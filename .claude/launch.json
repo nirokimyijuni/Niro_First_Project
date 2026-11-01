@@ -6,6 +6,12 @@
       "runtimeExecutable": "C:\\Users\\SDS\\.cargo\\bin\\basic-http-server.exe",
       "runtimeArgs": ["-a", "127.0.0.1:4000", "D:\\김이준\\미쓰 찾기 게임\\dist"],
       "port": 4000
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "C:\\Users\\SDS\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "runtimeArgs": ["D:\\김이준\\미쓰 찾기 게임\\tools\\dashboard\\server.py"],
+      "port": 4100
     }
   ]
 }

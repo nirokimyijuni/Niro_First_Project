@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>미스 찾기 팀 대시보드</title>
+<style>
+  @font-face { font-family: "Jua"; src: url("/font.ttf"); }
+  :root {
+    --bg: #eaf6ff; --card: #ffffff; --ink: #233047; --muted: #6b7a90;
+    --line: #d5e3f0; --work: #ff9f1c; --idle: #9fb3c8; --ok: #2bb673; --bad: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Jua", "Malgun Gothic", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 18px 24px; background: linear-gradient(180deg, #8fd3ff, #c8ecff);
+    border-bottom: 4px solid #f2d39b;
+  }
+  h1 { margin: 0; font-size: 34px; font-weight: normal; letter-spacing: 1px; }
+  .clock { font-size: 18px; color: var(--muted); text-align: right; }
+  .live { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); margin-right: 6px; }
+  .live.off { background: var(--bad); }
+  main { padding: 20px 24px 40px; max-width: 1400px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--card); border: 3px solid var(--line); border-radius: 20px;
+    padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 250px;
+    transition: border-color .3s, box-shadow .3s;
+  }
+  .card.working { border-color: var(--work); box-shadow: 0 0 0 4px #ffe2b8; }
+  .top { display: flex; gap: 14px; align-items: center; }
+  .avatar {
+    width: 76px; height: 86px; flex: none; border-radius: 16px; background-color: #fffaf0;
+    background-repeat: no-repeat; display: grid; place-items: center; font-size: 46px;
+    border: 2px solid var(--line);
+  }
+  .card.working .avatar { animation: bob 1s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(-5px) rotate(-3deg); } }
+  .name { font-size: 28px; }
+  .role { font-size: 16px; color: var(--muted); }
+  .status { font-size: 17px; padding: 4px 12px; border-radius: 999px; display: inline-block; margin-top: 4px; }
+  .status.working { background: #fff0db; color: #b25e00; }
+  .status.idle { background: #eef3f8; color: var(--muted); }
+  .now { font-size: 20px; min-height: 28px; line-height: 1.35; word-break: break-all; }
+  .task { font-size: 15px; color: var(--muted); }
+  .task b { color: var(--ink); font-weight: normal; }
+  ul.recent { list-style: none; margin: 0; padding: 0; font-size: 14px; color: var(--muted); }
+  ul.recent li { padding: 3px 0; border-top: 1px dashed var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ul.recent li span.t { color: #a3b1c2; margin-right: 6px; }
+  h2 { font-weight: normal; font-size: 24px; margin: 28px 0 10px; }
+  .feed { background: var(--card); border: 3px solid var(--line); border-radius: 20px; padding: 8px 16px; }
+  .feed .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 16px; align-items: baseline; }
+  .feed .row:last-child { border-bottom: 0; }
+  .feed .who { min-width: 70px; }
+  .feed .t { color: #a3b1c2; min-width: 64px; }
+  .feed .what { word-break: break-all; }
+  .empty { color: var(--muted); padding: 14px 0; }
+  @media (max-width: 600px) {
+    header { padding: 14px 16px; } h1 { font-size: 26px; } main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏖️ 미스 찾기 팀 대시보드</h1>
+  <div class="clock"><span class="live" id="live"></span><span id="clock"></span><div id="updated"></div></div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <h2>📜 방금 일어난 일</h2>
+  <div class="feed" id="feed"></div>
+</main>
+<script>
+// 원화(characters.png 547x428)에서 캐릭터를 자르는 좌표: game/src/view/assets.rs 와 같은 값
+const ART = { w: 547, h: 428,
+  niro: [34, 176, 182, 236], ellie: [232, 199, 132, 181], logan: [382, 163, 130, 207] };
+
+const AGENTS = [
+  { key: "main",   name: "Claude", role: "감독 · 일 나눠 주기", emoji: "🎬" },
+  { key: "niro",   name: "니로",   role: "이야기 · 유저스토리", art: "niro" },
+  { key: "joshua", name: "조슈아", role: "게임 규칙 (백엔드)",  emoji: "⚙️" },
+  { key: "logan",  name: "로건",   role: "화면 · 그림 (프론트)", art: "logan" },
+  { key: "ellie",  name: "엘리",   role: "테스터",              art: "ellie" },
+  { key: "kevin",  name: "케빈",   role: "빌드 · 배포",          emoji: "🚀" },
+];
+const NAME = Object.fromEntries(AGENTS.map(a => [a.key, a.name]));
+
+const base = p => p ? String(p).split(/[\\/]/).pop() : "";
+
+// 도구 사용 기록을 아이도 읽을 수 있는 말로 바꾼다
+function describe(r) {
+  const i = r.input || {}, tool = r.tool || "";
+  const cmd = i.command || "";
+  if (r.event === "SubagentStart") return "🔔 일을 시작했어요";
+  if (r.event === "SubagentStop") return "✅ 일을 마쳤어요";
+  if (r.event === "PostToolUseFailure") return "⚠️ 잘 안 됐어요: " + (r.error || tool);
+  if (tool === "Read") return "📖 " + base(i.file_path) + " 읽기";
+  if (tool === "Edit") return "✏️ " + base(i.file_path) + " 고치기";
+  if (tool === "Write") return "📝 " + base(i.file_path) + " 만들기";
+  if (tool === "Grep" || tool === "Glob") return "🔍 찾아보기: " + (i.pattern || "");
+  if (tool === "Bash" || tool === "PowerShell") {
+    if (/cargo test/.test(cmd)) return "🧪 테스트 돌리기";
+    if (/build\.sh|cargo build/.test(cmd)) return "🔨 게임 빌드하기";
+    if (/\bgit\b/.test(cmd)) return "📦 git: " + (i.description || cmd);
+    return "⌨️ " + (i.description || cmd);
+  }
+  if (tool === "Agent") return "📨 " + (NAME[i.subagent_type] || i.subagent_type || "에이전트") + "에게 일 맡기기: " + (i.description || "");
+  if (tool === "SendMessage") return "💬 메시지 보내기";
+  if (tool === "SubagentHandback") return "📮 감독에게 결과 보고하기";
+  if (tool.startsWith("mcp__Claude_Browser__")) {
+    const t = tool.replace("mcp__Claude_Browser__", "");
+    if (t === "computer") return i.action === "screenshot" ? "📸 게임 화면 찍기" : "🎮 게임 조작하기";
+    return "🌐 브라우저로 게임 보기";
+  }
+  if (tool === "WebSearch" || tool === "WebFetch") return "🌍 인터넷에서 찾아보기";
+  if (tool === "Skill") return "📘 사용법 읽기: " + (i.skill || "");
+  if (tool.startsWith("mcp__ccd_turn__")) return "🗒️ 할 일 목록 정리";
+  return "🔧 " + tool;
+}
+
+function ago(ts) {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  if (s < 60) return s + "초 전";
+  if (s < 3600) return Math.floor(s / 60) + "분 전";
+  return Math.floor(s / 3600) + "시간 전";
+}
+function dur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  return sec < 60 ? sec + "초" : Math.floor(sec / 60) + "분 " + (sec % 60) + "초";
+}
+const hhmm = ts => new Date(ts * 1000).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function avatarStyle(a) {
+  if (!a.art) return "";
+  const [x, y, w, h] = ART[a.art];
+  const k = Math.min(76 / w, 86 / h);
+  const ox = (76 - w * k) / 2, oy = (86 - h * k) / 2;
+  return `background-image:url(/characters.png);background-size:${ART.w * k}px ${ART.h * k}px;` +
+         `background-position:${ox - x * k}px ${oy - y * k}px`;
+}
+
+function render(records) {
+  const now = Date.now() / 1000;
+  const byAgent = {};
+  for (const r of records) (byAgent[r.agent_type || "main"] ||= []).push(r);
+
+  // 감독이 각 에이전트에게 맡긴 마지막 일
+  const tasks = {};
+  for (const r of byAgent.main || [])
+    if (r.event === "PreToolUse" && r.tool === "Agent" && r.input && r.input.subagent_type)
+      tasks[r.input.subagent_type] = r;
+
+  document.getElementById("grid").innerHTML = AGENTS.map(a => {
+    const evs = byAgent[a.key] || [];
+    const last = evs[evs.length - 1];
+    let working = false, since = null;
+    if (last) {
+      if (a.key === "main") working = now - last.ts < 30;
+      else working = last.event !== "SubagentStop" && now - last.ts < 120;
+      if (working) {
+        const run = evs.filter(e => e.agent_id === last.agent_id);
+        since = run.length ? run[0].ts : last.ts;
+      }
+    }
+    const actions = evs.filter(e => e.event !== "PostToolUse");
+    const nowText = last ? describe(actions[actions.length - 1] || last) : "아직 기록이 없어요";
+    const recent = actions.slice(-6, -1).reverse()
+      .map(e => `<li><span class="t">${hhmm(e.ts)}</span>${esc(describe(e))}</li>`).join("");
+    const task = tasks[a.key];
+    return `<div class="card ${working ? "working" : ""}">
+      <div class="top">
+        <div class="avatar" style="${avatarStyle(a)}">${a.art ? "" : a.emoji}</div>
+        <div>
+          <div class="name">${a.name}</div>
+          <div class="role">${a.role}</div>
+          <div class="status ${working ? "working" : "idle"}">${
+            working ? "⏳ 일하는 중 · " + dur(now - since) : "😴 쉬는 중" + (last ? " · " + ago(last.ts) : "")}</div>
+        </div>
+      </div>
+      <div class="now">${esc(nowText)}</div>
+      ${task ? `<div class="task">맡은 일: <b>${esc(task.input.description || "")}</b> (${ago(task.ts)})</div>` : ""}
+      <ul class="recent">${recent}</ul>
+    </div>`;
+  }).join("");
+
+  const feed = records.filter(r => r.event !== "PostToolUse").slice(-25).reverse();
+  document.getElementById("feed").innerHTML = feed.length
+    ? feed.map(r => `<div class="row"><span class="t">${hhmm(r.ts)}</span>` +
+        `<span class="who">${esc(NAME[r.agent_type || "main"] || r.agent_type)}</span>` +
+        `<span class="what">${esc(describe(r))}</span></div>`).join("")
+    : `<div class="empty">아직 기록이 없어요. 에이전트가 일을 시작하면 여기에 나타나요.</div>`;
+}
+
+let lastData = [];
+async function tick() {
+  const live = document.getElementById("live");
+  try {
+    const res = await fetch("/api/activity", { cache: "no-store" });
+    lastData = await res.json();
+    live.classList.remove("off");
+    document.getElementById("updated").textContent = "1초마다 새로고침";
+  } catch {
+    live.classList.add("off");
+    document.getElementById("updated").textContent = "서버 연결 끊김";
+  }
+  render(lastData);
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString("ko-KR");
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
