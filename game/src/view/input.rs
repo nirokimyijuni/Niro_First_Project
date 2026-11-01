@@ -44,3 +44,8 @@ pub fn menu_input(letterbox: &Letterbox) -> MenuInput {
         tap,
     }
 }
+
+/// 개발용 빨리감기(D12) 켜기/끄기: F를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
+pub fn fast_forward_pressed() -> bool {
+    is_key_pressed(KeyCode::F)
+}

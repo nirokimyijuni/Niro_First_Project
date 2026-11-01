@@ -52,6 +52,25 @@
   ul.recent li { padding: 3px 0; border-top: 1px dashed var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   ul.recent li span.t { color: #a3b1c2; margin-right: 6px; }
   h2 { font-weight: normal; font-size: 24px; margin: 28px 0 10px; }
+  .roadmap { background: var(--card); border: 3px solid var(--line); border-radius: 20px; padding: 16px; margin-bottom: 20px; }
+  .roadmap h2 { margin: 0 0 12px; }
+  .track { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .ms { border: 3px solid var(--line); border-radius: 16px; padding: 10px 12px; background: #f6f9fc; position: relative; }
+  .ms.done { background: #e9f8ef; border-color: #a7e3c0; }
+  .ms.now { background: #fff4e3; border-color: var(--work); box-shadow: 0 0 0 4px #ffe2b8; }
+  .ms .id { font-size: 15px; color: var(--muted); }
+  .ms .nm { font-size: 19px; margin: 2px 0 6px; line-height: 1.2; }
+  .ms .st { font-size: 14px; color: var(--muted); }
+  .bar { height: 10px; border-radius: 999px; background: #e3ebf3; overflow: hidden; margin-top: 6px; }
+  .bar i { display: block; height: 100%; background: var(--ok); border-radius: 999px; transition: width .5s; }
+  .ms.now .bar i { background: var(--work); }
+  .detail { margin-top: 14px; font-size: 16px; }
+  .detail .head { font-size: 18px; margin-bottom: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 5px 12px; border-radius: 999px; background: #eef3f8; font-size: 15px; }
+  .chip.완료 { background: #e2f6ea; color: #1d7a4b; }
+  .chip.진행 { background: #fff0db; color: #b25e00; }
+  .chip.테스트 { background: #e7e9ff; color: #3b44b5; }
   .feed { background: var(--card); border: 3px solid var(--line); border-radius: 20px; padding: 8px 16px; }
   .feed .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 16px; align-items: baseline; }
   .feed .row:last-child { border-bottom: 0; }
@@ -70,6 +89,11 @@
   <div class="clock"><span class="live" id="live"></span><span id="clock"></span><div id="updated"></div></div>
 </header>
 <main>
+  <section class="roadmap">
+    <h2>🗺️ 로드맵</h2>
+    <div class="track" id="track"></div>
+    <div class="detail" id="detail"></div>
+  </section>
   <div class="grid" id="grid"></div>
   <h2>📜 방금 일어난 일</h2>
   <div class="feed" id="feed"></div>
@@ -82,12 +106,15 @@ const ART = { w: 547, h: 428,
 const AGENTS = [
   { key: "main",   name: "Claude", role: "감독 · 일 나눠 주기", emoji: "🎬" },
   { key: "niro",   name: "니로",   role: "이야기 · 유저스토리", art: "niro" },
-  { key: "joshua", name: "조슈아", role: "게임 규칙 (백엔드)",  emoji: "⚙️" },
+  { key: "susanna", name: "수산나", role: "게임 규칙 (백엔드)",  emoji: "⚙️" },
   { key: "logan",  name: "로건",   role: "화면 · 그림 (프론트)", art: "logan" },
   { key: "ellie",  name: "엘리",   role: "테스터",              art: "ellie" },
   { key: "kevin",  name: "케빈",   role: "빌드 · 배포",          emoji: "🚀" },
 ];
 const NAME = Object.fromEntries(AGENTS.map(a => [a.key, a.name]));
+// 이름이 바뀐 에이전트: 예전 이름으로 남은 기록도 새 카드에 모은다
+const ALIAS = { joshua: "susanna" };
+NAME.joshua = NAME.susanna;
 
 const base = p => p ? String(p).split(/[\\/]/).pop() : "";
 
@@ -147,13 +174,13 @@ function avatarStyle(a) {
 function render(records) {
   const now = Date.now() / 1000;
   const byAgent = {};
-  for (const r of records) (byAgent[r.agent_type || "main"] ||= []).push(r);
+  for (const r of records) (byAgent[ALIAS[r.agent_type] || r.agent_type || "main"] ||= []).push(r);
 
   // 감독이 각 에이전트에게 맡긴 마지막 일
   const tasks = {};
   for (const r of byAgent.main || [])
     if (r.event === "PreToolUse" && r.tool === "Agent" && r.input && r.input.subagent_type)
-      tasks[r.input.subagent_type] = r;
+      tasks[ALIAS[r.input.subagent_type] || r.input.subagent_type] = r;
 
   document.getElementById("grid").innerHTML = AGENTS.map(a => {
     const evs = byAgent[a.key] || [];
@@ -196,8 +223,41 @@ function render(records) {
     : `<div class="empty">아직 기록이 없어요. 에이전트가 일을 시작하면 여기에 나타나요.</div>`;
 }
 
+// 스토리가 모두 [완료]면 끝난 단계, 처음으로 안 끝난 단계가 "지금" 단계
+function renderRoadmap(milestones) {
+  const isDone = m => m.stories.length > 0 && m.stories.every(s => s.status === "완료");
+  const current = milestones.find(m => !isDone(m));
+  document.getElementById("track").innerHTML = milestones.map(m => {
+    const total = m.stories.length, done = m.stories.filter(s => s.status === "완료").length;
+    const cls = isDone(m) ? "done" : m === current ? "now" : "";
+    const label = isDone(m) ? "✅ 완료" : m === current ? "🏃 지금 만드는 중" : "⏳ 예정";
+    const count = total ? `스토리 ${done}/${total}` : (m === current ? "스토리 준비 중" : "");
+    return `<div class="ms ${cls}" title="${esc(m.summary)}">
+      <div class="id">${m.id} · ${label}</div>
+      <div class="nm">${esc(m.name)}</div>
+      <div class="st">${count}</div>
+      <div class="bar"><i style="width:${total ? Math.round(done / total * 100) : 0}%"></i></div>
+    </div>`;
+  }).join("");
+  const chipClass = s => s.startsWith("완료") ? "완료" : s.startsWith("진행") ? "진행" : s.startsWith("테스트") ? "테스트" : "";
+  document.getElementById("detail").innerHTML = current
+    ? `<div class="head">${current.id} ${esc(current.name)} — ${esc(current.summary)}</div>
+       <div class="chips">${current.stories.length
+         ? current.stories.map(s => `<span class="chip ${chipClass(s.status)}">${s.id} ${esc(s.title)} · ${esc(s.status)}</span>`).join("")
+         : `<span class="chip">니로가 스토리를 쓰고 있어요</span>`}</div>`
+    : `<div class="head">🎉 모든 단계를 끝냈어요!</div>`;
+}
+
+let roadmapAt = 0;
+async function loadRoadmap() {
+  if (Date.now() - roadmapAt < 5000) return;  // 로드맵은 5초마다만
+  roadmapAt = Date.now();
+  try { renderRoadmap(await (await fetch("/api/roadmap", { cache: "no-store" })).json()); } catch {}
+}
+
 let lastData = [];
 async function tick() {
+  loadRoadmap();
   const live = document.getElementById("live");
   try {
     const res = await fetch("/api/activity", { cache: "no-store" });

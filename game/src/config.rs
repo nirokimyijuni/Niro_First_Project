@@ -58,6 +58,29 @@ pub const MAX_FALL_SPEED: f32 = 900.0;
 /// M1 한 번에 계산하는 가장 긴 시간 (초). 프레임이 길면 이만큼씩 잘게 나눠 계산한다.
 pub const PHYSICS_STEP_SECONDS: f32 = 1.0 / 120.0;
 
+// ---- M2 낮과 밤 ----
+
+/// M2 노을 길이 (초). US-011: 낮의 마지막 1분. 낮의 마지막 이만큼 동안 하늘이 천천히 어두워진다.
+pub const DUSK_SECONDS: f32 = 60.0;
+/// M2 새벽 길이 (초). US-011: 밤의 마지막 1분. 밤의 마지막 이만큼 동안 하늘이 천천히 밝아진다.
+pub const DAWN_SECONDS: f32 = 60.0;
+/// D12 빨리감기(F 키)를 켰을 때 시간이 몇 배 빨리 가는지. 호출하는 쪽이 dt에 곱한다.
+pub const DEV_FAST_FORWARD_SCALE: f32 = 10.0;
+
+/// M2 한 프레임에 흘려 보내는 가장 긴 시간 (초). 다른 탭에 다녀오면 프레임 시간이 수십 초가 될 수 있는데,
+/// 그만큼 한꺼번에 흘리지 않고 여기서 자른다 → 탭을 떠나 있는 동안은 게임이 멈춘 것처럼 된다 (US-009).
+pub const MAX_FRAME_SECONDS: f32 = 0.25;
+
+/// M2 게임을 시작할 때 캐릭터 왼쪽 위 x 위치 (상자가 없는 왼쪽).
+pub const PLAYER_SPAWN_X: f32 = 120.0;
+
+/// D11 코인 크기 (가로 = 세로, 픽셀)
+pub const COIN_SIZE: f32 = 24.0;
+/// D11 코인 아래쪽과 상자 윗면 사이 틈 (픽셀). 상자 위에 서면 몸이 코인에 닿는 높이.
+pub const COIN_GAP_ABOVE_BOX: f32 = 8.0;
+/// D11 코인을 주운 뒤 같은 자리에 다시 생길 때까지 (초)
+pub const COIN_RESPAWN_SECONDS: f32 = 10.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +96,9 @@ mod tests {
         assert_eq!(ZOMBIE_ATTACK_DROP_PER_LEVEL, 2);
         assert_eq!(ZOMBIE_MIN_ATTACK, 1);
         assert_eq!(COIN_MAX, 5000);
+        assert_eq!(COIN_RESPAWN_SECONDS, 10.0);
+        assert_eq!(DEV_FAST_FORWARD_SCALE, 10.0);
+        assert_eq!((DUSK_SECONDS, DAWN_SECONDS), (60.0, 60.0));
         assert!(MINE_SECONDS_BARE_HAND > MINE_SECONDS_PICKAXE);
         assert_eq!((CRAFT_GRID_WIDTH, CRAFT_GRID_HEIGHT), (4, 3));
     }

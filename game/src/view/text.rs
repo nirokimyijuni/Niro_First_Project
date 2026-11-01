@@ -53,6 +53,11 @@ impl<'a> TextPainter<'a> {
         measure_text(text, p.font, p.font_size, p.font_scale).width
     }
 
+    /// `left_x`를 왼쪽 끝으로 그린다 (정보판 숫자처럼 왼쪽에 붙일 때).
+    pub fn left(&self, text: &str, left_x: f32, baseline_y: f32, size: f32, color: Color) {
+        self.centered(text, left_x + self.width(text, size) / 2.0, baseline_y, size, color);
+    }
+
     /// `center_x`를 가운데로, `baseline_y`를 글자 바닥선으로 그린다.
     /// 그림자 → 진한 테두리 → 글자 순서. 테두리·그림자도 `color`의 투명도를 따른다.
     pub fn centered(&self, text: &str, center_x: f32, baseline_y: f32, size: f32, color: Color) {

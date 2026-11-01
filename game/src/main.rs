@@ -1,16 +1,18 @@
-//! 미스 찾기 — 게임 루프: 입력 → logic 업데이트 → 그리기.
-//! 화면 흐름: 타이틀 → 캐릭터 고르기 → 플레이 (Esc를 누르면 다시 고르기).
+//! 미스 찾기 — 게임 루프: 입력 → logic 업데이트 → 이벤트 처리 → 그리기.
+//! 화면 흐름: 타이틀 → 캐릭터 고르기 → 플레이 (Esc를 누르면 다시 고르기, 다시 고르면 새 게임).
 
 mod config;
 mod logic;
 mod view;
 
 use logic::character::CharacterKind;
-use logic::player::Player;
-use logic::world::World;
+use logic::clock::ClockEvent;
+use logic::game::{Game, GameEvent};
+use logic::player::PlayerInput;
 use macroquad::prelude::*;
 use view::assets::Assets;
-use view::input::{menu_input, player_input};
+use view::coin::CoinPops;
+use view::input::{fast_forward_pressed, menu_input, player_input};
 use view::screen::Letterbox;
 use view::screens;
 use view::text::TextPainter;
@@ -19,19 +21,52 @@ enum Scene {
     Title,
     /// `picked`: 골라진 캐릭터 번호 (CharacterKind::ALL 순서)
     Select { picked: usize },
-    Play { world: World, player: Player },
+    Play {
+        game: Game,
+        /// D12 빨리감기(F). 새 게임은 언제나 꺼진 채로 시작한다 (D13).
+        fast_forward: bool,
+        /// 코인 주울 때 반짝 효과 (화면 전용)
+        pops: CoinPops,
+    },
 }
 
 fn start_play(kind: CharacterKind) -> Scene {
-    let world = World::m1();
-    // 왼쪽, 상자가 없는 곳에서 시작한다.
-    let spawn = vec2(120.0, world.ground_y - config::PLAYER_HEIGHT);
-    let player = Player::new(kind, spawn);
-    Scene::Play { world, player }
+    Scene::Play { game: Game::new(kind), fast_forward: false, pops: CoinPops::new() }
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
     CharacterKind::ALL.iter().position(|k| *k == kind).unwrap_or(0)
+}
+
+/// 이번 프레임 시간. 다른 탭에 다녀와 아주 길어진 프레임은 MAX_FRAME_SECONDS로 자른다.
+fn cap_frame_seconds(frame_time: f32) -> f32 {
+    frame_time.clamp(0.0, config::MAX_FRAME_SECONDS)
+}
+
+/// 빨리감기 중 한 프레임: `Game::update`와 같은 순서(플레이어 → 시계 → 코인 → 지갑)로 부르되,
+/// 걷기·점프는 진짜 시간 `dt`, 시계와 코인은 `dt × time_scale`로 흘린다 (D13).
+/// 규칙은 새로 만들지 않고 logic 함수를 부르는 순서만 따라 한다.
+/// `time_scale`이 1이면 `Game::update`와 결과가 똑같다 (아래 테스트).
+fn update_with_time_scale(game: &mut Game, input: &PlayerInput, dt: f32, time_scale: f32) -> Vec<GameEvent> {
+    let mut events = Vec::new();
+    let world_dt = dt * time_scale;
+
+    game.player.update(input, dt, &game.world);
+
+    for clock_event in game.clock.update(world_dt) {
+        events.push(match clock_event {
+            ClockEvent::NightStarted => GameEvent::NightStarted,
+            ClockEvent::DayStarted { day_number } => GameEvent::DayStarted { day_number },
+        });
+    }
+
+    let picked = game.coins.update(world_dt, game.player.rect());
+    if picked > 0 {
+        game.wallet.add(picked);
+        events.push(GameEvent::CoinsPicked { count: picked });
+    }
+
+    events
 }
 
 fn window_conf() -> Conf {
@@ -53,6 +88,7 @@ async fn main() {
     loop {
         let letterbox = Letterbox::current();
         let menu = menu_input(&letterbox);
+        let dt = cap_frame_seconds(get_frame_time());
 
         // 1) 입력 → 장면 바꾸기 / logic 업데이트. 장면이 바뀐 프레임에는 새 장면을 업데이트하지 않는다
         //    (같은 Space 한 번이 "결정"과 "점프"로 두 번 쓰이지 않게).
@@ -79,11 +115,28 @@ async fn main() {
                     None
                 }
             }
-            Scene::Play { world, player } => {
+            Scene::Play { game, fast_forward, pops } => {
                 if menu.back {
-                    Some(Scene::Select { picked: kind_index(player.kind) })
+                    Some(Scene::Select { picked: kind_index(game.player.kind) })
                 } else {
-                    player.update(&player_input(), get_frame_time(), world);
+                    if fast_forward_pressed() {
+                        *fast_forward = !*fast_forward;
+                    }
+                    let input = player_input();
+                    let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
+                    let events = if *fast_forward {
+                        update_with_time_scale(game, &input, dt, config::DEV_FAST_FORWARD_SCALE)
+                    } else {
+                        game.update(&input, dt)
+                    };
+                    // 2) 이벤트 처리: 지금은 코인 반짝 효과만. 낮/밤이 바뀌는 건 하늘 색과 정보판이 보여 준다.
+                    //    (아침 인사 문구·소리는 아이와 정한 뒤에 — US-012, M5 사운드)
+                    for event in events {
+                        if let GameEvent::CoinsPicked { count } = event {
+                            pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
+                        }
+                    }
+                    pops.update(dt);
                     None
                 }
             }
@@ -92,13 +145,13 @@ async fn main() {
             scene = next;
         }
 
-        // 2) 그리기 (960×540 가상 화면)
+        // 3) 그리기 (960×540 가상 화면)
         letterbox.begin();
         let text = TextPainter::new(&assets.font, letterbox.scale);
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { world, player } => screens::draw_play(&assets, &text, world, player),
+            Scene::Play { game, fast_forward, pops } => screens::draw_play(&assets, &text, game, *fast_forward, pops),
         }
         letterbox.end();
         if first_frame {
@@ -108,5 +161,90 @@ async fn main() {
         }
 
         next_frame().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use config::{COIN_RESPAWN_SECONDS, DAY_SECONDS, DEV_FAST_FORWARD_SCALE, PLAYER_WALK_SPEED};
+
+    const FRAME: f32 = 1.0 / 60.0;
+
+    /// 상자 위로 올라가 코인을 줍고, 걷고, 점프하는 입력 묶음 (몇 초 동안).
+    fn script(frame: usize) -> PlayerInput {
+        PlayerInput { left: frame % 400 > 300, right: frame % 400 < 250, jump_pressed: frame % 90 == 0 }
+    }
+
+    #[test]
+    fn time_scale_one_matches_game_update() {
+        let mut a = Game::new(CharacterKind::Niro);
+        let mut b = Game::new(CharacterKind::Niro);
+        for f in 0..3000 {
+            let input = script(f);
+            let ea = a.update(&input, FRAME);
+            let eb = update_with_time_scale(&mut b, &input, FRAME, 1.0);
+            assert_eq!(ea, eb, "frame {f}");
+            assert_eq!(a.player.pos, b.player.pos);
+            assert_eq!(a.wallet.coins(), b.wallet.coins());
+            assert_eq!(a.clock.seconds_left_in_phase(), b.clock.seconds_left_in_phase());
+            let va: Vec<bool> = a.coins.list.iter().map(|c| c.is_visible()).collect();
+            let vb: Vec<bool> = b.coins.list.iter().map(|c| c.is_visible()).collect();
+            assert_eq!(va, vb);
+        }
+        assert!(a.wallet.coins() > 0, "스크립트가 코인을 하나는 주워야 의미가 있다");
+    }
+
+    #[test]
+    fn fast_forward_speeds_clock_but_not_walking() {
+        let mut normal = Game::new(CharacterKind::Ellie);
+        let mut fast = Game::new(CharacterKind::Ellie);
+        let right = PlayerInput { right: true, ..Default::default() };
+        for _ in 0..60 {
+            normal.update(&right, FRAME);
+            update_with_time_scale(&mut fast, &right, FRAME, DEV_FAST_FORWARD_SCALE);
+        }
+        // 걷기는 같다 (1초 동안 같은 거리)
+        assert_eq!(normal.player.pos, fast.player.pos);
+        assert!(normal.player.pos.x > 120.0 + PLAYER_WALK_SPEED * 0.5);
+        // 시계는 10배 (1초 vs 10초)
+        let used_normal = DAY_SECONDS - normal.clock.seconds_left_in_phase();
+        let used_fast = DAY_SECONDS - fast.clock.seconds_left_in_phase();
+        assert!((used_normal - 1.0).abs() < 0.01, "{used_normal}");
+        assert!((used_fast - 10.0).abs() < 0.05, "{used_fast}");
+    }
+
+    #[test]
+    fn fast_forward_respawns_coin_in_about_one_second() {
+        let mut g = Game::new(CharacterKind::Logan);
+        let coin = g.coins.list[0].rect;
+        // 코인 자리에 플레이어를 잠깐 놓아 줍게 한 뒤 멀리 치운다.
+        g.player.pos = coin.point();
+        update_with_time_scale(&mut g, &PlayerInput::default(), 0.0, DEV_FAST_FORWARD_SCALE);
+        assert_eq!(g.wallet.coins(), 1);
+        g.player.pos.x = 0.0;
+        g.player.pos.y = g.world.ground_y - g.player.size.y;
+        let frames = (COIN_RESPAWN_SECONDS / DEV_FAST_FORWARD_SCALE / FRAME) as usize;
+        for _ in 0..frames - 3 {
+            update_with_time_scale(&mut g, &PlayerInput::default(), FRAME, DEV_FAST_FORWARD_SCALE);
+        }
+        assert!(!g.coins.list[0].is_visible());
+        for _ in 0..6 {
+            update_with_time_scale(&mut g, &PlayerInput::default(), FRAME, DEV_FAST_FORWARD_SCALE);
+        }
+        assert!(g.coins.list[0].is_visible());
+    }
+
+    #[test]
+    fn long_frame_is_capped() {
+        // 탭에 30초 다녀와도 한 프레임은 MAX_FRAME_SECONDS까지만. 빨리감기여도 낮/밤을 건너뛰지 않는다.
+        let dt = cap_frame_seconds(30.0);
+        assert_eq!(dt, config::MAX_FRAME_SECONDS);
+        assert!(dt * DEV_FAST_FORWARD_SCALE < config::DUSK_SECONDS);
+        let mut g = Game::new(CharacterKind::Niro);
+        let events = update_with_time_scale(&mut g, &PlayerInput::default(), dt, DEV_FAST_FORWARD_SCALE);
+        assert!(events.is_empty());
+        assert_eq!(g.clock.day_number(), 1);
+        assert!(!g.clock.is_night());
     }
 }

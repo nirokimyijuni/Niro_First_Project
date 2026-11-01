@@ -3,15 +3,23 @@
 실행: python tools/dashboard/server.py  →  http://127.0.0.1:4100
 - /              대시보드 화면 (index.html)
 - /api/activity  활동 기록의 마지막 줄들 (JSON 배열)
+- /api/roadmap   마일스톤별 스토리 진행 상황 (docs/02-plan.md 표 + stories/backlog.md)
 - /font.ttf, /characters.png  게임 에셋을 그대로 보여 준다
 """
 import json
+import re
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 LOG_FILE = ROOT / ".claude" / "activity" / "activity.jsonl"
+PLAN_FILE = ROOT / "docs" / "02-plan.md"
+BACKLOG_FILE = ROOT / "stories" / "backlog.md"
+# 계획 표의 한 줄: | M2 | 낮과 밤 | 내용 | 아이와 함께 할 일 |
+MILESTONE_ROW = re.compile(r"^\|\s*(M\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|")
+# 스토리 제목 줄: ### US-009 제목  [M2] [할 일]
+STORY_LINE = re.compile(r"^###\s+(US-\d+)\s+(.+?)\s+\[(M\d+)\]\s+\[([^\]]+)\]")
 PORT = 4100
 TAIL_LINES = 600
 
@@ -36,11 +44,35 @@ def read_tail():
     return records
 
 
+def read_roadmap():
+    def lines(file):
+        try:
+            return file.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return []
+
+    milestones, seen = [], set()
+    for line in lines(PLAN_FILE):
+        m = MILESTONE_ROW.match(line)
+        if m and m.group(1) not in seen:
+            seen.add(m.group(1))
+            milestones.append({"id": m.group(1), "name": m.group(2), "summary": m.group(3), "stories": []})
+    by_id = {m["id"]: m for m in milestones}
+    for line in lines(BACKLOG_FILE):
+        s = STORY_LINE.match(line)
+        if s and s.group(3) in by_id:
+            by_id[s.group(3)]["stories"].append({"id": s.group(1), "title": s.group(2), "status": s.group(4)})
+    return milestones
+
+
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/api/activity":
             self.send(json.dumps(read_tail(), ensure_ascii=False).encode("utf-8"),
+                      "application/json; charset=utf-8")
+        elif path == "/api/roadmap":
+            self.send(json.dumps(read_roadmap(), ensure_ascii=False).encode("utf-8"),
                       "application/json; charset=utf-8")
         elif path in FILES:
             file, ctype = FILES[path]

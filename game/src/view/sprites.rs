@@ -62,7 +62,8 @@ pub fn max_half_width(texture: &Texture2D, height: f32) -> f32 {
 }
 
 /// `feet`: 발 가운데 위치. `height`: 기본 그림 높이 (원화 비율대로 가로가 정해진다).
-pub fn draw_character(texture: &Texture2D, feet: Vec2, height: f32, facing: Facing, pose: Pose) {
+/// `tint`: 그림에 곱할 색. 보통 WHITE(그대로), 밤에는 살짝 푸르스름하게.
+pub fn draw_character(texture: &Texture2D, feet: Vec2, height: f32, facing: Facing, pose: Pose, tint: Color) {
     let width = height * texture.width() / texture.height();
     let size = vec2(width * pose.scale_x, height * pose.scale_y);
     let foot = vec2(feet.x, feet.y - pose.lift * height);
@@ -70,7 +71,7 @@ pub fn draw_character(texture: &Texture2D, feet: Vec2, height: f32, facing: Faci
         texture,
         foot.x - size.x / 2.0,
         foot.y - size.y,
-        WHITE,
+        tint,
         DrawTextureParams {
             dest_size: Some(size),
             rotation: pose.tilt,

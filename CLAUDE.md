@@ -14,7 +14,7 @@
 | 에이전트 | 역할 | 주로 일하는 곳 |
 |---|---|---|
 | `niro` 니로 | 스토리텔러 · 유저스토리 관리 | `stories/` |
-| `joshua` 조슈아 | 백엔드 (게임 규칙·로직) | `game/src/logic/` |
+| `susanna` 수산나 | 백엔드 (게임 규칙·로직) | `game/src/logic/` |
 | `logan` 로건 | 프론트 (그림·입력·UI·사운드) | `game/src/view/`, `game/assets/`, `web/` |
 | `ellie` 엘리 | 테스터 | `qa/`, `game/tests/` |
 | `kevin` 케빈 | 배포 관리 | `deploy/`, `.github/workflows/` |
@@ -23,7 +23,7 @@
 
 ## 작업 흐름
 1. 니로가 유저스토리를 `stories/backlog.md`에 쓴다 (완료 조건 포함).
-2. 조슈아(로직)와 로건(화면)이 구현한다. 둘의 경계는 `game/src/logic` ↔ `game/src/view`.
+2. 수산나(로직)와 로건(화면)이 구현한다. 둘의 경계는 `game/src/logic` ↔ `game/src/view`.
 3. 엘리가 완료 조건대로 확인하고 버그는 `qa/bugs/`에 남긴다.
 4. 케빈이 웹에 올리고 플레이 링크를 공유한다.
 
