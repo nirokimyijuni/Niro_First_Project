@@ -16,8 +16,12 @@ pub const PLAYER_HP_PER_LEVEL: u32 = 5;
 
 /// D3 좀비 체력 (3번 때리면 쓰러짐). 몬스터 레벨이 올라도 그대로.
 pub const ZOMBIE_HP: u32 = 3;
-// TODO(D3): 좀비(몬스터) 공격력은 아직 결정 전. docs/02-plan.md "D3 확인할 것"
-//           (가)/(나)/(다) 중 아이와 정한 뒤 여기에 상수를 추가한다.
+/// D3 레벨 1 좀비 공격력
+pub const ZOMBIE_START_ATTACK: u32 = 5;
+/// D3 몬스터 레벨이 오를 때마다 줄어드는 좀비 공격력
+pub const ZOMBIE_ATTACK_DROP_PER_LEVEL: u32 = 2;
+/// D3 좀비 공격력은 이보다 낮아지지 않는다
+pub const ZOMBIE_MIN_ATTACK: u32 = 1;
 
 /// M6 코인 최대 개수
 pub const COIN_MAX: u32 = 5000;
@@ -37,6 +41,9 @@ mod tests {
         assert_eq!(PLAYER_START_HP, 7);
         assert_eq!(PLAYER_HP_PER_LEVEL, 5);
         assert_eq!(ZOMBIE_HP, 3);
+        assert_eq!(ZOMBIE_START_ATTACK, 5);
+        assert_eq!(ZOMBIE_ATTACK_DROP_PER_LEVEL, 2);
+        assert_eq!(ZOMBIE_MIN_ATTACK, 1);
         assert_eq!(COIN_MAX, 5000);
         assert_eq!((CRAFT_GRID_WIDTH, CRAFT_GRID_HEIGHT), (4, 3));
     }
