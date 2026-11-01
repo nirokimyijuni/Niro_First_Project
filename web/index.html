@@ -20,11 +20,36 @@
             -webkit-tap-highlight-color: transparent;
         }
         canvas:focus { outline: none; }
+        /* 글꼴·그림을 받는 동안 보이는 "불러오는 중..." (시스템 글꼴).
+           macroquad는 불러오는 동안에도 매 프레임 캔버스를 검게 지우므로 캔버스 "위"에 덮어 두고,
+           게임이 첫 화면을 그리면 loading_done()으로 치운다. */
+        #loading {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #87cefa;
+            color: #1f2a5c;
+            font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+            font-size: clamp(28px, 7vmin, 64px);
+            font-weight: bold;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <canvas id="glcanvas" tabindex="1"></canvas>
+    <div id="loading">불러오는 중...</div>
     <script src="mq_js_bundle.js"></script>
-    <script>load("miss-game.wasm");</script>
+    <script>
+        // 게임(Rust)이 첫 화면을 그린 뒤 부른다 (game/src/view/web.rs).
+        importObject.env.loading_done = function () {
+            var el = document.getElementById("loading");
+            if (el) el.remove();
+        };
+        load("miss-game.wasm");
+    </script>
 </body>
 </html>

@@ -17,11 +17,9 @@ rm -rf "$DIST"
 mkdir -p "$DIST"
 cp "$ROOT/web/index.html" "$ROOT/web/mq_js_bundle.js" "$DIST/"
 cp "$WASM" "$DIST/miss-game.wasm"
-# 그림/소리 등이 생기면 함께 복사 (.gitkeep 제외)
-if find "$ROOT/game/assets" -type f ! -name .gitkeep | grep -q .; then
-    cp -r "$ROOT/game/assets" "$DIST/assets"
-    find "$DIST/assets" -name .gitkeep -delete
-fi
+# 그림·글꼴·소리: 게임이 "assets/..." 경로로 불러오므로 dist/assets 로 복사한다 (.gitkeep 제외)
+cp -r "$ROOT/game/assets" "$DIST/assets"
+find "$DIST/assets" -name .gitkeep -delete
 
 SIZE=$(wc -c < "$DIST/miss-game.wasm")
 echo "dist 준비 완료: $DIST"

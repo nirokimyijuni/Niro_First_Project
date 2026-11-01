@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 macroquad = "0.4"
+# 타이틀 제목을 자모별로 칠하려고 글리프를 직접 그림으로 만든다 (macroquad가 이미 쓰는 것과 같은 버전).
+fontdue = "0.9"
 
 # wasm 크기를 줄여 모바일에서 빨리 열리게 한다.
 [profile.release]

@@ -1,21 +1,42 @@
-// M0 "안녕" 화면: 하늘색 배경 + 제목 자리 + 캐릭터 자리 표시 네모 3개.
-// 한글 폰트가 아직 없어서 화면 글자는 영어로 쓴다.
-// 게임 제목: 미스 찾기 (docs/02-plan.md D7). 한글 폰트가 들어오면 화면 글자도 바꾼다.
+//! 미스 찾기 — 게임 루프: 입력 → logic 업데이트 → 그리기.
+//! 화면 흐름: 타이틀 → 캐릭터 고르기 → 플레이 (Esc를 누르면 다시 고르기).
 
 mod config;
+mod logic;
+mod view;
 
+use logic::character::CharacterKind;
+use logic::player::Player;
+use logic::world::World;
 use macroquad::prelude::*;
+use view::assets::Assets;
+use view::input::{menu_input, player_input};
+use view::screen::Letterbox;
+use view::screens;
+use view::text::TextPainter;
 
-const SKY: Color = Color::new(0.53, 0.81, 0.98, 1.0);
-const PINK: Color = Color::new(0.93, 0.36, 0.55, 1.0);
-const NIRO_YELLOW: Color = Color::new(0.95, 0.82, 0.15, 1.0);
-const ELLIE_BLUE: Color = Color::new(0.30, 0.65, 0.95, 1.0);
-const LOGAN_RED: Color = Color::new(0.78, 0.15, 0.25, 1.0);
-const CROWN_GOLD: Color = Color::new(0.98, 0.78, 0.10, 1.0);
+enum Scene {
+    Title,
+    /// `picked`: 골라진 캐릭터 번호 (CharacterKind::ALL 순서)
+    Select { picked: usize },
+    Play { world: World, player: Player },
+}
+
+fn start_play(kind: CharacterKind) -> Scene {
+    let world = World::m1();
+    // 왼쪽, 상자가 없는 곳에서 시작한다.
+    let spawn = vec2(120.0, world.ground_y - config::PLAYER_HEIGHT);
+    let player = Player::new(kind, spawn);
+    Scene::Play { world, player }
+}
+
+fn kind_index(kind: CharacterKind) -> usize {
+    CharacterKind::ALL.iter().position(|k| *k == kind).unwrap_or(0)
+}
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Game title coming soon".to_owned(),
+        window_title: "미스 찾기".to_owned(),
         window_width: 960,
         window_height: 540,
         high_dpi: true,
@@ -23,65 +44,67 @@ fn window_conf() -> Conf {
     }
 }
 
-fn draw_centered(text: &str, y: f32, size: f32, color: Color) {
-    let dim = measure_text(text, None, size as u16, 1.0);
-    draw_text(text, (screen_width() - dim.width) / 2.0, y, size, color);
-}
-
-/// 캐릭터 자리 표시: 몸통 네모 + 이름. 모자/왕관은 따로 그린다.
-fn draw_placeholder(cx: f32, ground: f32, w: f32, h: f32, body: Color, name: &str) {
-    draw_rectangle(cx - w / 2.0, ground - h, w, h, body);
-    draw_rectangle_lines(cx - w / 2.0, ground - h, w, h, 3.0, BLACK);
-    let size = (w * 0.35).max(16.0);
-    let dim = measure_text(name, None, size as u16, 1.0);
-    draw_text(name, cx - dim.width / 2.0, ground + size, size, BLACK);
-}
-
 #[macroquad::main(window_conf)]
 async fn main() {
+    let assets = Assets::load().await;
+    let mut scene = Scene::Title;
+    let mut first_frame = true;
+
     loop {
-        clear_background(SKY);
-        let sw = screen_width();
-        let sh = screen_height();
-        let unit = (sw / 10.0).min(sh / 6.0);
+        let letterbox = Letterbox::current();
+        let menu = menu_input(&letterbox);
 
-        let title_size = (unit * 0.6).max(24.0);
-        draw_centered("Hello! Game title coming soon", sh * 0.2, title_size, DARKBLUE);
+        // 1) 입력 → 장면 바꾸기 / logic 업데이트. 장면이 바뀐 프레임에는 새 장면을 업데이트하지 않는다
+        //    (같은 Space 한 번이 "결정"과 "점프"로 두 번 쓰이지 않게).
+        let next = match &mut scene {
+            Scene::Title => {
+                if menu.confirm || menu.tap.is_some() {
+                    Some(Scene::Select { picked: 0 })
+                } else {
+                    None
+                }
+            }
+            Scene::Select { picked } => {
+                if menu.left && *picked > 0 {
+                    *picked -= 1;
+                }
+                if menu.right && *picked + 1 < CharacterKind::ALL.len() {
+                    *picked += 1;
+                }
+                if let Some(i) = menu.tap.and_then(screens::select_card_at) {
+                    Some(start_play(CharacterKind::ALL[i]))
+                } else if menu.confirm {
+                    Some(start_play(CharacterKind::ALL[*picked]))
+                } else {
+                    None
+                }
+            }
+            Scene::Play { world, player } => {
+                if menu.back {
+                    Some(Scene::Select { picked: kind_index(player.kind) })
+                } else {
+                    player.update(&player_input(), get_frame_time(), world);
+                    None
+                }
+            }
+        };
+        if let Some(next) = next {
+            scene = next;
+        }
 
-        let ground = sh * 0.72;
-        let w = unit * 1.2;
-        let h = unit * 1.6;
-        let gap = sw / 4.0;
-
-        // 캐릭터 Niro: 노란 몸 + 분홍 모자
-        let x = gap;
-        draw_placeholder(x, ground, w, h, NIRO_YELLOW, "Niro");
-        draw_rectangle(x - w * 0.35, ground - h - w * 0.35, w * 0.7, w * 0.35, PINK);
-
-        // 캐릭터 Ellie: 왼쪽 파랑, 오른쪽 분홍
-        let x = gap * 2.0;
-        draw_placeholder(x, ground, w, h, ELLIE_BLUE, "Ellie");
-        draw_rectangle(x, ground - h, w / 2.0, h, PINK);
-        draw_rectangle_lines(x - w / 2.0, ground - h, w, h, 3.0, BLACK);
-
-        // 캐릭터 Logan: 빨간 몸 + 금 왕관
-        let x = gap * 3.0;
-        draw_placeholder(x, ground, w, h, LOGAN_RED, "Logan");
-        let top = ground - h;
-        let cw = w * 0.7;
-        let cl = x - cw / 2.0;
-        draw_rectangle(cl, top - w * 0.15, cw, w * 0.15, CROWN_GOLD);
-        for i in 0..3 {
-            let px = cl + cw * (i as f32) / 2.0;
-            let half = cw / 6.0;
-            let bx = (px - half).max(cl);
-            let ex = (px + half).min(cl + cw);
-            draw_triangle(
-                vec2(bx, top - w * 0.15),
-                vec2(ex, top - w * 0.15),
-                vec2(px, top - w * 0.4),
-                CROWN_GOLD,
-            );
+        // 2) 그리기 (960×540 가상 화면)
+        letterbox.begin();
+        let text = TextPainter::new(&assets.font, letterbox.scale);
+        match &scene {
+            Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y),
+            Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
+            Scene::Play { world, player } => screens::draw_play(&assets, &text, world, player),
+        }
+        letterbox.end();
+        if first_frame {
+            // 첫 그림을 그렸으니 웹페이지의 "불러오는 중..." 글자를 치운다.
+            view::web::hide_loading_screen();
+            first_frame = false;
         }
 
         next_frame().await
