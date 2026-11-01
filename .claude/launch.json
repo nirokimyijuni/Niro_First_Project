@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game",
+      "runtimeExecutable": "C:\\Users\\SDS\\.cargo\\bin\\basic-http-server.exe",
+      "runtimeArgs": ["-a", "127.0.0.1:4000", "D:\\김이준\\미쓰 찾기 게임\\dist"],
+      "port": 4000
+    }
+  ]
+}

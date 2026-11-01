@@ -1,0 +1,14 @@
+[package]
+name = "miss-game"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+macroquad = "0.4"
+
+# wasm 크기를 줄여 모바일에서 빨리 열리게 한다.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
