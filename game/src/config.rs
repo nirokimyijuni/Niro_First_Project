@@ -26,6 +26,10 @@ pub const ZOMBIE_MIN_ATTACK: u32 = 1;
 /// M6 코인 최대 개수
 pub const COIN_MAX: u32 = 5000;
 
+/// D5 광석 하나 캐는 시간 (초). 맨손은 곡괭이보다 느리다. M5에서 해 보고 조절한다.
+pub const MINE_SECONDS_BARE_HAND: f32 = 3.0;
+pub const MINE_SECONDS_PICKAXE: f32 = 1.0;
+
 /// D5 제작대 크기: 가로 4칸 × 세로 3칸
 pub const CRAFT_GRID_WIDTH: usize = 4;
 pub const CRAFT_GRID_HEIGHT: usize = 3;
@@ -45,6 +49,7 @@ mod tests {
         assert_eq!(ZOMBIE_ATTACK_DROP_PER_LEVEL, 2);
         assert_eq!(ZOMBIE_MIN_ATTACK, 1);
         assert_eq!(COIN_MAX, 5000);
+        assert!(MINE_SECONDS_BARE_HAND > MINE_SECONDS_PICKAXE);
         assert_eq!((CRAFT_GRID_WIDTH, CRAFT_GRID_HEIGHT), (4, 3));
     }
 }
