@@ -1,10 +1,42 @@
 //! 키보드·마우스·터치 입력을 읽어서 logic이 쓰는 모양으로 바꾼다.
-//! 터치는 macroquad가 마우스 클릭으로도 알려 주므로(기본 설정) 마우스와 같이 처리된다.
-//! 모바일 가상 조이스틱은 M7에서 붙인다.
+//! 메뉴 화면: 터치는 macroquad가 마우스 클릭으로도 알려 주므로(기본 설정 simulate_mouse_with_touch)
+//! 마우스와 같이 `tap`으로 처리된다.
+//! 플레이 화면: 마우스 `tap`은 쓰지 않고, 터치는 `touches()`로 받아 조이스틱·버튼(touch.rs)으로만 처리한다.
 
 use super::screen::Letterbox;
+use super::touch::{Finger, TouchFrame};
 use crate::logic::player::PlayerInput;
 use macroquad::prelude::*;
+
+/// 키보드 입력에 터치 입력을 더한다 (둘 중 하나라도 누르면 누른 것).
+pub fn merge_touch(keys: PlayerInput, touch: &TouchFrame) -> PlayerInput {
+    PlayerInput {
+        left: keys.left || touch.left,
+        right: keys.right || touch.right,
+        jump_pressed: keys.jump_pressed || touch.jump_pressed,
+    }
+}
+
+/// 이번 프레임 화면 위 손가락들 (가상 화면 좌표).
+pub fn fingers(letterbox: &Letterbox) -> Vec<Finger> {
+    let dpi = screen_dpi_scale();
+    touches()
+        .into_iter()
+        .map(|t| Finger { id: t.id, phase: t.phase, pos: touch_to_virtual(t.position, dpi, letterbox) })
+        .collect()
+}
+
+/// 터치 위치 → 가상 화면 좌표.
+/// `high_dpi`에서 `touches()`는 실제 화면 점(물리 픽셀) 단위라서, `screen_width()`·`mouse_position()`과
+/// 같은 단위(논리 픽셀)가 되게 dpi 배율로 나눈 뒤 `Letterbox`에 넣는다 (REVIEW-003 1번).
+pub fn touch_to_virtual(physical: Vec2, dpi: f32, letterbox: &Letterbox) -> Vec2 {
+    letterbox.to_virtual(physical / dpi.max(0.01))
+}
+
+/// 이번 프레임에 키보드 키를 하나라도 새로 눌렀는지 (터치 모드 끄기용).
+pub fn any_key_pressed() -> bool {
+    !get_keys_pressed().is_empty()
+}
 
 /// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프.
 pub fn player_input() -> PlayerInput {
@@ -48,4 +80,39 @@ pub fn menu_input(letterbox: &Letterbox) -> MenuInput {
 /// 개발용 빨리감기(D12) 켜기/끄기: F를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
 pub fn fast_forward_pressed() -> bool {
     is_key_pressed(KeyCode::F)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::view::touch::{button_at, ButtonKind, PLAY_BUTTONS};
+
+    /// 아이폰 12 Pro 가로: 창 844×390 (논리 픽셀), 배율 3.
+    fn iphone() -> Letterbox {
+        Letterbox::for_window(844.0, 390.0)
+    }
+
+    /// 가상 좌표 → 그 자리를 누르면 들어오는 터치 위치 (물리 픽셀).
+    fn physical_at(lb: &Letterbox, virtual_point: Vec2, dpi: f32) -> Vec2 {
+        (lb.offset + virtual_point * lb.scale) * dpi
+    }
+
+    #[test]
+    fn jump_button_works_at_dpi_3() {
+        let lb = iphone();
+        let jump = PLAY_BUTTONS[0].center;
+        let p = touch_to_virtual(physical_at(&lb, jump, 3.0), 3.0, &lb);
+        assert!(p.distance(jump) < 0.01);
+        assert_eq!(button_at(&PLAY_BUTTONS, p), Some(ButtonKind::Jump));
+    }
+
+    #[test]
+    fn same_spot_gives_same_result_at_dpi_1_and_3() {
+        let lb = iphone();
+        for v in [vec2(100.0, 400.0), vec2(480.0, 270.0), PLAY_BUTTONS[0].center] {
+            let a = touch_to_virtual(physical_at(&lb, v, 1.0), 1.0, &lb);
+            let b = touch_to_virtual(physical_at(&lb, v, 3.0), 3.0, &lb);
+            assert!(a.distance(b) < 0.01, "{a} vs {b}");
+        }
+    }
 }

@@ -1,0 +1,58 @@
+# main에 push하면: 테스트(cargo test) 통과 → wasm 빌드(deploy/build.sh) → GitHub Pages 배포
+# 관리: 케빈(에이전트). 결정 사항 D17.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 한 번에 하나만. 새 push가 오면 진행 중인 배포는 끝까지 두고 다음 것을 기다린다.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 받기
+        uses: actions/checkout@v7
+
+      - name: Rust stable + wasm32 타깃 설치
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: cargo 캐시
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: game
+
+      - name: 테스트 (실패하면 배포하지 않음)
+        working-directory: game
+        run: cargo test
+
+      - name: 웹 빌드 (dist/)
+        run: bash deploy/build.sh
+
+      - name: dist 업로드
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: GitHub Pages에 배포
+        id: deployment
+        uses: actions/deploy-pages@v5

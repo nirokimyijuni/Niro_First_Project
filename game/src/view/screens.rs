@@ -16,6 +16,8 @@ use crate::logic::player::{Facing, Motion};
 use macroquad::prelude::*;
 
 // ---- 색 ----
+/// 타이틀 구석 버전 글자 (모래 위에 작고 흐리게)
+const VERSION_COLOR: Color = Color::new(0.35, 0.25, 0.15, 0.7);
 /// 모래: 아이 그림의 흰 얼굴이 묻히지 않게 너무 하얗지 않은 따뜻한 베이지
 const SAND: Color = Color::new(0.90, 0.76, 0.52, 1.0);
 /// 화면 아래쪽 모래는 조금 더 진하게 (그라데이션)
@@ -187,7 +189,8 @@ fn draw_background(assets: &Assets, look: &SkyLook, ground_y: f32) {
 
 // ---- 타이틀 ----
 
-pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32) {
+/// 타이틀. `version`이 있으면(웹 배포판) 오른쪽 아래 구석에 작게 보여 준다 (US-031).
+pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32, version: Option<&str>) {
     draw_background(assets, &SkyLook::new(0.0, &MENU_SKY, time()), ground_y);
     for (i, kind) in CharacterKind::ALL.into_iter().enumerate() {
         let pose = sprites::pose(Motion::Idle, time() + i as f32 * 0.37, false);
@@ -200,6 +203,12 @@ pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32) {
     let alpha = 0.65 + 0.35 * (time() * 3.0).sin();
     let hint = Color { a: alpha, ..TEXT_COLOR };
     text.centered("시작하려면 Space/Enter 또는 화면을 눌러요", VIRTUAL_WIDTH / 2.0, 240.0, 38.0, hint);
+    if let Some(v) = version {
+        let label = format!("v {v}");
+        let size = 18.0;
+        let w = text.width(&label, size);
+        text.left(&label, VIRTUAL_WIDTH - w - 10.0, VIRTUAL_HEIGHT - 10.0, size, VERSION_COLOR);
+    }
 }
 
 // ---- 캐릭터 고르기 ----
@@ -245,7 +254,8 @@ fn feet_x_on_screen(center_x: f32, half_width: f32) -> f32 {
     center_x.clamp(half_width, (VIRTUAL_WIDTH - half_width).max(half_width))
 }
 
-pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward: bool, pops: &CoinPops) {
+/// `touch_mode`면 키보드 안내 글자는 숨긴다 (터치 조이스틱·버튼은 main이 위에 그린다).
+pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward: bool, pops: &CoinPops, touch_mode: bool) {
     let d = game.clock.sky_darkness();
     draw_background(assets, &SkyLook::new(d, &PLAY_SKY, time()), game.world.ground_y);
     for b in &game.world.obstacles {
@@ -264,7 +274,9 @@ pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward:
 
     pops.draw(text);
     draw_hud(text, &game.clock, game.wallet.coins(), fast_forward);
-    text.centered("화살표: 걷기   Space: 점프   Esc: 캐릭터 고르기", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+    if !touch_mode {
+        text.centered("화살표: 걷기   Space: 점프   Esc: 캐릭터 고르기", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+    }
 }
 
 #[cfg(test)]

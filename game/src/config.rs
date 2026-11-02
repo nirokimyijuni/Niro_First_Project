@@ -23,10 +23,10 @@ pub const ZOMBIE_ATTACK_DROP_PER_LEVEL: u32 = 2;
 /// D3 좀비 공격력은 이보다 낮아지지 않는다
 pub const ZOMBIE_MIN_ATTACK: u32 = 1;
 
-/// M6 코인 최대 개수
+/// M7 상점에서도 쓰는 코인 최대 개수
 pub const COIN_MAX: u32 = 5000;
 
-/// D5 광석 하나 캐는 시간 (초). 맨손은 곡괭이보다 느리다. M5에서 해 보고 조절한다.
+/// D5 광석 하나 캐는 시간 (초). 맨손은 곡괭이보다 느리다. M6(제작과 동굴)에서 해 보고 조절한다.
 pub const MINE_SECONDS_BARE_HAND: f32 = 3.0;
 pub const MINE_SECONDS_PICKAXE: f32 = 1.0;
 

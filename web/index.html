@@ -49,6 +49,14 @@
             var el = document.getElementById("loading");
             if (el) el.remove();
         };
+        // 타이틀 구석에 보이는 버전 (game/src/view/web.rs). window.GAME_VERSION은 deploy/build.sh가
+        // dist/index.html에만 넣는다. 없으면 -1을 돌려줘서 게임이 버전을 안 그린다.
+        importObject.env.game_version_byte = function (i) {
+            var v = window.GAME_VERSION;
+            if (typeof v !== "string") return -1;
+            var bytes = new TextEncoder().encode(v);
+            return i < bytes.length ? bytes[i] : -1;
+        };
         load("miss-game.wasm");
     </script>
 </body>

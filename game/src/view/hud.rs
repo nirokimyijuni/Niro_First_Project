@@ -41,7 +41,7 @@ pub fn hh_mm(hour: u32, minute: u32) -> String {
 }
 
 /// 둥근 끝 판.
-fn draw_pill(x: f32, y: f32, w: f32, h: f32, color: Color) {
+pub(super) fn draw_pill(x: f32, y: f32, w: f32, h: f32, color: Color) {
     let r = h / 2.0;
     draw_rectangle(x + r, y, (w - h).max(0.0), h, color);
     // 반원 두 개 대신 원 두 개를 그리면 겹치는 곳이 더 진해지므로 반원 부채를 그린다.

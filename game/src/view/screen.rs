@@ -19,7 +19,11 @@ pub struct Letterbox {
 
 impl Letterbox {
     pub fn current() -> Letterbox {
-        let (sw, sh) = (screen_width(), screen_height());
+        Letterbox::for_window(screen_width(), screen_height())
+    }
+
+    /// 창 크기(논리 픽셀)에 맞춘 화면 맞춤 정보.
+    pub fn for_window(sw: f32, sh: f32) -> Letterbox {
         let scale = (sw / VIRTUAL_WIDTH).min(sh / VIRTUAL_HEIGHT).max(0.01);
         let offset = vec2(
             (sw - VIRTUAL_WIDTH * scale) / 2.0,

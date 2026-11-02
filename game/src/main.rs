@@ -12,7 +12,8 @@ use logic::player::PlayerInput;
 use macroquad::prelude::*;
 use view::assets::Assets;
 use view::coin::CoinPops;
-use view::input::{fast_forward_pressed, menu_input, player_input};
+use view::input::{any_key_pressed, fast_forward_pressed, fingers, menu_input, merge_touch, player_input, MenuInput};
+use view::touch::{draw_rotate_hint, draw_touch_controls, next_touch_mode, show_rotate_hint, TouchControls, PLAY_BUTTONS};
 use view::screen::Letterbox;
 use view::screens;
 use view::text::TextPainter;
@@ -84,60 +85,83 @@ async fn main() {
     let assets = Assets::load().await;
     let mut scene = Scene::Title;
     let mut first_frame = true;
+    // 폰 터치 조작 (D16). 터치가 들어오면 터치 모드(조이스틱·버튼 보이기), 키보드를 누르면 다시 숨긴다.
+    let mut touch = TouchControls::new();
+    let mut touch_mode = false;
+    // 웹 배포 버전 (타이틀 구석에 작게). 로컬 실행이면 None.
+    let version = view::web::game_version();
 
     loop {
         let letterbox = Letterbox::current();
-        let menu = menu_input(&letterbox);
+        let fingers = fingers(&letterbox);
+        touch_mode = next_touch_mode(touch_mode, !fingers.is_empty(), any_key_pressed());
+        let (sw, sh) = (screen_width(), screen_height());
+        // 세로 화면 안내 중에는 어떤 입력도 받지 않고 게임도 멈춘다 (아래).
+        let rotate_hint = show_rotate_hint(touch_mode, sw, sh);
+        let menu = if rotate_hint { MenuInput::default() } else { menu_input(&letterbox) };
         let dt = cap_frame_seconds(get_frame_time());
+        // 플레이 중이 아니거나 안내 중이면 조이스틱·버튼을 놓고, 지금 닿아 있는 손가락만 기억한다.
+        // (메뉴에서 누른 손가락, 안내 전에 대고 있던 손가락이 플레이에서 저절로 걷기·점프가 되지 않게)
+        if rotate_hint || !matches!(scene, Scene::Play { .. }) {
+            touch.idle(&fingers);
+        }
 
         // 1) 입력 → 장면 바꾸기 / logic 업데이트. 장면이 바뀐 프레임에는 새 장면을 업데이트하지 않는다
         //    (같은 Space 한 번이 "결정"과 "점프"로 두 번 쓰이지 않게).
-        let next = match &mut scene {
-            Scene::Title => {
-                if menu.confirm || menu.tap.is_some() {
-                    Some(Scene::Select { picked: 0 })
-                } else {
-                    None
-                }
-            }
-            Scene::Select { picked } => {
-                if menu.left && *picked > 0 {
-                    *picked -= 1;
-                }
-                if menu.right && *picked + 1 < CharacterKind::ALL.len() {
-                    *picked += 1;
-                }
-                if let Some(i) = menu.tap.and_then(screens::select_card_at) {
-                    Some(start_play(CharacterKind::ALL[i]))
-                } else if menu.confirm {
-                    Some(start_play(CharacterKind::ALL[*picked]))
-                } else {
-                    None
-                }
-            }
-            Scene::Play { game, fast_forward, pops } => {
-                if menu.back {
-                    Some(Scene::Select { picked: kind_index(game.player.kind) })
-                } else {
-                    if fast_forward_pressed() {
-                        *fast_forward = !*fast_forward;
-                    }
-                    let input = player_input();
-                    let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
-                    let events = if *fast_forward {
-                        update_with_time_scale(game, &input, dt, config::DEV_FAST_FORWARD_SCALE)
+        //    세로 안내 중에는 아무것도 업데이트하지 않는다: 시계·코인·캐릭터가 그대로 멈춘다
+        //    (dt = 0과 같다. 규칙을 바꾸는 게 아니라 logic을 부르지 않을 뿐).
+        let next = if rotate_hint {
+            None
+        } else {
+            match &mut scene {
+                Scene::Title => {
+                    if menu.confirm || menu.tap.is_some() {
+                        Some(Scene::Select { picked: 0 })
                     } else {
-                        game.update(&input, dt)
-                    };
-                    // 2) 이벤트 처리: 지금은 코인 반짝 효과만. 낮/밤이 바뀌는 건 하늘 색과 정보판이 보여 준다.
-                    //    (아침 인사 문구·소리는 아이와 정한 뒤에 — US-012, M5 사운드)
-                    for event in events {
-                        if let GameEvent::CoinsPicked { count } = event {
-                            pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
-                        }
+                        None
                     }
-                    pops.update(dt);
-                    None
+                }
+                Scene::Select { picked } => {
+                    if menu.left && *picked > 0 {
+                        *picked -= 1;
+                    }
+                    if menu.right && *picked + 1 < CharacterKind::ALL.len() {
+                        *picked += 1;
+                    }
+                    if let Some(i) = menu.tap.and_then(screens::select_card_at) {
+                        Some(start_play(CharacterKind::ALL[i]))
+                    } else if menu.confirm {
+                        Some(start_play(CharacterKind::ALL[*picked]))
+                    } else {
+                        None
+                    }
+                }
+                Scene::Play { game, fast_forward, pops } => {
+                    // 플레이 중 터치는 조이스틱·버튼으로만 (마우스로 흉내 낸 menu.tap은 쓰지 않는다).
+                    let touched = touch.update(&fingers, &PLAY_BUTTONS, touch_mode);
+                    if menu.back || touched.back_pressed {
+                        Some(Scene::Select { picked: kind_index(game.player.kind) })
+                    } else {
+                        if fast_forward_pressed() {
+                            *fast_forward = !*fast_forward;
+                        }
+                        let input = merge_touch(player_input(), &touched);
+                        let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
+                        let events = if *fast_forward {
+                            update_with_time_scale(game, &input, dt, config::DEV_FAST_FORWARD_SCALE)
+                        } else {
+                            game.update(&input, dt)
+                        };
+                        // 2) 이벤트 처리: 지금은 코인 반짝 효과만. 낮/밤이 바뀌는 건 하늘 색과 정보판이 보여 준다.
+                        //    (아침 인사 문구·소리는 아이와 정한 뒤에 — US-012, M6 사운드)
+                        for event in events {
+                            if let GameEvent::CoinsPicked { count } = event {
+                                pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
+                            }
+                        }
+                        pops.update(dt);
+                        None
+                    }
                 }
             }
         };
@@ -149,11 +173,20 @@ async fn main() {
         letterbox.begin();
         let text = TextPainter::new(&assets.font, letterbox.scale);
         match &scene {
-            Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y),
+            Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, pops } => screens::draw_play(&assets, &text, game, *fast_forward, pops),
+            Scene::Play { game, fast_forward, pops } => {
+                screens::draw_play(&assets, &text, game, *fast_forward, pops, touch_mode);
+                if touch_mode {
+                    draw_touch_controls(&text, &touch, &PLAY_BUTTONS);
+                }
+            }
         }
         letterbox.end();
+        if rotate_hint {
+            // 창 전체(띠 포함)를 덮는다. 글자 크기는 창(CSS) 픽셀 기준이라 dpi 붓을 쓴다.
+            draw_rotate_hint(&TextPainter::new(&assets.font, screen_dpi_scale()), sw, sh);
+        }
         if first_frame {
             // 첫 그림을 그렸으니 웹페이지의 "불러오는 중..." 글자를 치운다.
             view::web::hide_loading_screen();
