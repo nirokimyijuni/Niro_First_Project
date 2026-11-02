@@ -71,6 +71,18 @@ pub const DEV_FAST_FORWARD_SCALE: f32 = 10.0;
 /// 그만큼 한꺼번에 흘리지 않고 여기서 자른다 → 탭을 떠나 있는 동안은 게임이 멈춘 것처럼 된다 (US-009).
 pub const MAX_FRAME_SECONDS: f32 = 0.25;
 
+/// D14 하루가 몇 분인지 (게임 시계). 24시간 × 60분.
+pub const MINUTES_PER_GAME_DAY: u32 = 24 * 60;
+/// D14 낮이 시작되는 시각 (시). 06:00에 해가 뜨고 N일째·버틴 날이 1 는다.
+pub const DAY_START_HOUR: u32 = 6;
+/// D14 밤이 시작되는 시각 (시). 낮은 06:00~18:00, 밤은 18:00~06:00.
+pub const NIGHT_START_HOUR: u32 = 18;
+/// D14 게임 시계에서 낮이 차지하는 분 (06:00~18:00 = 12시간).
+/// 실제 낮 길이(DAY_SECONDS)가 바뀌어도 이 12시간에 맞춰 시계가 빨라지거나 느려진다.
+pub const DAY_GAME_MINUTES: u32 = (NIGHT_START_HOUR - DAY_START_HOUR) * 60;
+/// D14 게임 시계에서 밤이 차지하는 분 (18:00~다음 날 06:00 = 12시간).
+pub const NIGHT_GAME_MINUTES: u32 = MINUTES_PER_GAME_DAY - DAY_GAME_MINUTES;
+
 /// M2 게임을 시작할 때 캐릭터 왼쪽 위 x 위치 (상자가 없는 왼쪽).
 pub const PLAYER_SPAWN_X: f32 = 120.0;
 
@@ -101,5 +113,10 @@ mod tests {
         assert_eq!((DUSK_SECONDS, DAWN_SECONDS), (60.0, 60.0));
         assert!(MINE_SECONDS_BARE_HAND > MINE_SECONDS_PICKAXE);
         assert_eq!((CRAFT_GRID_WIDTH, CRAFT_GRID_HEIGHT), (4, 3));
+        assert_eq!((DAY_START_HOUR, NIGHT_START_HOUR), (6, 18));
+        assert_eq!((DAY_GAME_MINUTES, NIGHT_GAME_MINUTES), (720, 720));
+        // D14: 실제 1초 = 게임 1.2분
+        assert_eq!(DAY_GAME_MINUTES as f32 / DAY_SECONDS, 1.2);
+        assert_eq!(NIGHT_GAME_MINUTES as f32 / NIGHT_SECONDS, 1.2);
     }
 }

@@ -1,4 +1,4 @@
-//! 정보판(HUD): 화면 맨 위에 크게. 왼쪽 = 낮/밤 + 남은 시간, 가운데 = N일째 · 버틴 날, 오른쪽 = 코인.
+//! 정보판(HUD): 화면 맨 위에 크게. 왼쪽 = 낮/밤 + 24시간 시계(HH:MM, D14), 가운데 = N일째 · 버틴 날, 오른쪽 = 코인.
 //! 빨리감기(D12)가 켜져 있으면 정보판 줄 바로 아래 오른쪽(해 그림 왼쪽)에 "빨리감기 x10" 판.
 //! 값은 모두 logic(clock, wallet)이 준 그대로 보여 준다.
 
@@ -35,10 +35,9 @@ const FAST_ICON_H: f32 = 24.0;
 const FAST_PAD_LEFT: f32 = 20.0;
 const FAST_ICON_TEXT_GAP: f32 = 12.0;
 
-/// 남은 초 → "MM:SS". 올림해서 시작할 때 10:00, 끝나기 직전 00:01. 0 아래·99:59 위로는 안 나간다.
-pub fn mm_ss(seconds_left: f32) -> String {
-    let total = seconds_left.max(0.0).ceil().min(99.0 * 60.0 + 59.0) as u32;
-    format!("{:02}:{:02}", total / 60, total % 60)
+/// 24시간 시계의 (시, 분) → "HH:MM". 두 자리씩. 시는 23, 분은 59를 넘지 않는다.
+pub fn hh_mm(hour: u32, minute: u32) -> String {
+    format!("{:02}:{:02}", hour.min(23), minute.min(59))
 }
 
 /// 둥근 끝 판.
@@ -96,14 +95,20 @@ pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: boo
     let mid_y = PANEL_TOP + PANEL_HEIGHT / 2.0;
     let baseline = PANEL_TOP + TEXT_BASELINE;
 
-    // 왼쪽: 낮/밤 + 남은 시간. 판 폭은 숫자가 바뀌어도 흔들리지 않게 고정 견본으로 잰다.
+    // 왼쪽: 낮/밤 + 24시간 시계. 판 폭은 숫자가 바뀌어도 흔들리지 않게 고정 견본으로 잰다.
     let label = match clock.phase() {
         Phase::Day => "낮",
         Phase::Night => "밤",
     };
     let is_night = clock.is_night();
-    let time_text = format!("{label} {}", mm_ss(clock.seconds_left_in_phase()));
-    let left_w = ICON_TEXT_GAP + text.width("밤 00:00", BIG_TEXT) + PANEL_PAD_RIGHT;
+    let (hour, minute) = clock.hour_minute();
+    let time_text = format!("{label} {}", hh_mm(hour, minute));
+    // 숫자마다 폭이 다른 글꼴이어도 넘치지 않게 가장 넓은 견본에 맞춘다.
+    let sample_w = ["밤 00:00", "낮 00:00", "밤 88:88", "낮 88:88"]
+        .iter()
+        .map(|s| text.width(s, BIG_TEXT))
+        .fold(0.0, f32::max);
+    let left_w = ICON_TEXT_GAP + sample_w + PANEL_PAD_RIGHT;
     draw_pill(MARGIN, PANEL_TOP, left_w, PANEL_HEIGHT, PANEL);
     let icon = vec2(MARGIN + ICON_X, mid_y);
     if is_night {
@@ -145,13 +150,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clock_text_is_always_two_digits_each() {
-        assert_eq!(mm_ss(600.0), "10:00");
-        assert_eq!(mm_ss(599.5), "10:00");
-        assert_eq!(mm_ss(599.0), "09:59");
-        assert_eq!(mm_ss(545.0), "09:05");
-        assert_eq!(mm_ss(6.2), "00:07");
-        assert_eq!(mm_ss(0.0), "00:00");
-        assert_eq!(mm_ss(-3.0), "00:00");
+    fn clock_text_is_hh_mm_two_digits_each() {
+        assert_eq!(hh_mm(6, 0), "06:00");
+        assert_eq!(hh_mm(9, 36), "09:36");
+        assert_eq!(hh_mm(0, 12), "00:12");
+        assert_eq!(hh_mm(0, 0), "00:00");
+        assert_eq!(hh_mm(23, 59), "23:59");
+        assert_eq!(hh_mm(24, 60), "23:59", "24:00이나 세 자리는 안 나온다");
+    }
+
+    #[test]
+    fn clock_text_follows_logic_clock() {
+        let show = |c: &Clock| {
+            let (h, m) = c.hour_minute();
+            hh_mm(h, m)
+        };
+        let mut c = Clock::new();
+        assert_eq!(show(&c), "06:00");
+        c.update(599.9);
+        assert_eq!(show(&c), "17:59");
+        c.update(0.1);
+        assert_eq!(show(&c), "18:00");
+        c.update(300.0);
+        assert_eq!(show(&c), "00:00");
     }
 }

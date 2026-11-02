@@ -16,6 +16,7 @@
 | `niro` 니로 | 스토리텔러 · 유저스토리 관리 | `stories/` |
 | `susanna` 수산나 | 백엔드 (게임 규칙·로직) | `game/src/logic/` |
 | `logan` 로건 | 프론트 (그림·입력·UI·사운드) | `game/src/view/`, `game/assets/`, `web/` |
+| `bob` 밥 | 코드 리뷰어 (고치지 않고 읽고 지적) | `qa/reviews/` |
 | `ellie` 엘리 | 테스터 | `qa/`, `game/tests/` |
 | `kevin` 케빈 | 배포 관리 | `deploy/`, `.github/workflows/` |
 
@@ -24,8 +25,9 @@
 ## 작업 흐름
 1. 니로가 유저스토리를 `stories/backlog.md`에 쓴다 (완료 조건 포함).
 2. 수산나(로직)와 로건(화면)이 구현한다. 둘의 경계는 `game/src/logic` ↔ `game/src/view`.
-3. 엘리가 완료 조건대로 확인하고 버그는 `qa/bugs/`에 남긴다.
-4. 케빈이 웹에 올리고 플레이 링크를 공유한다.
+3. 밥이 코드를 리뷰하고 `qa/reviews/`에 남긴다. 꼭 고칠 것은 수산나·로건이 고친다.
+4. 엘리가 완료 조건대로 확인하고 버그는 `qa/bugs/`에 남긴다.
+5. 케빈이 웹에 올리고 플레이 링크를 공유한다.
 
 ## 기술 기본값
 - 엔진: `macroquad` (Wasm 빌드가 가장 단순함). 빌드 타깃 `wasm32-unknown-unknown`.

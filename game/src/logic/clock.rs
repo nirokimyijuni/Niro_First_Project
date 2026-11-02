@@ -3,7 +3,10 @@
 //! 빨리감기(D12)는 시계가 따로 알 필요가 없다. 부르는 쪽이 `dt × DEV_FAST_FORWARD_SCALE`을 넣으면 된다.
 
 
-use crate::config::{DAWN_SECONDS, DAY_SECONDS, DUSK_SECONDS, NIGHT_SECONDS};
+use crate::config::{
+    DAWN_SECONDS, DAY_GAME_MINUTES, DAY_SECONDS, DAY_START_HOUR, DUSK_SECONDS, MINUTES_PER_GAME_DAY,
+    NIGHT_GAME_MINUTES, NIGHT_SECONDS,
+};
 
 /// 지금이 낮인지 밤인지.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +106,26 @@ impl Clock {
         }
     }
 
+    /// 24시간 시계의 지금 시각을 분으로 (D14). 00:00 = 0, 23:59 = 1439.
+    /// 낮은 06:00~18:00, 밤은 18:00~06:00. 낮·밤 길이가 달라도 각각 12시간에 맞춰 늘이거나 줄인다.
+    /// 분은 내림이라 화면 시계가 뒤로 가는 일이 없다.
+    pub fn time_of_day_minutes(&self) -> u32 {
+        // 오늘 아침(06:00)부터 몇 분 지났는지
+        let minutes_since_morning = match self.phase {
+            Phase::Day => minutes_into_phase(self.seconds_in_phase, DAY_SECONDS, DAY_GAME_MINUTES),
+            Phase::Night => {
+                DAY_GAME_MINUTES + minutes_into_phase(self.seconds_in_phase, NIGHT_SECONDS, NIGHT_GAME_MINUTES)
+            }
+        };
+        (DAY_START_HOUR * 60 + minutes_since_morning) % MINUTES_PER_GAME_DAY
+    }
+
+    /// 24시간 시계의 (시, 분). 예: 오후 3시 7분 → (15, 7).
+    pub fn hour_minute(&self) -> (u32, u32) {
+        let m = self.time_of_day_minutes();
+        (m / 60, m % 60)
+    }
+
     fn phase_length(&self) -> f32 {
         match self.phase {
             Phase::Day => DAY_SECONDS,
@@ -115,6 +138,14 @@ impl Default for Clock {
     fn default() -> Clock {
         Clock::new()
     }
+}
+
+/// 구간이 시작된 뒤 `seconds`초가 지났을 때, 게임 시계로 몇 분 지났는지 (내림).
+/// 구간(실제 `phase_seconds`초)이 게임 시계 `phase_minutes`분에 맞도록 늘이거나 줄인다.
+/// 구간이 끝나기 전에는 마지막 분을 넘지 않는다 → 낮인데 18:00이 보이는 일이 없다.
+fn minutes_into_phase(seconds: f32, phase_seconds: f32, phase_minutes: u32) -> u32 {
+    let minutes = (seconds.max(0.0) / phase_seconds * phase_minutes as f32).floor() as u32;
+    minutes.min(phase_minutes - 1)
 }
 
 /// 0~1 값을 처음과 끝이 살살 바뀌게 만든다 (smoothstep).
@@ -246,5 +277,101 @@ mod tests {
         let mut c = Clock::new();
         assert!(c.update(-5.0).is_empty());
         assert_eq!(c.seconds_left_in_phase(), DAY_SECONDS);
+    }
+
+    // ---------- D14 24시간 시계 ----------
+
+    #[test]
+    fn clock_starts_at_six_in_the_morning() {
+        let c = Clock::new();
+        assert_eq!(c.time_of_day_minutes(), 6 * 60);
+        assert_eq!(c.hour_minute(), (6, 0));
+    }
+
+    #[test]
+    fn noon_after_300_seconds() {
+        let mut c = Clock::new();
+        c.update(300.0);
+        assert_eq!(c.hour_minute(), (12, 0));
+    }
+
+    #[test]
+    fn one_real_second_is_1_2_game_minutes() {
+        let mut c = Clock::new();
+        c.update(5.0); // 6분
+        assert_eq!(c.hour_minute(), (6, 6));
+        c.update(1.0); // 7.2분 → 내림 7분
+        assert_eq!(c.hour_minute(), (6, 7));
+    }
+
+    #[test]
+    fn evening_six_right_when_night_starts() {
+        let mut c = Clock::new();
+        c.update(599.9);
+        assert_eq!(c.phase(), Phase::Day);
+        assert_eq!(c.hour_minute(), (17, 59), "낮의 끝은 17:59");
+        c.update(0.1);
+        assert!(c.is_night());
+        assert_eq!(c.hour_minute(), (18, 0));
+    }
+
+    #[test]
+    fn midnight_at_900_seconds_and_three_at_1050() {
+        let mut c = Clock::new();
+        c.update(900.0);
+        assert_eq!(c.hour_minute(), (0, 0), "자정");
+        assert_eq!(c.day_number(), 1, "자정에는 날이 안 바뀐다");
+        c.update(150.0);
+        assert_eq!(c.hour_minute(), (3, 0));
+        assert_eq!(c.day_number(), 1);
+    }
+
+    #[test]
+    fn six_again_and_day_two_after_1200_seconds() {
+        let mut c = Clock::new();
+        c.update(1200.0);
+        assert_eq!(c.phase(), Phase::Day);
+        assert_eq!(c.hour_minute(), (6, 0));
+        assert_eq!(c.day_number(), 2);
+        assert_eq!(c.nights_survived(), 1);
+    }
+
+    #[test]
+    fn clock_never_goes_backward_frame_by_frame() {
+        // 하루(실제 20분)를 60프레임/초로 흘리며, 자정을 넘을 때만 빼고 시각이 줄지 않는지 본다.
+        let mut c = Clock::new();
+        let mut last = c.time_of_day_minutes();
+        let mut wraps = 0;
+        for _ in 0..(1200 * 60) {
+            c.update(1.0 / 60.0);
+            let now = c.time_of_day_minutes();
+            assert!(now < MINUTES_PER_GAME_DAY);
+            if now < last {
+                wraps += 1;
+                assert_eq!((last, now), (MINUTES_PER_GAME_DAY - 1, 0), "자정 넘김만 허용");
+            } else {
+                assert!(now - last <= 1, "한 프레임에 1분 넘게 뛰지 않는다");
+            }
+            last = now;
+        }
+        assert_eq!(wraps, 1, "하루에 자정은 한 번");
+    }
+
+    #[test]
+    fn big_dt_keeps_time_of_day_right() {
+        let mut c = Clock::new();
+        c.update(3000.0); // 3일째 밤 시작
+        assert_eq!(c.hour_minute(), (18, 0));
+        assert_eq!(c.day_number(), 3);
+        c.update(1200.0 * 10.0 + 300.0); // 10일 더 + 300초 → 자정
+        assert_eq!(c.hour_minute(), (0, 0));
+        assert_eq!(c.day_number(), 13);
+    }
+
+    #[test]
+    fn negative_dt_does_not_change_time() {
+        let mut c = Clock::new();
+        c.update(-5.0);
+        assert_eq!(c.hour_minute(), (6, 0));
     }
 }
