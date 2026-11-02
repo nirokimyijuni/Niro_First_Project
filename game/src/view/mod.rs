@@ -6,6 +6,7 @@ pub mod hud;
 pub mod input;
 pub mod screen;
 pub mod screens;
+pub mod sky;
 pub mod sprites;
 pub mod text;
 pub mod title;

@@ -4,6 +4,7 @@
 //! 원화 한 장(547×428)에 세 캐릭터가 같이 있어서, 게임이 시작할 때
 //! 1) 캐릭터별 네모로 잘라 내고 2) 바깥 종이 배경을 투명하게 만든다.
 
+use super::sky::SkyArt;
 use super::title::TitleArt;
 use crate::logic::character::CharacterKind;
 use macroquad::prelude::*;
@@ -44,6 +45,8 @@ pub struct Assets {
     pub title: TitleArt,
     /// `CharacterKind::ALL` 순서 (Niro, Ellie, Logan).
     characters: [Texture2D; 3],
+    /// 코드로 만든 하늘 그림 (해·달·구름·빛). 시작할 때 한 번만 만든다.
+    pub sky: SkyArt,
 }
 
 impl Assets {
@@ -63,7 +66,7 @@ impl Assets {
             texture.set_filter(FilterMode::Linear);
             texture
         });
-        Assets { font, title, characters }
+        Assets { font, title, characters, sky: SkyArt::new() }
     }
 
     pub fn character(&self, kind: CharacterKind) -> &Texture2D {
