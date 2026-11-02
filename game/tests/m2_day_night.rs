@@ -2,7 +2,7 @@
 //! 기준: stories/backlog.md US-009, US-012, US-013, US-014, US-015 완료 조건 + docs/02-plan.md D1, D11, D13.
 //!
 //! m1_movement.rs처럼 logic/와 config.rs 소스를 붙여 와서 검사한다.
-//! 빨리감기(main.rs의 update_with_time_scale)와 화면 시계 글자(view/hud.rs의 mm_ss)는
+//! 빨리감기(main.rs의 update_with_time_scale)와 화면 시계 글자(view/hud.rs의 hh_mm)는
 //! bin 쪽 코드라 여기서 못 부른다 → 그쪽 단위 테스트(main.rs, hud.rs)와 브라우저에서 확인한다.
 
 #[path = "../src/config.rs"]
@@ -21,7 +21,8 @@ use macroquad::math::Vec2;
 const FRAME: f32 = 1.0 / 60.0;
 const NONE: PlayerInput = PlayerInput { left: false, right: false, jump_pressed: false };
 
-/// 화면에 나오는 "MM:SS"의 초 (hud.rs mm_ss와 같은 올림).
+/// 구간(낮/밤)에서 남은 초 (올림). 화면에는 안 나오고 낮/밤 길이 확인에만 쓴다.
+/// 화면 시계(HH:MM, 06:00에서 시작해 앞으로 감)는 m2_clock_24h.rs가 지킨다 (US-016).
 fn shown_seconds(c: &Clock) -> u32 {
     c.seconds_left_in_phase().max(0.0).ceil() as u32
 }
