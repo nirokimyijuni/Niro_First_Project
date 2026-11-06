@@ -100,6 +100,25 @@ pub const DAY_PERIODS: [(u32, &str); 6] = [
 /// M2 게임을 시작할 때 캐릭터 왼쪽 위 x 위치 (상자가 없는 왼쪽).
 pub const PLAYER_SPAWN_X: f32 = 120.0;
 
+// ---- D36 랜덤 상자 (개수 말고는 수산나가 정한 처음 값. 해 보고 조절한다) ----
+
+/// D36 새 게임의 상자 수
+pub const BOX_COUNT_MIN: usize = 3;
+pub const BOX_COUNT_MAX: usize = 10;
+/// D36 상자 한 변 (픽셀). 큰 상자도 점프 최고 높이(약 97)보다 낮아야 넘을 수 있다.
+pub const BOX_SMALL_SIZE: f32 = 48.0;
+pub const BOX_BIG_SIZE: f32 = 64.0;
+/// D36 상자가 큰 상자일 확률
+pub const BOX_BIG_CHANCE: f32 = 0.5;
+/// D36 상자를 놓을 수 있는 곳의 왼쪽·오른쪽 끝 (x). 바깥은 시작 자리와 몬스터가 나오는 곳이라 비운다.
+/// 큰 상자 10개를 붙이면 640이라 이 안(648)에 꼭 들어간다.
+pub const BOX_AREA_LEFT: f32 = 216.0;
+pub const BOX_AREA_RIGHT: f32 = 864.0;
+/// D36 상자 사이 틈은 0(붙음)이거나 이 폭 이상이다. 몸 폭과 딱 맞으면 끼어서 못 내려간다.
+pub const BOX_MIN_GAP: f32 = PLAYER_WIDTH + 16.0;
+/// D36 이웃한 상자 사이에 틈을 둘 확률. 나머지는 붙는다. 자리가 모자라면 더 붙는다.
+pub const BOX_GAP_CHANCE: f32 = 0.5;
+
 /// D11 코인 크기 (가로 = 세로, 픽셀)
 pub const COIN_SIZE: f32 = 24.0;
 /// D11 코인 아래쪽과 상자 윗면 사이 틈 (픽셀). 상자 위에 서면 몸이 코인에 닿는 높이.
@@ -114,15 +133,13 @@ pub const ZOMBIE_WIDTH: f32 = 48.0;
 pub const ZOMBIE_HEIGHT: f32 = 64.0;
 /// US-039 좀비가 걷는 속도 (초당 픽셀). 플레이어보다 느려야 한다. 수산나가 정한 처음 값.
 pub const ZOMBIE_WALK_SPEED: f32 = 80.0;
-/// US-039 다음 좀비가 나올 때까지 (초). 3마리가 꽉 차 있는 동안은 세지 않는다.
+/// US-039 다음 몬스터가 나올 때까지 (초). 스켈레톤도 같이 쓴다. 화면이 꽉 차 있는 동안은 세지 않는다.
 pub const ZOMBIE_SPAWN_SECONDS: f32 = 20.0;
 /// US-039 화면에 함께 있을 수 있는 좀비 수
 pub const ZOMBIE_MAX_ON_SCREEN: usize = 3;
-/// 좀비가 왼쪽 끝에서 나올 확률. 나머지는 오른쪽 끝.
+/// 몬스터가 왼쪽 끝에서 나올 확률. 나머지는 오른쪽 끝 (D36: 플레이어 위치와 상관없다).
+/// 플레이어가 그 끝 자리에 서 있을 때만 겹치지 않게 반대쪽 끝에서 나온다.
 pub const ZOMBIE_SPAWN_LEFT_CHANCE: f32 = 0.5;
-/// 좀비가 나오는 화면 끝이 플레이어와 이만큼 가까우면 반대쪽 끝에서 나온다 (픽셀).
-/// 나오자마자 맞는 일이 없게 수산나가 정한 처음 값.
-pub const ZOMBIE_SPAWN_MIN_DISTANCE: f32 = 200.0;
 /// US-042 나타난 좀비가 날아오르는 좀비일 확률 (3마리 중 1마리쯤)
 pub const ZOMBIE_FLOAT_CHANCE: f32 = 1.0 / 3.0;
 /// US-042 나타나고 몇 초 뒤 떠오르는지
@@ -139,6 +156,59 @@ pub const PLAYER_ATTACK_RANGE: f32 = 60.0;
 /// US-041 맞은 뒤 다시 맞지 않는 시간 (초)
 pub const PLAYER_HURT_INVINCIBLE_SECONDS: f32 = 1.0;
 
+// ---- M5 스켈레톤과 레벨업 (D35 말고는 수산나가 정한 처음 값. 해 보고 조절한다) ----
+
+/// US-045 몬스터를 쓰러뜨리면 얻는 경험치
+pub const EXPERIENCE_PER_DEFEAT: u32 = 1;
+/// D35 레벨이 오르는 경험치. 오르면 0부터 다시 센다.
+pub const EXPERIENCE_PER_LEVEL: u32 = 5;
+
+/// M5 좀비와 스켈레톤을 합쳐 화면에 함께 있을 수 있는 수. 좀비만은 `ZOMBIE_MAX_ON_SCREEN`까지.
+pub const MONSTER_MAX_ON_SCREEN: usize = 4;
+/// M5 나올 차례에 좀비 대신 스켈레톤이 나올 확률. 나오는 시간은 `ZOMBIE_SPAWN_SECONDS`를 같이 쓴다.
+pub const SKELETON_SPAWN_CHANCE: f32 = 0.5;
+
+/// M5 스켈레톤 크기 (가로, 세로)
+pub const SKELETON_WIDTH: f32 = 48.0;
+pub const SKELETON_HEIGHT: f32 = 64.0;
+/// D35 스켈레톤 체력. 세 단계 모두 같다.
+pub const SKELETON_HP: u32 = 3;
+/// D35 단계가 나오는 몬스터 레벨. 레벨마다 그 단계만 나온다.
+pub const SKELETON_HALF_MIN_LEVEL: u32 = 2;
+pub const SKELETON_FULL_MIN_LEVEL: u32 = 3;
+/// D35 단계별 공격력 (일반 화살, 절반 손, 완전체 총)
+pub const SKELETON_NORMAL_ATTACK: u32 = 2;
+pub const SKELETON_HALF_ATTACK: u32 = 3;
+pub const SKELETON_FULL_ATTACK: u32 = 4;
+/// M5 스켈레톤이 걷는 속도 (초당 픽셀). 플레이어보다 느려야 한다.
+pub const SKELETON_WALK_SPEED: f32 = 70.0;
+/// M5 활·총을 든 스켈레톤이 플레이어와 이만큼 가까워지면 걸음을 멈춘다 (픽셀, 몸 가운데끼리).
+pub const SKELETON_SHOOT_DISTANCE: f32 = 240.0;
+/// US-040 맞은 스켈레톤이 반짝이는 시간 (초)
+pub const SKELETON_HIT_FLASH_SECONDS: f32 = ZOMBIE_HIT_FLASH_SECONDS;
+/// US-049 튕겨 오는 공격이 이만큼 가까워지면 점프한다 (픽셀).
+/// D36 둔하게: 52보다 작으면 총알은 늘 맞고, 30보다 크면 화살은 멀리서 튕겨 오면 피한다.
+/// 상자 바로 옆에 선 스켈레톤은 화살도 맞는다.
+pub const SKELETON_DODGE_SENSE_DISTANCE: f32 = 40.0;
+/// US-049 피할 때 뛰어오르는 속도 (초당 픽셀). 발이 화살 높이보다 높이 올라가야 한다.
+pub const SKELETON_DODGE_JUMP_SPEED: f32 = 560.0;
+
+/// US-046 화살 쏘는 간격(초), 속도(초당 픽셀), 길이(픽셀)
+pub const ARROW_INTERVAL_SECONDS: f32 = 3.0;
+pub const ARROW_SPEED: f32 = 240.0;
+pub const ARROW_WIDTH: f32 = 24.0;
+/// US-048 총알 쏘는 간격(초), 속도(초당 픽셀), 길이(픽셀). 화살보다 빠르다.
+pub const BULLET_INTERVAL_SECONDS: f32 = 2.0;
+pub const BULLET_SPEED: f32 = 420.0;
+pub const BULLET_WIDTH: f32 = 12.0;
+/// M5 화살·총알의 두께 (픽셀)
+pub const PROJECTILE_HEIGHT: f32 = 6.0;
+/// US-049 화살·총알 가운데가 땅에서 떠 있는 높이 (픽셀).
+/// 작은 상자(48)보다 높고 큰 상자(64)보다 낮아서, 작은 상자는 넘어가고 큰 상자에서는 튕긴다.
+pub const PROJECTILE_FLIGHT_HEIGHT: f32 = 56.0;
+/// US-049 튕긴 공격이 사라질 때까지 날아가는 거리 (픽셀)
+pub const PROJECTILE_BOUNCED_RANGE: f32 = 400.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +221,10 @@ mod tests {
         assert_eq!(PLAYER_HP_PER_LEVEL, 5);
         assert_eq!(ZOMBIE_HP, 3);
         assert_eq!(ZOMBIE_ATTACK, 2);
+        assert_eq!(EXPERIENCE_PER_LEVEL, 5);
+        assert_eq!(SKELETON_HP, 3);
+        assert_eq!((SKELETON_HALF_MIN_LEVEL, SKELETON_FULL_MIN_LEVEL), (2, 3));
+        assert_eq!((SKELETON_NORMAL_ATTACK, SKELETON_HALF_ATTACK, SKELETON_FULL_ATTACK), (2, 3, 4));
         assert_eq!(COIN_MAX, 5000);
         assert_eq!(COIN_RESPAWN_SECONDS, 10.0);
         assert_eq!(DEV_FAST_FORWARD_SCALE, 10.0);

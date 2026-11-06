@@ -1,12 +1,12 @@
 //! 정보판(HUD): 화면 맨 위에 크게. 왼쪽 = 시간대 이름 + 24시간 시계(HH:MM, D14), 가운데 = N일째 · 버틴 날, 오른쪽 = 코인.
-//! 정보판 줄 바로 아래: 왼쪽에 체력 하트와 숫자(D2), 오른쪽에 빨리감기(D12)가 켜져 있으면 "빨리감기 x10" 판.
+//! 정보판 줄 바로 아래: 왼쪽에 체력 하트와 숫자(D2), 가운데에 빨리감기(D12)가 켜져 있으면 "빨리감기 x10" 판, 오른쪽에 레벨과 경험치 칸(D35).
 //! 값은 모두 logic(clock, wallet, health)이 준 그대로 보여 준다.
 
 use super::coin::draw_coin;
 use super::screen::VIRTUAL_WIDTH;
 use super::text::TextPainter;
 use super::touch::draw_star;
-use crate::config::{DAY_PERIODS, DEV_FAST_FORWARD_SCALE};
+use crate::config::{DAY_PERIODS, DEV_FAST_FORWARD_SCALE, EXPERIENCE_PER_LEVEL};
 use crate::logic::clock::{Clock, Phase};
 use macroquad::prelude::*;
 
@@ -30,10 +30,12 @@ const PANEL_PAD_RIGHT: f32 = 20.0;
 /// 빨리감기 판: 정보판 줄 바로 아래. 개발용이고 판이 위에 그려져서 지나가는 해와 겹쳐도 글자는 보인다.
 const FAST_PANEL_TOP: f32 = PANEL_TOP + PANEL_HEIGHT + 8.0;
 const FAST_PANEL_HEIGHT: f32 = 48.0;
-const FAST_PANEL_RIGHT: f32 = 775.0;
+const FAST_PANEL_RIGHT: f32 = 770.0;
 const FAST_ICON_H: f32 = 24.0;
 const FAST_PAD_LEFT: f32 = 20.0;
 const FAST_ICON_TEXT_GAP: f32 = 12.0;
+/// 체력 판과 레벨 판 사이에 들어가도록 다른 글자보다 조금 작게
+const FAST_TEXT: f32 = 28.0;
 
 /// 체력 판: 빨리감기 판과 같은 줄, 터치 "고르기" 버튼(x 12~168)의 오른쪽.
 const HEALTH_LEFT: f32 = 180.0;
@@ -45,6 +47,14 @@ const HEART_MAX_STEP: f32 = 28.0;
 const HEART_FULL: Color = Color::new(0.96, 0.27, 0.38, 1.0);
 const HEART_EMPTY: Color = Color::new(0.0, 0.0, 0.0, 0.35);
 const HEART_SPARKLE: Color = Color::new(1.0, 0.96, 0.70, 1.0);
+
+/// 레벨 판: 빨리감기 판 오른쪽, 화면 오른쪽 끝에 붙는다. 칸 하나가 경험치 1이다.
+const LEVEL_TEXT: f32 = 30.0;
+const LEVEL_PAD: f32 = 14.0;
+const LEVEL_TEXT_GAP: f32 = 8.0;
+const EXPERIENCE_STEP: f32 = 11.0;
+const EXPERIENCE_RADIUS: f32 = 4.5;
+const EXPERIENCE_FULL: Color = Color::new(1.0, 0.86, 0.22, 1.0);
 
 /// 시각(00:00부터 분) → 시간대 이름 (D31, `config::DAY_PERIODS` 표).
 pub fn period_name(minutes: u32) -> &'static str {
@@ -143,6 +153,22 @@ pub fn draw_health(text: &TextPainter, hp: u32, max_hp: u32, sparkle: f32) {
     text.left(&label, HEALTH_LEFT + HEALTH_PAD + hearts_w + HEALTH_TEXT_GAP, mid_y + 11.0, MID_TEXT, WHITE);
 }
 
+/// 레벨 판: "레벨 N" + 경험치 칸 (`EXPERIENCE_PER_LEVEL`칸 중 `experience`칸이 찬다).
+pub fn draw_level(text: &TextPainter, level: u32, experience: u32) {
+    let label = format!("레벨 {level}");
+    let label_w = text.width(&label, LEVEL_TEXT);
+    let w = LEVEL_PAD + label_w + LEVEL_TEXT_GAP + EXPERIENCE_STEP * EXPERIENCE_PER_LEVEL as f32 + LEVEL_PAD;
+    let x = VIRTUAL_WIDTH - MARGIN - w;
+    let mid_y = FAST_PANEL_TOP + FAST_PANEL_HEIGHT / 2.0;
+    draw_pill(x, FAST_PANEL_TOP, w, FAST_PANEL_HEIGHT, PANEL);
+    text.left(&label, x + LEVEL_PAD, mid_y + 10.0, LEVEL_TEXT, WHITE);
+    let first = x + LEVEL_PAD + label_w + LEVEL_TEXT_GAP + EXPERIENCE_STEP / 2.0;
+    for i in 0..EXPERIENCE_PER_LEVEL {
+        let color = if i < experience { EXPERIENCE_FULL } else { HEART_EMPTY };
+        draw_circle(first + EXPERIENCE_STEP * i as f32, mid_y, EXPERIENCE_RADIUS, color);
+    }
+}
+
 pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: bool) {
     let mid_y = PANEL_TOP + PANEL_HEIGHT / 2.0;
     let baseline = PANEL_TOP + TEXT_BASELINE;
@@ -183,12 +209,12 @@ pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: boo
         let label = format!("빨리감기 x{}", DEV_FAST_FORWARD_SCALE as u32);
         // 다른 정보판처럼 반투명 남색 판 위에: 낮·노을 하늘에서도 또렷하게.
         let icon_w = FAST_ICON_H * 1.4;
-        let w = FAST_PAD_LEFT + icon_w + FAST_ICON_TEXT_GAP + text.width(&label, MID_TEXT) + PANEL_PAD_RIGHT;
+        let w = FAST_PAD_LEFT + icon_w + FAST_ICON_TEXT_GAP + text.width(&label, FAST_TEXT) + PANEL_PAD_RIGHT;
         let x = FAST_PANEL_RIGHT - w;
         let fast_mid_y = FAST_PANEL_TOP + FAST_PANEL_HEIGHT / 2.0;
         draw_pill(x, FAST_PANEL_TOP, w, FAST_PANEL_HEIGHT, PANEL);
         draw_fast_icon(x + FAST_PAD_LEFT, fast_mid_y, FAST_ICON_H, FAST_COLOR);
-        text.left(&label, x + FAST_PAD_LEFT + icon_w + FAST_ICON_TEXT_GAP, fast_mid_y + 11.0, MID_TEXT, WHITE);
+        text.left(&label, x + FAST_PAD_LEFT + icon_w + FAST_ICON_TEXT_GAP, fast_mid_y + 9.0, FAST_TEXT, WHITE);
     }
 }
 
@@ -229,7 +255,7 @@ mod tests {
     #[test]
     fn hearts_fit_as_max_health_grows() {
         assert_eq!(heart_step(7), HEART_MAX_STEP);
-        for max_hp in [7, 12, 17, 100] {
+        for max_hp in [7, 12, 17, 22, 27, 100] {
             assert!(heart_step(max_hp) * max_hp as f32 <= HEARTS_MAX_WIDTH + 0.01, "{max_hp}");
         }
     }

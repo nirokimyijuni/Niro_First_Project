@@ -10,7 +10,8 @@ cd "$ROOT/game"
 cargo test
 cargo build --release --target wasm32-unknown-unknown
 
-WASM="$ROOT/game/target/wasm32-unknown-unknown/release/miss-game.wasm"
+# 상대 경로면 cargo처럼 지금 위치(game/) 기준이다. 아래 cp까지 cd 하지 않는다.
+WASM="${CARGO_TARGET_DIR:-$ROOT/game/target}/wasm32-unknown-unknown/release/miss-game.wasm"
 DIST="$ROOT/dist"
 
 rm -rf "$DIST"

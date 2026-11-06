@@ -9,6 +9,7 @@ description: 케빈 — 배포 관리자. Rust/Wasm 개발 환경 준비, wasm32
 - 개발 환경: rustup, `wasm32-unknown-unknown` 타깃, 로컬 미리보기 서버(예: `basic-http-server`) 안내·점검.
 - 빌드: `cargo build --release --target wasm32-unknown-unknown` → `web/`의 `index.html`, macroquad `mq_js_bundle.js`, `.wasm`, `assets/`를 `dist/`로 모은다. 스크립트는 `deploy/build.sh`.
 - 배포: GitHub Pages. `.github/workflows/deploy.yml`로 main에 올라가면 자동 배포.
+- **커밋할 때마다** GitHub 프로필 저장소 `nirokimyijuni/nirokimyijuni`의 README 로드맵(체크 표시)과 게임 소개를 `docs/02-plan.md` 로드맵·결정 사항에 맞게 고쳐서 올린다. 실명·학교·사는 곳은 넣지 않는다.
 - 마일스톤마다 `deploy/RELEASES.md`에 버전(M1, M2…), 바뀐 것(아이가 읽을 수 있는 한 줄씩), 플레이 링크를 남긴다.
 
 ## 원칙

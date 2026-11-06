@@ -4,7 +4,7 @@
 //! 왼쪽 위가 (0, 0)이고 아래로 갈수록 y가 커진다. 그래서 발 위치는 `pos.y + size.y`.
 
 use super::character::CharacterKind;
-use super::world::World;
+use super::world::{really_overlaps, World};
 use crate::config::{
     GRAVITY, MAX_FALL_SPEED, PHYSICS_STEP_SECONDS, PLAYER_EDGE_SLIDE_SPEED, PLAYER_HEIGHT,
     PLAYER_JUMP_SPEED, PLAYER_WALK_SPEED, PLAYER_WIDTH,
@@ -124,7 +124,7 @@ impl Player {
         self.pos.x = self.pos.x.clamp(0.0, world.width - self.size.x);
         // 상자 옆면
         for wall in &world.obstacles {
-            if overlaps(self.rect(), *wall) {
+            if really_overlaps(self.rect(), *wall) {
                 if self.vel.x > 0.0 {
                     self.pos.x = wall.x - self.size.x; // 상자 왼쪽 면에 막힘
                 } else if self.vel.x < 0.0 {
@@ -138,19 +138,22 @@ impl Player {
         self.on_ground = false;
         // 상자 윗면(올라섬) / 아랫면(머리 박음)
         for block in &world.obstacles {
-            if overlaps(self.rect(), *block) {
+            if really_overlaps(self.rect(), *block) {
                 if self.vel.y > 0.0 {
                     self.pos.y = block.y - self.size.y;
                     self.vel.y = 0.0;
                     // 몸 가운데가 윗면 위(끝 포함)일 때만 선다. 밖이면 바깥쪽으로 미끄러져 떨어진다.
-                    // shortcut: 상자끼리 붙어 있거나 틈이 캐릭터보다 좁으면 못 빠져나간다, 그런 맵을 만들 때 고친다.
+                    // 높이가 같게 붙은 상자는 이어진 바닥이라 옆 상자 위여도 선다.
+                    // shortcut: 틈이 캐릭터보다 좁으면 못 빠져나간다, 지금은 World::with_random_boxes가 그런 틈을 안 만든다.
                     let center_x = self.pos.x + self.size.x / 2.0;
-                    if center_x < block.x {
-                        self.pos.x -= PLAYER_EDGE_SLIDE_SPEED * step;
-                    } else if center_x > block.x + block.w {
-                        self.pos.x += PLAYER_EDGE_SLIDE_SPEED * step;
-                    } else {
+                    let is_over_a_top =
+                        world.obstacles.iter().any(|b| b.y == block.y && b.x <= center_x && center_x <= b.x + b.w);
+                    if is_over_a_top {
                         self.on_ground = true;
+                    } else if center_x < block.x {
+                        self.pos.x -= PLAYER_EDGE_SLIDE_SPEED * step;
+                    } else {
+                        self.pos.x += PLAYER_EDGE_SLIDE_SPEED * step;
                     }
                 } else if self.vel.y < 0.0 {
                     self.pos.y = block.y + block.h;
@@ -165,12 +168,6 @@ impl Player {
             self.on_ground = true;
         }
     }
-}
-
-/// 두 네모가 정말로 겹치는지. 모서리끼리 딱 닿기만 한 건 겹친 게 아니다
-/// (그래야 상자 위에 서서 옆으로 걸어도 "옆면에 막힘"으로 오해하지 않는다).
-fn overlaps(a: Rect, b: Rect) -> bool {
-    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
 #[cfg(test)]

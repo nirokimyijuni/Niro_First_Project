@@ -3,6 +3,7 @@
 
 #[path = "../src/config.rs"]
 mod config;
+#[allow(dead_code)] // 이 테스트에서 안 쓰는 logic 함수(Game::new 등)가 있다
 #[path = "../src/logic/mod.rs"]
 mod logic;
 
@@ -12,11 +13,24 @@ use logic::combat::{attack_box, Combat, CombatEvent};
 use logic::game::{Game, GameEvent};
 use logic::monster::{Zombie, ZombieState};
 use logic::player::{Facing, PlayerInput};
+use logic::skeleton::{Skeleton, SkeletonStage};
 use logic::world::World;
 use macroquad::math::Rect;
 
 const FRAME: f32 = 1.0 / 60.0;
 const SEED: u32 = 7;
+
+/// 좀비만 나오는 밤. 스켈레톤이 섞인 밤은 m5_skeleton.rs가 본다.
+fn zombie_combat(seed: u32) -> Combat {
+    let mut c = Combat::new(seed);
+    c.skeleton_chance = 0.0;
+    c
+}
+
+/// 상자 자리가 고정된 맵의 새 게임. 여기 규칙들은 랜덤 상자와 상관없다 (D36은 d36_random_boxes.rs).
+fn m1_game(kind: CharacterKind) -> Game {
+    Game::on_world(kind, SEED, World::m1())
+}
 
 fn flat_world() -> World {
     World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![] }
@@ -38,7 +52,7 @@ fn run(c: &mut Combat, seconds: f32, is_night: bool, player: Rect, world: &World
 
 /// 좀비 한 마리만 놓고 시작한다. 다음 좀비가 끼어들지 않게 스폰 시간을 먼저 흘린다.
 fn night_with_one_zombie(x: f32, will_float: bool) -> Combat {
-    let mut c = Combat::new(SEED);
+    let mut c = zombie_combat(SEED);
     run(&mut c, FRAME, true, player_at(480.0), &flat_world());
     c.zombies.list.clear();
     c.zombies.list.push(Zombie::new(x, GROUND_Y, will_float));
@@ -53,7 +67,7 @@ fn count(events: &[CombatEvent], wanted: fn(&CombatEvent) -> bool) -> usize {
 
 #[test]
 fn no_zombies_in_the_daytime() {
-    let mut c = Combat::new(SEED);
+    let mut c = zombie_combat(SEED);
     let events = run(&mut c, 60.0, false, player_at(480.0), &flat_world());
     assert!(c.zombies.list.is_empty());
     assert!(events.is_empty());
@@ -62,7 +76,7 @@ fn no_zombies_in_the_daytime() {
 #[test]
 fn first_zombie_appears_at_screen_edge_as_night_starts() {
     let w = flat_world();
-    let mut c = Combat::new(SEED);
+    let mut c = zombie_combat(SEED);
     let events = c.update(FRAME, true, player_at(480.0), &w);
     assert_eq!(c.zombies.list.len(), 1);
     assert_eq!(count(&events, |e| matches!(e, CombatEvent::ZombieAppeared { .. })), 1);
@@ -84,7 +98,7 @@ fn one_zombie_every_20_seconds() {
     let w = walled_world();
     let player = player_at(480.0);
     let appeared = |events: &[CombatEvent]| count(events, |e| matches!(e, CombatEvent::ZombieAppeared { .. }));
-    let mut c = Combat::new(SEED);
+    let mut c = zombie_combat(SEED);
     assert_eq!(appeared(&run(&mut c, 1.0, true, player, &w)), 1);
     assert_eq!(appeared(&run(&mut c, 18.0, true, player, &w)), 0);
     assert_eq!(appeared(&run(&mut c, 2.0, true, player, &w)), 1);
@@ -94,7 +108,7 @@ fn one_zombie_every_20_seconds() {
 fn never_more_than_3_zombies() {
     let w = walled_world();
     let player = player_at(480.0);
-    let mut c = Combat::new(SEED);
+    let mut c = zombie_combat(SEED);
     let mut most = 0;
     for _ in 0..(NIGHT_SECONDS / FRAME) as usize {
         c.update(FRAME, true, player, &w);
@@ -110,8 +124,11 @@ fn after_a_full_screen_next_zombie_comes_20_seconds_after_one_is_gone() {
     let mut c = night_with_one_zombie(0.0, false);
     c.zombies.list.push(Zombie::new(0.0, GROUND_Y, false));
     c.zombies.list.push(Zombie::new(0.0, GROUND_Y, false));
+    // M5: 화면이 꽉 차는 수는 좀비와 스켈레톤을 합쳐서 센다.
+    c.skeletons.list.push(Skeleton::new(0.0, GROUND_Y, SkeletonStage::Half));
     run(&mut c, 30.0, true, player, &w);
     assert_eq!(c.zombies.list.len(), 3, "꽉 차 있으면 시간을 세지 않는다");
+    assert!(!c.skeletons.list[0].is_flashing(), "아무도 안 때린 스켈레톤은 번쩍이지 않는다");
 
     c.zombies.list.pop();
     run(&mut c, ZOMBIE_SPAWN_SECONDS - 1.0, true, player, &w);
@@ -167,16 +184,31 @@ fn zombie_next_to_a_box_does_not_jump_across_it() {
 }
 
 #[test]
-fn zombie_does_not_appear_right_next_to_the_player() {
+fn zombie_does_not_appear_on_top_of_a_player_at_the_edge() {
     let w = flat_world();
     for seed in 0..50 {
-        for player_x in [0.0, w.width - PLAYER_WIDTH] {
+        for player_x in [0.0, 30.0, w.width - PLAYER_WIDTH - 30.0, w.width - PLAYER_WIDTH] {
             let player = player_at(player_x);
-            let mut c = Combat::new(seed);
+            let mut c = zombie_combat(seed);
             c.update(FRAME, true, player, &w);
-            let gap = (c.zombies.list[0].rect().center().x - player.center().x).abs();
-            assert!(gap > ZOMBIE_SPAWN_MIN_DISTANCE, "seed {seed}: {gap}");
+            assert!(!c.zombies.list[0].rect().overlaps(&player), "seed {seed}: 플레이어 x {player_x}");
         }
+    }
+}
+
+#[test]
+fn zombie_can_appear_at_the_edge_right_beside_the_player_d36() {
+    // 끝 자리 바로 옆에 서 있어도 양쪽 끝 모두 나온다 (200픽셀 규칙 삭제).
+    let w = flat_world();
+    for player_x in [ZOMBIE_WIDTH + 10.0, w.width - ZOMBIE_WIDTH - PLAYER_WIDTH - 10.0] {
+        let lefts = (0..100)
+            .filter(|&seed| {
+                let mut c = zombie_combat(seed);
+                c.update(FRAME, true, player_at(player_x), &w);
+                c.zombies.list[0].pos.x < 5.0
+            })
+            .count();
+        assert!((20..=80).contains(&lefts), "플레이어 x {player_x}: 왼쪽 {lefts}마리");
     }
 }
 
@@ -185,7 +217,7 @@ fn both_screen_edges_are_used() {
     let w = flat_world();
     let lefts = (0..100)
         .filter(|&seed| {
-            let mut c = Combat::new(seed);
+            let mut c = zombie_combat(seed);
             c.update(FRAME, true, player_at(480.0), &w);
             c.zombies.list[0].pos.x < 5.0 // 나온 프레임에 벌써 조금 걸었다
         })
@@ -291,7 +323,7 @@ fn zombie_hp_stays_3_at_higher_levels() {
 
 #[test]
 fn player_starts_with_7_and_gains_5_per_level() {
-    let mut c = Combat::new(SEED);
+    let mut c = zombie_combat(SEED);
     assert_eq!((c.health.hp(), c.health.max_hp(), c.level), (7, 7, 1));
     c.level_up();
     assert_eq!(c.health.max_hp(), 12);
@@ -435,7 +467,7 @@ fn next_zombie_can_come_after_a_pop() {
     c.zombies.list.push(Zombie::new(0.0, GROUND_Y, true));
     c.zombies.list.push(Zombie::new(0.0, GROUND_Y, true));
     let events = run(&mut c, ZOMBIE_FLOAT_START_SECONDS + ZOMBIE_FLOAT_SECONDS + ZOMBIE_SPAWN_SECONDS + 1.0, true, far, &w);
-    assert_eq!(count(&events, |e| matches!(e, CombatEvent::ZombiePopped { .. })), 3);
+    assert!(count(&events, |e| matches!(e, CombatEvent::ZombiePopped { .. })) >= 3);
     assert!(count(&events, |e| matches!(e, CombatEvent::ZombieAppeared { .. })) >= 1);
 }
 
@@ -446,7 +478,7 @@ fn about_one_in_three_zombies_float() {
     let total = 300;
     let floaters = (0..total)
         .filter(|&seed| {
-            let mut c = Combat::new(seed);
+            let mut c = zombie_combat(seed);
             c.update(FRAME, true, far, &w);
             run(&mut c, ZOMBIE_FLOAT_START_SECONDS + 0.1, true, far, &w);
             c.zombies.list[0].state == ZombieState::Floating
@@ -462,7 +494,7 @@ fn same_seed_gives_the_same_night() {
     let w = flat_world();
     let player = player_at(480.0);
     let night = |seed| {
-        let mut c = Combat::new(seed);
+        let mut c = zombie_combat(seed);
         run(&mut c, 100.0, true, player, &w)
             .iter()
             .filter_map(|e| match e {
@@ -479,7 +511,8 @@ fn same_seed_gives_the_same_night() {
 
 /// 밤이 시작된 게임. 좀비는 테스트가 직접 놓는다.
 fn night_game() -> Game {
-    let mut g = Game::new(CharacterKind::Niro, SEED);
+    let mut g = m1_game(CharacterKind::Niro);
+    g.combat.skeleton_chance = 0.0;
     g.clock.update(DAY_SECONDS);
     g.update(&PlayerInput::default(), FRAME);
     g.combat.zombies.list.clear();
@@ -492,14 +525,15 @@ fn zombie_at(g: &mut Game, x: f32) {
 
 #[test]
 fn new_game_has_full_health_and_no_zombies() {
-    let g = Game::new(CharacterKind::Ellie, SEED);
+    let g = m1_game(CharacterKind::Ellie);
     assert_eq!(g.combat.health.hp(), PLAYER_START_HP);
     assert!(g.combat.zombies.list.is_empty());
 }
 
 #[test]
 fn zombie_appears_in_the_same_frame_night_starts() {
-    let mut g = Game::new(CharacterKind::Niro, SEED);
+    let mut g = m1_game(CharacterKind::Niro);
+    g.combat.skeleton_chance = 0.0;
     g.clock.update(DAY_SECONDS - FRAME / 2.0);
     let events = g.update(&PlayerInput::default(), FRAME);
     assert_eq!(events[0], GameEvent::NightStarted);

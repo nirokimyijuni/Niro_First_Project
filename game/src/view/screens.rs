@@ -7,15 +7,16 @@ use super::assets::{height_with_antenna, Assets};
 use super::coin::draw_coins;
 use super::effects::Effects;
 use super::gameover::{draw_down_panel, draw_fallen_player, DownScreen};
-use super::hud::{draw_health, draw_hud};
+use super::hud::{draw_health, draw_hud, draw_level};
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
-use super::sprites::{self, draw_character, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
+use super::sprites::{self, draw_character, draw_projectile, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
 use crate::logic::monster::ZombieState;
 use crate::logic::player::{Facing, Motion};
+use crate::logic::skeleton::SkeletonState;
 use macroquad::prelude::*;
 
 // ---- 색 ----
@@ -285,6 +286,35 @@ fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
     }
 }
 
+/// 스켈레톤: 플레이어 쪽을 보고, 걸을 때 통통, 서 있으면 숨쉬기, 피할 때 뒤로 젖히고, 맞으면 번쩍.
+/// 좀비와 같은 밤 색을 받고, 쓰러진 화면에서는 멈춘다.
+fn draw_skeletons(assets: &Assets, game: &Game, tint: Color) {
+    let frozen = game.combat.health.is_down();
+    let player_x = game.player.rect().center().x;
+    for (i, skeleton) in game.combat.skeletons.list.iter().enumerate() {
+        let (picture, flash) = assets.skeleton(skeleton.stage);
+        let height = sprites::skeleton_sprite_height(skeleton.stage);
+        let r = skeleton.rect();
+        let t = if frozen { 0.0 } else { time() + i as f32 * 0.37 };
+        let player_on_left = player_x < r.center().x;
+        let pose = match skeleton.state {
+            SkeletonState::Walking => sprites::pose(Motion::Walk, t, false),
+            SkeletonState::Standing => sprites::pose(Motion::Idle, t, false),
+            SkeletonState::Dodging => {
+                let lean = if player_on_left { sprites::DODGE_LEAN } else { -sprites::DODGE_LEAN };
+                sprites::Pose { tilt: lean, ..sprites::pose(Motion::Jump, t, true) }
+            }
+        };
+        // `draw_character`는 Left일 때 뒤집으니, 왼쪽을 보는 그림은 반대로 준다.
+        let facing = if player_on_left != sprites::skeleton_art_faces_left(skeleton.stage) { Facing::Left } else { Facing::Right };
+        let feet = vec2(feet_x_on_screen(r.center().x, max_half_width(picture, height)), r.y + r.h);
+        draw_character(picture, feet, height, facing, pose, tint);
+        if skeleton.is_flashing() {
+            draw_character(flash, feet, height, facing, pose, ZOMBIE_FLASH);
+        }
+    }
+}
+
 /// `touch_mode`면 키보드 안내 글자는 숨긴다 (터치 조이스틱·버튼은 main이 위에 그린다).
 /// `down`이 있으면 쓰러진 화면이다.
 pub fn draw_play(
@@ -311,6 +341,7 @@ pub fn draw_play(
     let feet = vec2(feet_x_on_screen(r.x + r.w / 2.0, half), r.y + r.h);
     let tint = mix(WHITE, CHARACTER_NIGHT_TINT, d);
     draw_zombies(assets, game, tint);
+    draw_skeletons(assets, game, tint);
     if let Some(down) = down {
         draw_fallen_player(texture, player, &game.world, feet.x, height, tint, down.seconds);
     } else {
@@ -320,9 +351,11 @@ pub fn draw_play(
         draw_character(texture, feet, height, player.facing, pose, player_tint);
     }
 
+    game.combat.skeletons.projectiles.iter().for_each(draw_projectile);
     effects.draw(text, r, player.facing);
     draw_hud(text, &game.clock, game.wallet.coins(), fast_forward);
     draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
+    draw_level(text, game.combat.level, game.combat.experience);
     if !touch_mode && down.is_none() {
         text.centered("화살표: 걷기   Space: 점프   X: 공격   Esc: 캐릭터 고르기", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }

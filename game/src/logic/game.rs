@@ -1,4 +1,4 @@
-//! 게임 한 판의 상태를 한데 묶는다: 플레이어, 맵, 낮/밤 시계, 코인, 지갑, 싸움(체력·좀비).
+//! 게임 한 판의 상태를 한데 묶는다: 플레이어, 맵, 낮/밤 시계, 코인, 지갑, 싸움(체력·레벨·몬스터).
 //! Esc로 나갔다가 새 게임을 하면 `Game::new`로 새로 만든다.
 
 
@@ -20,7 +20,7 @@ pub enum GameEvent {
     DayStarted { day_number: u32 },
     /// 코인을 주웠다 (`count`개, 보통 1).
     CoinsPicked { count: u32 },
-    /// 좀비·체력에 생긴 일.
+    /// 몬스터·체력·레벨에 생긴 일.
     Combat(CombatEvent),
 }
 
@@ -35,9 +35,13 @@ pub struct Game {
 
 impl Game {
     /// 고른 캐릭터로 새 게임. 1일째 낮, 코인 0개, 상자마다 코인 하나.
-    /// `seed`가 같으면 좀비가 나오는 쪽과 날아오르는 좀비가 늘 똑같다.
+    /// `seed`가 같으면 상자 배치와 나오는 몬스터, 나오는 쪽, 날아오르는 좀비가 늘 똑같다.
     pub fn new(kind: CharacterKind, seed: u32) -> Game {
-        let world = World::m1();
+        Game::on_world(kind, seed, World::with_random_boxes(seed))
+    }
+
+    /// 정해진 맵으로 새 게임. 테스트는 `World::m1()`을 넣어 상자 자리를 고정한다.
+    pub fn on_world(kind: CharacterKind, seed: u32, world: World) -> Game {
         let spawn = Vec2::new(PLAYER_SPAWN_X, world.ground_y - PLAYER_HEIGHT);
         Game {
             player: Player::new(kind, spawn),
@@ -76,7 +80,7 @@ impl Game {
         events
     }
 
-    /// 공격 버튼을 처리하고 좀비 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
+    /// 공격 버튼을 처리하고 몬스터 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
     /// 이번 프레임의 낮/밤을 본다. 빨리감기여도 `dt`는 진짜 시간이다 (D13: 빨라지는 건 시계·코인뿐).
     pub fn update_combat(&mut self, input: &PlayerInput, dt: f32, events: &mut Vec<GameEvent>) {
         let player_rect = self.player.rect();
@@ -92,10 +96,16 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{COIN_RESPAWN_SECONDS, DAY_SECONDS};
+    use crate::config::{COIN_RESPAWN_SECONDS, DAY_SECONDS, GROUND_Y, WORLD_WIDTH};
+    use macroquad::math::Rect;
 
     const FRAME: f32 = 1.0 / 60.0;
     const SEED: u32 = 7;
+
+    /// 상자 자리가 고정된 맵의 새 게임. 여기 규칙들은 랜덤 상자와 상관없다 (D36은 d36_random_boxes.rs).
+    fn m1_game(kind: CharacterKind) -> Game {
+        Game::on_world(kind, SEED, World::m1())
+    }
 
     fn no_input() -> PlayerInput {
         PlayerInput::default()
@@ -111,7 +121,7 @@ mod tests {
 
     #[test]
     fn new_game_starts_fresh() {
-        let g = Game::new(CharacterKind::Ellie, SEED);
+        let g = m1_game(CharacterKind::Ellie);
         assert_eq!(g.player.kind, CharacterKind::Ellie);
         assert_eq!(g.clock.day_number(), 1);
         assert!(!g.clock.is_night());
@@ -123,7 +133,7 @@ mod tests {
     #[test]
     fn walking_on_ground_does_not_pick_coins() {
         // 상자 옆을 땅으로 걷기만 하면 코인에 안 닿는다 (상자에 막힐 때까지 밀어 본다).
-        let mut g = Game::new(CharacterKind::Niro, SEED);
+        let mut g = m1_game(CharacterKind::Niro);
         let events = run(&mut g, PlayerInput { right: true, ..Default::default() }, 120);
         assert!(g.player.on_ground);
         assert_eq!(g.wallet.coins(), 0);
@@ -133,7 +143,7 @@ mod tests {
     #[test]
     fn standing_on_a_box_touches_its_coin() {
         // 진짜 Player 움직임으로: 첫 상자 앞에서 점프해 올라서기.
-        let mut g = Game::new(CharacterKind::Niro, SEED);
+        let mut g = m1_game(CharacterKind::Niro);
         let box_ = g.world.obstacles[0];
         g.player.pos.x = box_.x - 100.0;
         run(&mut g, no_input(), 10);
@@ -158,7 +168,7 @@ mod tests {
 
     #[test]
     fn standing_still_on_box_coin_stays_at_most_one_per_10_seconds() {
-        let mut g = Game::new(CharacterKind::Logan, SEED);
+        let mut g = m1_game(CharacterKind::Logan);
         let box_ = g.world.obstacles[0];
         // 상자 위에 떨어뜨린다.
         g.player.pos = Vec2::new(box_.x, box_.y - 200.0);
@@ -169,7 +179,10 @@ mod tests {
 
     #[test]
     fn clock_events_come_through_game() {
-        let mut g = Game::new(CharacterKind::Niro, SEED);
+        // 벽 사이에 넣는다. 밤새 서 있으면 왼쪽 끝 몬스터가 찾아와 쓰러진다 (D36).
+        let wall = |x| Rect::new(x, 0.0, 10.0, GROUND_Y);
+        let walled = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![wall(100.0), wall(180.0)] };
+        let mut g = Game::on_world(CharacterKind::Niro, SEED, walled);
         let events = g.update(&no_input(), DAY_SECONDS);
         assert!(events.contains(&GameEvent::NightStarted));
         assert!(g.clock.is_night());

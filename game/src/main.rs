@@ -81,6 +81,14 @@ fn update_with_time_scale(game: &mut Game, input: &PlayerInput, dt: f32, time_sc
     events
 }
 
+/// 버틴 날이 최고 기록보다 크면 기록을 올리고 저장한다 (US-044, D35: 쓰러질 때도, 나갈 때도).
+fn keep_record(days: u32, best_days: &mut u32) {
+    if days > *best_days {
+        *best_days = days;
+        view::web::save_best_days(days);
+    }
+}
+
 fn window_conf() -> Conf {
     Conf {
         window_title: "미스 찾기".to_owned(),
@@ -162,6 +170,7 @@ async fn main() {
                         screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
                     });
                     if menu.back || touched.back_pressed || retry {
+                        keep_record(game.clock.nights_survived(), &mut best_days);
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
                     } else {
                         if fast_forward_pressed() {
@@ -185,12 +194,9 @@ async fn main() {
                                     effects.pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
                                 }
                                 GameEvent::Combat(CombatEvent::PlayerDown) => {
-                                    let screen = DownScreen::new(game.clock.nights_survived(), best_days);
-                                    if screen.new_record {
-                                        best_days = screen.best;
-                                        view::web::save_best_days(best_days);
-                                    }
-                                    *down = Some(screen);
+                                    let days = game.clock.nights_survived();
+                                    *down = Some(DownScreen::new(days, best_days));
+                                    keep_record(days, &mut best_days);
                                 }
                                 GameEvent::Combat(combat) => effects.on_combat(combat),
                                 GameEvent::NightStarted | GameEvent::DayStarted { .. } => {}
@@ -238,9 +244,15 @@ async fn main() {
 mod tests {
     use super::*;
     use config::{COIN_RESPAWN_SECONDS, DAY_SECONDS, DEV_FAST_FORWARD_SCALE, PLAYER_WALK_SPEED};
+    use logic::world::World;
 
     const FRAME: f32 = 1.0 / 60.0;
     const SEED: u32 = 7;
+
+    /// 상자 자리가 고정된 맵의 새 게임. 여기 규칙들은 랜덤 상자와 상관없다 (D36은 d36_random_boxes.rs).
+    fn m1_game(kind: CharacterKind) -> Game {
+        Game::on_world(kind, SEED, World::m1())
+    }
 
     /// 상자 위로 올라가 코인을 줍고, 걷고, 점프하는 입력 묶음 (몇 초 동안).
     fn script(frame: usize) -> PlayerInput {
@@ -249,8 +261,8 @@ mod tests {
 
     #[test]
     fn time_scale_one_matches_game_update() {
-        let mut a = Game::new(CharacterKind::Niro, SEED);
-        let mut b = Game::new(CharacterKind::Niro, SEED);
+        let mut a = m1_game(CharacterKind::Niro);
+        let mut b = m1_game(CharacterKind::Niro);
         for f in 0..3000 {
             let input = script(f);
             let ea = a.update(&input, FRAME);
@@ -268,8 +280,8 @@ mod tests {
 
     #[test]
     fn fast_forward_speeds_clock_but_not_walking() {
-        let mut normal = Game::new(CharacterKind::Ellie, SEED);
-        let mut fast = Game::new(CharacterKind::Ellie, SEED);
+        let mut normal = m1_game(CharacterKind::Ellie);
+        let mut fast = m1_game(CharacterKind::Ellie);
         let right = PlayerInput { right: true, ..Default::default() };
         for _ in 0..60 {
             normal.update(&right, FRAME);
@@ -287,7 +299,7 @@ mod tests {
 
     #[test]
     fn fast_forward_respawns_coin_in_about_one_second() {
-        let mut g = Game::new(CharacterKind::Logan, SEED);
+        let mut g = m1_game(CharacterKind::Logan);
         let coin = g.coins.list[0].rect;
         // 코인 자리에 플레이어를 잠깐 놓아 줍게 한 뒤 멀리 치운다.
         g.player.pos = coin.point();
@@ -308,7 +320,8 @@ mod tests {
 
     /// 밤이 막 시작된 게임. 왼쪽 상자 왼쪽에 서 있어서 왼쪽 끝 좀비가 걸어올 수 있다.
     fn night_game() -> Game {
-        let mut g = Game::new(CharacterKind::Niro, SEED);
+        let mut g = m1_game(CharacterKind::Niro);
+        g.combat.skeleton_chance = 0.0;
         g.clock.update(DAY_SECONDS);
         g.player.pos.x = 230.0;
         g
@@ -333,6 +346,26 @@ mod tests {
     }
 
     #[test]
+    fn fast_forward_does_not_speed_up_skeletons_or_shots() {
+        let night_with_skeletons = || {
+            let mut g = night_game();
+            g.combat.skeleton_chance = 1.0;
+            g
+        };
+        let (mut normal, mut fast) = (night_with_skeletons(), night_with_skeletons());
+        let none = PlayerInput::default();
+        for _ in 0..(config::ARROW_INTERVAL_SECONDS / FRAME) as usize + 30 {
+            let events = normal.update(&none, FRAME);
+            let events_fast = update_with_time_scale(&mut fast, &none, FRAME, DEV_FAST_FORWARD_SCALE);
+            let combat_only = |list: Vec<GameEvent>| list.into_iter().filter(|e| matches!(e, GameEvent::Combat(_))).collect::<Vec<_>>();
+            assert_eq!(combat_only(events), combat_only(events_fast));
+        }
+        assert_eq!(normal.combat.skeletons.list[0].pos, fast.combat.skeletons.list[0].pos);
+        assert_eq!(normal.combat.skeletons.projectiles.len(), 1);
+        assert_eq!(normal.combat.skeletons.projectiles[0].pos, fast.combat.skeletons.projectiles[0].pos);
+    }
+
+    #[test]
     fn fast_forward_does_not_speed_up_zombies_d13() {
         let (mut normal, mut fast) = (night_game(), night_game());
         let none = PlayerInput::default();
@@ -347,10 +380,13 @@ mod tests {
     #[test]
     fn fast_forward_also_stops_after_going_down() {
         let mut g = night_game();
+        let mut frames = 0;
         while !g.combat.health.is_down() {
             let zombie = logic::monster::Zombie::new(g.player.pos.x, g.world.ground_y, false);
             g.combat.zombies.list = vec![zombie];
             update_with_time_scale(&mut g, &PlayerInput::default(), FRAME, DEV_FAST_FORWARD_SCALE);
+            frames += 1;
+            assert!(frames < 36_000, "10분 안에 쓰러져야 한다");
         }
         let left = g.clock.seconds_left_in_phase();
         let right = PlayerInput { right: true, ..Default::default() };
@@ -360,12 +396,22 @@ mod tests {
     }
 
     #[test]
+    fn leaving_keeps_only_a_better_record() {
+        let mut best = 3;
+        keep_record(2, &mut best);
+        assert_eq!(best, 3);
+        keep_record(4, &mut best);
+        assert_eq!(best, 4);
+    }
+
+    #[test]
     fn long_frame_is_capped() {
         // 탭에 30초 다녀와도 한 프레임은 MAX_FRAME_SECONDS까지만. 빨리감기여도 낮/밤을 건너뛰지 않는다.
         let dt = cap_frame_seconds(30.0);
         assert_eq!(dt, config::MAX_FRAME_SECONDS);
         assert!(dt * DEV_FAST_FORWARD_SCALE < config::DUSK_SECONDS);
-        let mut g = Game::new(CharacterKind::Niro, SEED);
+        let mut g = m1_game(CharacterKind::Niro);
+        g.combat.skeleton_chance = 0.0;
         let events = update_with_time_scale(&mut g, &PlayerInput::default(), dt, DEV_FAST_FORWARD_SCALE);
         assert!(events.is_empty());
         assert_eq!(g.clock.day_number(), 1);

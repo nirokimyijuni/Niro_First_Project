@@ -10,7 +10,7 @@
 //! - 그리는 일은 [`Canvas`]를 거친다: 게임에서는 GPU([`GpuCanvas`]), 테스트에서는 CPU로 PNG를 뽑아 본다.
 
 use super::screen::VIRTUAL_WIDTH;
-use crate::config::{DAY_GAME_MINUTES, DAY_START_HOUR, MINUTES_PER_GAME_DAY, NIGHT_GAME_MINUTES, NIGHT_START_HOUR};
+use crate::config::{DAY_GAME_MINUTES, DAY_START_HOUR, MINUTES_PER_GAME_DAY, NIGHT_GAME_MINUTES, NIGHT_START_HOUR, SUNSET_DARKNESS};
 use macroquad::prelude::*;
 
 // ================= 그림 값 (색·크기·빠르기) =================
@@ -136,6 +136,8 @@ const GLITTER_NIGHT: Color = Color::new(0.95, 0.93, 0.80, 0.28);
 const MENU_SUN: (f32, f32) = (870.0, 80.0);
 /// 플레이 화면 해·달이 지나는 호 (D31): 왼쪽 수평선 → 가운데 꼭대기 → 오른쪽 수평선.
 /// 꼭대기는 해 가까운 빛까지 정보판(y 66까지) 아래에 오는 높이.
+/// 이 어둠부터 해 빛무리가 줄어들기 시작한다 (18:00에 0)
+const SUN_HALO_FADE_FROM: f32 = 0.4;
 const ARC_LEFT_X: f32 = 70.0;
 const ARC_RIGHT_X: f32 = 890.0;
 const ARC_TOP_Y: f32 = 125.0;
@@ -571,6 +573,8 @@ impl Body {
 pub struct SkyLook {
     pub d: f32,
     pub dusk: f32,
+    /// 노을빛이 번지는 가운데 x
+    pub dusk_x: f32,
     pub time: f32,
     pub sun: Option<Body>,
     pub moon: Option<Body>,
@@ -580,7 +584,7 @@ impl SkyLook {
     /// 타이틀·고르기: 언제나 한낮, 해는 제자리.
     pub fn menu(time: f32) -> SkyLook {
         let sun = Body { pos: vec2(MENU_SUN.0, MENU_SUN.1), radius: SUN_RADIUS, amount: 0.0 };
-        SkyLook { d: 0.0, dusk: 0.0, time, sun: Some(sun), moon: None }
+        SkyLook { d: 0.0, dusk: 0.0, dusk_x: MENU_SUN.0, time, sun: Some(sun), moon: None }
     }
 
     /// 플레이: `minutes`(00:00부터 분)로 해·달 자리를 정한다. 바다가 나중에 그려져서 수평선 아래는 가려진다.
@@ -598,7 +602,9 @@ impl SkyLook {
             radius: MOON_RADIUS,
             amount: ramp(d, 0.3, 0.9),
         });
-        SkyLook { d, dusk: dusk_glow(d), time, sun, moon }
+        // 해가 진 저녁에는 진 자리(오른쪽), 새벽에는 곧 뜰 자리(왼쪽)에 노을빛이 남는다 (REVIEW-006 1번).
+        let no_sun_x = if minutes >= NIGHT_START_HOUR * 60 { ARC_RIGHT_X } else { ARC_LEFT_X };
+        SkyLook { d, dusk: dusk_glow(d), dusk_x: sun.map_or(no_sun_x, |s| s.pos.x), time, sun, moon }
     }
 
     fn sky_at(&self, y: f32) -> Color {
@@ -619,12 +625,10 @@ pub fn draw_sky(c: &mut impl Canvas, look: &SkyLook) {
     c.vgradient(0.0, VIRTUAL_WIDTH, &stops);
 
     // 노을·새벽: 해 쪽 수평선을 따라 따뜻한 빛이 옆으로 길게 번진다.
-    // 새벽에는 해가 아직 없으니 곧 해가 뜰 왼쪽 끝에 번진다.
     if look.dusk > 0.0 {
-        let x = look.sun.map(|s| s.pos.x).unwrap_or(ARC_LEFT_X);
         let (w, h, a) = DUSK_BAND;
         let tint = with_alpha(DUSK_SKY[2], a * look.dusk);
-        c.image(Tex::Glow, Rect::new(x - w / 2.0, HORIZON_Y - h / 2.0, w, h), tint);
+        c.image(Tex::Glow, Rect::new(look.dusk_x - w / 2.0, HORIZON_Y - h / 2.0, w, h), tint);
     }
 
     draw_stars(c, look);
@@ -659,14 +663,19 @@ pub fn draw_cloud(c: &mut impl Canvas, kind: usize, dest: Rect, tint: Color) {
     c.image(Tex::Cloud(kind), dest, tint);
 }
 
+/// 해 빛무리 세기. 해가 수평선에 잠길수록, 어두워질수록 사라진다.
+/// 뜰 때는 0에서 시작해야 06:00에 빛이 탁 켜지지 않는다. 노을(set = 1) 때는 0.25를 남기되,
+/// 해가 없어지는 18:00(`SUNSET_DARKNESS`)에는 0이 되어 빛이 뚝 꺼지지 않는다.
+fn sun_halo_fade(sun: &Body, darkness: f32) -> f32 {
+    lerp(0.25 * sun.amount, 1.0, sun.above_horizon()) * (1.0 - ramp(darkness, SUN_HALO_FADE_FROM, SUNSET_DARKNESS))
+}
+
 /// 해: 넓은 빛무리 → 가운데 빛 → 둘레 빛 → 몸통(가장자리 따뜻한 색) → 하얗게 빛나는 가운데.
 pub fn draw_sun(c: &mut impl Canvas, sun: &Body, darkness: f32) {
     let set = sun.amount;
     let r = sun.radius;
     let p = sun.pos;
-    // 해가 수평선에 잠길수록, 밤이 될수록 빛무리도 사라진다
-    // 뜰 때는 0에서 시작해야 06:00에 빛이 탁 켜지지 않는다. 노을(set = 1) 때는 0.25를 남긴다.
-    let fade = lerp(0.25 * set, 1.0, sun.above_horizon()) * (1.0 - ramp(darkness, 0.6, 1.0));
+    let fade = sun_halo_fade(sun, darkness);
     let halo = mix(SUN_HALO_DAY, SUN_HALO_SET, set);
     for (size, alpha) in [SUN_HALO_WIDE, SUN_HALO_MID, SUN_HALO_NEAR] {
         // 노을 때는 빛무리가 더 크고 진하다
@@ -945,6 +954,17 @@ mod tests {
         let mut later = GlowAboveHorizon::default();
         draw_moon(&mut later, &SkyLook::play(1.0, 19 * 60, 0.0).moon.unwrap());
         assert!(later.0 > 0.0);
+    }
+
+    #[test]
+    fn dusk_light_stays_put_when_the_sun_goes_down() {
+        // REVIEW-006 1번: 17:59와 18:00의 노을빛 자리가 같고, 해 빛무리는 18:00 전에 다 꺼진다.
+        let (before, after) = (SkyLook::play(SUNSET_DARKNESS, 17 * 60 + 59, 0.0), SkyLook::play(SUNSET_DARKNESS, 18 * 60, 0.0));
+        assert!(after.sun.is_none());
+        assert!((before.dusk_x - after.dusk_x).abs() < 2.0, "{} {}", before.dusk_x, after.dusk_x);
+        assert_eq!(sun_halo_fade(&before.sun.unwrap(), SUNSET_DARKNESS), 0.0);
+        // 새벽 노을빛은 곧 해가 뜰 왼쪽 끝이다
+        assert_eq!(SkyLook::play(0.5, 5 * 60 + 50, 0.0).dusk_x, ARC_LEFT_X);
     }
 
     // ---------- CPU 그림판: 확인용 PNG ----------

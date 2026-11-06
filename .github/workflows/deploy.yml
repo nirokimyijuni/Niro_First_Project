@@ -36,6 +36,7 @@ jobs:
 
       - name: 테스트 (실패하면 배포하지 않음)
         working-directory: game
+        timeout-minutes: 15
         run: cargo test
 
       - name: 웹 빌드 (dist/)

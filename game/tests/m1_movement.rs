@@ -365,8 +365,11 @@ fn pushing_back_toward_box_while_slipping_never_gets_stuck() {
         for (center_x, dir) in [(b.x - 5.0, RIGHT), (b.x + b.w + 5.0, LEFT)] {
             let mut p = drop_with_center_at(center_x, *b);
             // 발이 상자 윗면에 닿아 미끄러지기 시작할 때까지 기다린다.
+            let mut frames = 0;
             while p.pos.y + p.size.y < b.y {
                 p.update(&NONE, FRAME, &w);
+                frames += 1;
+                assert!(frames < 600, "10초 안에 상자 윗면까지 떨어져야 한다");
             }
             assert!(!p.on_ground, "가운데가 밖이면 서 있지 못한다");
             for _ in 0..10 {

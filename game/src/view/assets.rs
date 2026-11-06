@@ -7,6 +7,7 @@
 use super::sky::SkyArt;
 use super::title::TitleArt;
 use crate::logic::character::CharacterKind;
+use crate::logic::skeleton::SkeletonStage;
 use macroquad::prelude::*;
 use std::collections::VecDeque;
 
@@ -15,6 +16,8 @@ pub const CHARACTER_SHEET_PATH: &str = "assets/sprites/characters.png";
 /// 좀비 카스테라 픽셀 그림 (D19, D23, D29). 맨 아래 한 줄이 비어 있어서 잘라 내면 그림 아래 끝 = 발이다.
 pub const ZOMBIE_PATH: &str = "assets/sprites/zombie-round.png";
 const ZOMBIE_EMPTY_ROWS_BELOW: u16 = 1;
+/// 스켈레톤 그림 (D23, D35). `SkeletonStage` 순서 (일반, 절반, 완전체). 크기가 제각각이라 여백을 잘라 내고 쓴다.
+pub const SKELETON_PATHS: [&str; 3] = ["assets/sprites/skeleton-normal.png", "assets/sprites/skeleton-half.png", "assets/sprites/skeleton-full.png"];
 
 /// 원화에서 캐릭터별로 잘라 낼 네모 (x, y, 가로, 세로), 원화 픽셀 기준.
 /// 위쪽 손글씨 이름은 빼고, 머리 위 안테나(T자 선, docs/04-scenario.md)와 모자·머리·왕관은 넣었다.
@@ -97,6 +100,8 @@ pub struct Assets {
     pub zombie: Texture2D,
     /// 좀비와 같은 모양의 흰 그림. 색을 곱해 맞은 좀비를 번쩍이게 한다.
     pub zombie_flash: Texture2D,
+    /// `SkeletonStage` 순서로 (그림, 같은 모양의 흰 그림).
+    skeletons: Vec<(Texture2D, Texture2D)>,
     /// 코드로 만든 하늘 그림 (해·달·구름·빛). 시작할 때 한 번만 만든다.
     pub sky: SkyArt,
 }
@@ -127,12 +132,24 @@ impl Assets {
         };
         let zombie = pixel_texture(&zombie_image);
         let zombie_flash = pixel_texture(&white_silhouette(&zombie_image));
-        Assets { font, title, characters, zombie, zombie_flash, sky: SkyArt::new() }
+        let mut skeletons = Vec::new();
+        for path in SKELETON_PATHS {
+            let bytes = load_file(path).await.expect("스켈레톤 그림을 불러오지 못했어요");
+            let image = cut_skeleton(&bytes);
+            skeletons.push((pixel_texture(&image), pixel_texture(&white_silhouette(&image))));
+        }
+        Assets { font, title, characters, zombie, zombie_flash, skeletons, sky: SkyArt::new() }
     }
 
     pub fn character(&self, kind: CharacterKind) -> &Texture2D {
         let index = CharacterKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
         &self.characters[index]
+    }
+
+    /// 단계에 맞는 (그림, 번쩍일 때 덧그리는 흰 그림).
+    pub fn skeleton(&self, stage: SkeletonStage) -> (&Texture2D, &Texture2D) {
+        let (picture, flash) = &self.skeletons[stage as usize];
+        (picture, flash)
     }
 }
 
@@ -140,6 +157,16 @@ impl Assets {
 fn cut_zombie(png: &[u8]) -> Image {
     let image = Image::from_file_with_format(png, Some(ImageFormat::Png)).expect("좀비 그림(PNG)을 읽지 못했어요");
     image.sub_image(Rect::new(0.0, 0.0, image.width as f32, (image.height - ZOMBIE_EMPTY_ROWS_BELOW) as f32))
+}
+
+/// 스켈레톤 PNG를 읽고 둘레의 투명 여백을 잘라 낸다 → 그림 아래 끝 = 발, 그림 키 = 몸 키.
+fn cut_skeleton(png: &[u8]) -> Image {
+    let image = Image::from_file_with_format(png, Some(ImageFormat::Png)).expect("스켈레톤 그림(PNG)을 읽지 못했어요");
+    let w = image.width as usize;
+    let inked = || image.get_image_data().iter().enumerate().filter(|(_, p)| p[3] > 0).map(|(i, _)| (i % w, i / w));
+    let (left, right) = (inked().map(|p| p.0).min().unwrap_or(0), inked().map(|p| p.0).max().unwrap_or(0));
+    let (top, bottom) = (inked().map(|p| p.1).min().unwrap_or(0), inked().map(|p| p.1).max().unwrap_or(0));
+    image.sub_image(Rect::new(left as f32, top as f32, (right - left + 1) as f32, (bottom - top + 1) as f32))
 }
 
 /// 모양(투명도)은 그대로 두고 색만 하얗게.
@@ -330,6 +357,20 @@ mod tests {
         let white = white_silhouette(&img);
         for (a, b) in img.get_image_data().iter().zip(white.get_image_data()) {
             assert_eq!((a[3], b[0]), (b[3], 255));
+        }
+    }
+
+    #[test]
+    fn skeleton_pictures_have_no_empty_edges() {
+        for path in SKELETON_PATHS {
+            let bytes = std::fs::read(format!("{}/{path}", env!("CARGO_MANIFEST_DIR"))).expect("스켈레톤 그림");
+            let img = cut_skeleton(&bytes);
+            let (w, h) = (img.width as usize, img.height as usize);
+            println!("{path}: {w}x{h}");
+            let data = img.get_image_data();
+            assert!(data[(h - 1) * w..].iter().any(|p| p[3] > 0), "{path} 맨 아래 줄에 발이 있다");
+            assert!(data[..w].iter().any(|p| p[3] > 0), "{path} 맨 위");
+            assert!((0..h).any(|y| data[y * w][3] > 0) && (0..h).any(|y| data[y * w + w - 1][3] > 0), "{path} 양옆");
         }
     }
 

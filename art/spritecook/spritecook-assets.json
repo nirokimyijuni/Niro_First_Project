@@ -38,5 +38,25 @@
   "skeleton-full": {
     "based_on": "art/concept/완전-레벨업-스켈레톤.webp",
     "sha12": "3983ac544d75"
+  },
+  "miss": {
+    "based_on": "art/concept/게임 케릭터.png",
+    "sha12": "bc5d70229c5f"
+  },
+  "miss-citizen-bomb": {
+    "based_on": "miss",
+    "sha12": "a65e405c0087"
+  },
+  "weapon-gun": {
+    "based_on": "local-pillow",
+    "sha12": "34e9415068b5"
+  },
+  "weapon-sword": {
+    "based_on": "local-pillow",
+    "sha12": "7478da77564a"
+  },
+  "weapon-axe": {
+    "based_on": "local-pillow",
+    "sha12": "d295bb431b63"
   }
 }

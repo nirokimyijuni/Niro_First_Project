@@ -8,4 +8,5 @@ pub mod combat;
 pub mod game;
 pub mod monster;
 pub mod player;
+pub mod skeleton;
 pub mod world;
