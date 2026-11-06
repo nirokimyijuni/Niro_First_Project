@@ -18,6 +18,8 @@ pub struct PlayerInput {
     pub right: bool,
     /// 이번 프레임에 "새로" 눌렀을 때만 true. 꾹 누르고 있는 동안은 false.
     pub jump_pressed: bool,
+    /// 이번 프레임에 "새로" 눌렀을 때만 true. 꾹 눌러도 공격은 한 번 (US-040).
+    pub attack_pressed: bool,
 }
 
 /// 어떤 동작 그림을 보여 줄지.
@@ -92,12 +94,13 @@ impl Player {
             self.on_ground = false;
         }
 
-        // 3) 시간을 잘게 나눠서 움직인다 → 프레임이 길어도 상자를 뚫지 않는다.
-        let mut time_left = dt.max(0.0);
-        while time_left > 0.0 {
-            let step = time_left.min(PHYSICS_STEP_SECONDS);
+        // 3) 시간을 같은 크기로 잘게 나눠서 움직인다 → 프레임이 길어도 상자를 뚫지 않는다.
+        // 같은 크기여야 아주 작은 나머지 조각이 안 생긴다. 그런 조각은 상자 위에서 공중으로 쳐진다 (REVIEW-004 8번).
+        let dt = dt.max(0.0);
+        let steps = (dt / PHYSICS_STEP_SECONDS).ceil();
+        let step = dt / steps.max(1.0);
+        for _ in 0..steps as u32 {
             self.move_one_step(step, world);
-            time_left -= step;
         }
 
         // 4) 보여 줄 동작 고르기.
@@ -335,6 +338,20 @@ mod tests {
         let mut p = player_standing_at(w.width - 80.0, &w);
         run(&mut p, hold_right(), 60, &w);
         assert_eq!(p.pos.x, w.width - p.size.x);
+    }
+
+    #[test]
+    fn uneven_frame_time_keeps_standing_on_box_review_004() {
+        // 0.0167초는 1/120초로 나눈 나머지가 아주 작다. 그 조각 때문에 공중으로 쳐지면 안 된다.
+        let w = World::m1();
+        let box_ = w.obstacles[0];
+        let mut p = Player::new(CharacterKind::Niro, Vec2::new(box_.x, box_.y - PLAYER_HEIGHT));
+        p.update(&no_input(), FRAME, &w);
+        for _ in 0..100 {
+            p.update(&no_input(), 0.0167, &w);
+            assert!(p.on_ground);
+            assert_eq!(p.motion, Motion::Idle);
+        }
     }
 
     #[test]

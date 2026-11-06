@@ -1,11 +1,12 @@
 //! 정보판(HUD): 화면 맨 위에 크게. 왼쪽 = 시간대 이름 + 24시간 시계(HH:MM, D14), 가운데 = N일째 · 버틴 날, 오른쪽 = 코인.
-//! 빨리감기(D12)가 켜져 있으면 정보판 줄 바로 아래 오른쪽(해 그림 왼쪽)에 "빨리감기 x10" 판.
-//! 값은 모두 logic(clock, wallet)이 준 그대로 보여 준다.
+//! 정보판 줄 바로 아래: 왼쪽에 체력 하트와 숫자(D2), 오른쪽에 빨리감기(D12)가 켜져 있으면 "빨리감기 x10" 판.
+//! 값은 모두 logic(clock, wallet, health)이 준 그대로 보여 준다.
 
 use super::coin::draw_coin;
 use super::screen::VIRTUAL_WIDTH;
 use super::text::TextPainter;
-use crate::config::DEV_FAST_FORWARD_SCALE;
+use super::touch::draw_star;
+use crate::config::{DAY_PERIODS, DEV_FAST_FORWARD_SCALE};
 use crate::logic::clock::{Clock, Phase};
 use macroquad::prelude::*;
 
@@ -34,18 +35,20 @@ const FAST_ICON_H: f32 = 24.0;
 const FAST_PAD_LEFT: f32 = 20.0;
 const FAST_ICON_TEXT_GAP: f32 = 12.0;
 
-/// 시간대 이름 (D31). [`draw_hud`]가 이 목록으로 판 폭을 잰다.
-const PERIOD_NAMES: [&str; 5] = ["아침", "낮", "오후", "저녁", "새벽"];
+/// 체력 판: 빨리감기 판과 같은 줄, 터치 "고르기" 버튼(x 12~168)의 오른쪽.
+const HEALTH_LEFT: f32 = 180.0;
+const HEALTH_PAD: f32 = 22.0;
+const HEALTH_TEXT_GAP: f32 = 12.0;
+/// 하트 줄의 가장 긴 폭. 최대 체력이 늘면 하트가 작아져서 이 안에 들어온다 (빨리감기 판과 안 겹치게).
+const HEARTS_MAX_WIDTH: f32 = 200.0;
+const HEART_MAX_STEP: f32 = 28.0;
+const HEART_FULL: Color = Color::new(0.96, 0.27, 0.38, 1.0);
+const HEART_EMPTY: Color = Color::new(0.0, 0.0, 0.0, 0.35);
+const HEART_SPARKLE: Color = Color::new(1.0, 0.96, 0.70, 1.0);
 
-/// 시각(00:00부터 분) → 시간대 이름: 아침 06~10시, 낮 10~14시, 오후 14~18시, 저녁 18~24시, 새벽 0~6시.
+/// 시각(00:00부터 분) → 시간대 이름 (D31, `config::DAY_PERIODS` 표).
 pub fn period_name(minutes: u32) -> &'static str {
-    PERIOD_NAMES[match minutes / 60 {
-        6..=9 => 0,
-        10..=13 => 1,
-        14..=17 => 2,
-        18..=23 => 3,
-        _ => 4,
-    }]
+    DAY_PERIODS.iter().rev().find(|(start, _)| minutes / 60 >= *start).map_or(DAY_PERIODS[0].1, |(_, name)| name)
 }
 
 /// 24시간 시계의 (시, 분) → "HH:MM". 두 자리씩. 시는 23, 분은 59를 넘지 않는다.
@@ -104,6 +107,42 @@ fn draw_fast_icon(x: f32, mid_y: f32, h: f32, color: Color) {
     }
 }
 
+/// 하트 하나: 동그라미 두 개 + 아래로 뾰족한 세모. `size`는 폭.
+fn draw_heart(c: Vec2, size: f32, color: Color) {
+    let bump = size * 0.27;
+    draw_circle(c.x - size * 0.24, c.y - size * 0.12, bump, color);
+    draw_circle(c.x + size * 0.24, c.y - size * 0.12, bump, color);
+    draw_triangle(c + vec2(-size * 0.5, -size * 0.02), c + vec2(size * 0.5, -size * 0.02), c + vec2(0.0, size * 0.5), color);
+}
+
+/// 하트 한 칸 폭: 최대 체력이 커져도 하트 줄이 `HEARTS_MAX_WIDTH`를 넘지 않는다.
+fn heart_step(max_hp: u32) -> f32 {
+    (HEARTS_MAX_WIDTH / max_hp.max(1) as f32).min(HEART_MAX_STEP)
+}
+
+/// 체력 판: 최대 체력만큼 하트 + "남은/최대" 숫자. `sparkle`(1 막 시작 ~ 0 끝)이면 찬 하트가 반짝인다 (D27).
+pub fn draw_health(text: &TextPainter, hp: u32, max_hp: u32, sparkle: f32) {
+    let step = heart_step(max_hp);
+    let label = format!("{hp}/{max_hp}");
+    let hearts_w = step * max_hp as f32;
+    let w = HEALTH_PAD + hearts_w + HEALTH_TEXT_GAP + text.width(&label, MID_TEXT) + HEALTH_PAD;
+    draw_pill(HEALTH_LEFT, FAST_PANEL_TOP, w, FAST_PANEL_HEIGHT, PANEL);
+    let mid_y = FAST_PANEL_TOP + FAST_PANEL_HEIGHT / 2.0;
+    let grow = 1.0 + 0.3 * (sparkle * std::f32::consts::PI).sin();
+    for i in 0..max_hp {
+        let c = vec2(HEALTH_LEFT + HEALTH_PAD + step * (i as f32 + 0.5), mid_y);
+        if i < hp {
+            draw_heart(c, step * 0.86 * grow, HEART_FULL);
+            if sparkle > 0.0 {
+                draw_star(c, step * 0.5 * sparkle, sparkle * 4.0 + i as f32, Color { a: sparkle, ..HEART_SPARKLE });
+            }
+        } else {
+            draw_heart(c, step * 0.86, HEART_EMPTY);
+        }
+    }
+    text.left(&label, HEALTH_LEFT + HEALTH_PAD + hearts_w + HEALTH_TEXT_GAP, mid_y + 11.0, MID_TEXT, WHITE);
+}
+
 pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: bool) {
     let mid_y = PANEL_TOP + PANEL_HEIGHT / 2.0;
     let baseline = PANEL_TOP + TEXT_BASELINE;
@@ -112,16 +151,14 @@ pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: boo
     let (hour, minute) = clock.hour_minute();
     let time_text = format!("{} {}", period_name(clock.time_of_day_minutes()), hh_mm(hour, minute));
     // 숫자마다 폭이 다른 글꼴이어도 넘치지 않게 가장 넓은 견본에 맞춘다.
-    let sample_w = PERIOD_NAMES
+    let sample_w = DAY_PERIODS
         .iter()
-        .flat_map(|name| ["00:00", "88:88"].map(|t| format!("{name} {t}")))
+        .flat_map(|(_, name)| ["00:00", "88:88"].map(|t| format!("{name} {t}")))
         .map(|s| text.width(&s, BIG_TEXT))
         .fold(0.0, f32::max);
     let left_w = ICON_TEXT_GAP + sample_w + PANEL_PAD_RIGHT;
     draw_pill(MARGIN, PANEL_TOP, left_w, PANEL_HEIGHT, PANEL);
     let icon = vec2(MARGIN + ICON_X, mid_y);
-    // shortcut: logic에 같은 뜻의 is_night()와 phase()가 둘 다 있어서 여기서 맞춰 본다, 수산나가 하나를 지우면 이 줄도 지운다.
-    debug_assert_eq!(clock.is_night(), clock.phase() == Phase::Night);
     match clock.phase() {
         Phase::Day => draw_sun_icon(icon, 12.0),
         Phase::Night => draw_moon_icon(icon, 17.0),
@@ -181,9 +218,19 @@ mod tests {
             (14, 0, "오후"),
             (17, 59, "오후"),
             (18, 0, "저녁"),
-            (23, 59, "저녁"),
+            (20, 59, "저녁"),
+            (21, 0, "밤"),
+            (23, 59, "밤"),
         ] {
             assert_eq!(period_name(hour * 60 + minute), name, "{hour}:{minute}");
+        }
+    }
+
+    #[test]
+    fn hearts_fit_as_max_health_grows() {
+        assert_eq!(heart_step(7), HEART_MAX_STEP);
+        for max_hp in [7, 12, 17, 100] {
+            assert!(heart_step(max_hp) * max_hp as f32 <= HEARTS_MAX_WIDTH + 0.01, "{max_hp}");
         }
     }
 

@@ -7,6 +7,7 @@
 
 #[path = "../src/config.rs"]
 mod config;
+#[allow(dead_code)] // 이 테스트에서 안 쓰는 logic 함수(체력·번쩍임 등)가 있다
 #[path = "../src/logic/mod.rs"]
 mod logic;
 
@@ -19,7 +20,8 @@ use logic::player::PlayerInput;
 use macroquad::math::Vec2;
 
 const FRAME: f32 = 1.0 / 60.0;
-const NONE: PlayerInput = PlayerInput { left: false, right: false, jump_pressed: false };
+const SEED: u32 = 7;
+const NONE: PlayerInput = PlayerInput { left: false, right: false, jump_pressed: false, attack_pressed: false };
 
 /// 구간(낮/밤)에서 남은 초 (올림). 화면에는 안 나오고 낮/밤 길이 확인에만 쓴다.
 /// 화면 시계(HH:MM, 06:00에서 시작해 앞으로 감)는 m2_clock_24h.rs가 지킨다 (US-016).
@@ -102,7 +104,7 @@ fn us009_clock_runs_while_walking_jumping_or_standing() {
         PlayerInput { jump_pressed: true, ..NONE },
     ];
     for inp in inputs {
-        let mut g = Game::new(CharacterKind::Ellie);
+        let mut g = Game::new(CharacterKind::Ellie, SEED);
         for _ in 0..60 * 30 {
             g.update(&inp, FRAME);
         }
@@ -163,7 +165,7 @@ fn us012_day_counter_only_goes_up_in_the_morning() {
 
 #[test]
 fn us013_three_coins_one_on_each_of_three_boxes() {
-    let g = Game::new(CharacterKind::Niro);
+    let g = Game::new(CharacterKind::Niro, SEED);
     assert_eq!(g.world.obstacles.len(), 3);
     assert_eq!(g.coins.list.len(), 3);
     for (coin, b) in g.coins.list.iter().zip(&g.world.obstacles) {
@@ -177,7 +179,7 @@ fn us013_three_coins_one_on_each_of_three_boxes() {
 #[test]
 fn us013_collect_all_three_by_walking_and_jumping() {
     // 실제 걷기·점프로 세 상자 위에 차례로 올라가 코인 3개를 줍는다.
-    let mut g = Game::new(CharacterKind::Niro);
+    let mut g = Game::new(CharacterKind::Niro, SEED);
     for i in 0..3 {
         let b = g.world.obstacles[i];
         let target = b.x + b.w / 2.0 - g.player.size.x / 2.0;
@@ -208,7 +210,7 @@ fn us013_collect_all_three_by_walking_and_jumping() {
 
 #[test]
 fn us013_standing_on_coin_counts_once() {
-    let mut g = Game::new(CharacterKind::Logan);
+    let mut g = Game::new(CharacterKind::Logan, SEED);
     touch_coin(&mut g, 0);
     let mut picked = 0;
     for _ in 0..60 * 5 {
@@ -226,7 +228,7 @@ fn us013_standing_on_coin_counts_once() {
 
 #[test]
 fn us013_coins_can_be_picked_at_night() {
-    let mut g = Game::new(CharacterKind::Ellie);
+    let mut g = Game::new(CharacterKind::Ellie, SEED);
     park_far(&mut g);
     g.update(&NONE, DAY_SECONDS + 1.0);
     assert!(g.clock.is_night());
@@ -237,7 +239,7 @@ fn us013_coins_can_be_picked_at_night() {
 
 #[test]
 fn us013_wallet_4999_plus_two_coins_is_5000_and_stays() {
-    let mut g = Game::new(CharacterKind::Niro);
+    let mut g = Game::new(CharacterKind::Niro, SEED);
     g.wallet.add(4999);
     touch_coin(&mut g, 0);
     g.update(&NONE, FRAME);
@@ -258,7 +260,7 @@ fn us013_wallet_4999_plus_two_coins_is_5000_and_stays() {
 
 #[test]
 fn us014_each_coin_has_its_own_10_second_timer() {
-    let mut g = Game::new(CharacterKind::Niro);
+    let mut g = Game::new(CharacterKind::Niro, SEED);
     // 0초에 코인0, 3초에 코인1, 6초에 코인2를 줍는다.
     let mut picked_at = [0.0f32; 3];
     let mut t = 0.0;
@@ -290,7 +292,7 @@ fn us014_each_coin_has_its_own_10_second_timer() {
         assert!((wait - COIN_RESPAWN_SECONDS).abs() < 0.1, "코인 {i}: {wait}초 뒤 생김");
     }
     // 같은 자리, 3개 그대로 (겹쳐 생기지 않음)
-    let fresh = Game::new(CharacterKind::Niro);
+    let fresh = Game::new(CharacterKind::Niro, SEED);
     assert_eq!(g.coins.list.len(), 3);
     for (a, b) in g.coins.list.iter().zip(&fresh.coins.list) {
         assert_eq!(a.rect, b.rect);
@@ -301,7 +303,7 @@ fn us014_each_coin_has_its_own_10_second_timer() {
 #[test]
 fn us014_fast_forward_dt_respawns_in_about_one_second() {
     // main.rs의 빨리감기는 코인에 dt × 10을 넣는다 → 실제 1초(60프레임)면 다시 생겨야 한다.
-    let mut g = Game::new(CharacterKind::Niro);
+    let mut g = Game::new(CharacterKind::Niro, SEED);
     touch_coin(&mut g, 0);
     g.update(&NONE, 0.0);
     park_far(&mut g);
@@ -318,7 +320,7 @@ fn us014_fast_forward_dt_respawns_in_about_one_second() {
 
 #[test]
 fn us015_new_game_after_night_and_coins_is_fresh() {
-    let mut g = Game::new(CharacterKind::Niro);
+    let mut g = Game::new(CharacterKind::Niro, SEED);
     touch_coin(&mut g, 0);
     g.update(&NONE, 0.0);
     g.update(&NONE, DAY_SECONDS * 3.0 + 10.0); // 2일째 밤
@@ -327,7 +329,7 @@ fn us015_new_game_after_night_and_coins_is_fresh() {
     assert!(g.wallet.coins() >= 1);
 
     // Esc → 다시 고르기 → 새 게임은 Game::new (main.rs start_play)
-    let g = Game::new(CharacterKind::Logan);
+    let g = Game::new(CharacterKind::Logan, SEED);
     assert_eq!(g.clock.phase(), Phase::Day);
     assert_eq!(shown_seconds(&g.clock), 600);
     assert_eq!((g.clock.day_number(), g.clock.nights_survived()), (1, 0));

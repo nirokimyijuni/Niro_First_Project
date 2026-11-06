@@ -1,7 +1,7 @@
-//! 폰 터치 조작 (D16, D25): 왼쪽 떠다니는 조이스틱 + 오른쪽 절반 아무 곳이나 점프 + 왼쪽 위 "고르기" 버튼.
+//! 폰 터치 조작 (D16, D25): 왼쪽 떠다니는 조이스틱 + 오른쪽 절반 아무 곳이나 점프 + 공격 버튼 + 왼쪽 위 "고르기" 버튼.
 //! 위쪽은 판정(손가락 추적·데드존·버튼 영역)만 하는 작은 함수들이라 단위 테스트를 한다.
 //! 아래쪽 `draw_*`는 판정 결과를 보여 주기만 한다. 좌표는 모두 가상 화면(960×540) 기준.
-//! 게임 규칙은 없다: 결과는 키보드와 같은 `PlayerInput` 모양(왼쪽/오른쪽/점프 새로 누름)이다.
+//! 게임 규칙은 없다: 결과는 키보드와 같은 `PlayerInput` 모양(왼쪽/오른쪽/점프·공격 새로 누름)이다.
 
 use super::hud::draw_pill;
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
@@ -22,6 +22,8 @@ pub const JOYSTICK_AREA_RIGHT: f32 = VIRTUAL_WIDTH / 2.0;
 const BUTTON_RADIUS: f32 = 68.0;
 /// 화면 오른쪽·아래 끝에서 버튼까지 떨어진 거리
 const BUTTON_EDGE_GAP: f32 = 22.0;
+/// 점프 그림과 공격 버튼 사이. 빗나간 손가락이 공격 대신 점프가 되도록 판정 여유(SLOP)보다 넓게.
+const BUTTON_GAP: f32 = 44.0;
 /// 손가락이 버튼 그림보다 조금 밖을 눌러도 눌린 것으로 친다 (아이 손가락은 빗나가기 쉽다)
 const BUTTON_TOUCH_SLOP: f32 = 12.0;
 
@@ -41,16 +43,18 @@ const BUTTON_ICON: Color = Color::new(1.0, 1.0, 1.0, 0.95);
 const BACK_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.55);
 const LINE_WIDTH: f32 = 5.0;
 
-/// 오른쪽 버튼 종류. M4에 공격, M7에 캐기를 여기와 `PLAY_BUTTONS`에 더하면 된다.
+/// 오른쪽 버튼 종류. M7에 캐기를 여기와 `PLAY_BUTTONS`에 더하면 된다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
     Jump,
+    Attack,
 }
 
 impl ButtonKind {
     fn label(self) -> &'static str {
         match self {
             ButtonKind::Jump => "점프",
+            ButtonKind::Attack => "공격",
         }
     }
 }
@@ -62,16 +66,21 @@ pub struct TouchButton {
     pub radius: f32,
 }
 
-/// 플레이 화면 오른쪽 버튼 목록. 지금은 점프 하나 (오른쪽 아래 구석, 안내용 그림. 판정은 오른쪽 절반 전체).
-/// 버튼이 늘면 점프 왼쪽·위로 하나씩 놓는다. 버튼 자리가 오른쪽 절반 점프보다 먼저 판정된다.
-pub const PLAY_BUTTONS: [TouchButton; 1] = [TouchButton {
-    kind: ButtonKind::Jump,
-    center: Vec2::new(
-        VIRTUAL_WIDTH - BUTTON_EDGE_GAP - BUTTON_RADIUS,
-        VIRTUAL_HEIGHT - BUTTON_EDGE_GAP - BUTTON_RADIUS,
-    ),
-    radius: BUTTON_RADIUS,
-}];
+const JUMP_CENTER: Vec2 = Vec2::new(
+    VIRTUAL_WIDTH - BUTTON_EDGE_GAP - BUTTON_RADIUS,
+    VIRTUAL_HEIGHT - BUTTON_EDGE_GAP - BUTTON_RADIUS,
+);
+
+/// 플레이 화면 오른쪽 버튼 목록. 점프(오른쪽 아래 구석, 안내용 그림. 판정은 오른쪽 절반 전체)와 그 왼쪽의 공격.
+/// 버튼이 늘면 왼쪽·위로 하나씩 놓는다. 버튼 자리가 오른쪽 절반 점프보다 먼저 판정된다.
+pub const PLAY_BUTTONS: [TouchButton; 2] = [
+    TouchButton { kind: ButtonKind::Jump, center: JUMP_CENTER, radius: BUTTON_RADIUS },
+    TouchButton {
+        kind: ButtonKind::Attack,
+        center: Vec2::new(JUMP_CENTER.x - BUTTON_RADIUS * 2.0 - BUTTON_GAP, JUMP_CENTER.y),
+        radius: BUTTON_RADIUS,
+    },
+];
 
 /// 누른 곳(가상 좌표)이 어느 버튼인지. 겹치면 앞쪽 버튼.
 pub fn button_at(buttons: &[TouchButton], point: Vec2) -> Option<ButtonKind> {
@@ -148,12 +157,13 @@ pub struct Joystick {
     pub knob: Vec2,
 }
 
-/// 이번 프레임 터치 결과. 키보드 입력과 같은 규칙: 점프·돌아가기는 "새로 누른" 프레임에만 true.
+/// 이번 프레임 터치 결과. 키보드 입력과 같은 규칙: 점프·공격·돌아가기는 "새로 누른" 프레임에만 true.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TouchFrame {
     pub left: bool,
     pub right: bool,
     pub jump_pressed: bool,
+    pub attack_pressed: bool,
     pub back_pressed: bool,
 }
 
@@ -208,6 +218,7 @@ impl TouchControls {
                 } else if let Some(kind) = button_at(buttons, f.pos).or(right_half_button(f.pos)) {
                     match kind {
                         ButtonKind::Jump => out.jump_pressed = true,
+                        ButtonKind::Attack => out.attack_pressed = true,
                     }
                     if !f.lifted() {
                         self.held.push((f.id, kind));
@@ -247,6 +258,17 @@ fn draw_arrow_head(tip: Vec2, dir: Vec2, size: f32, color: Color) {
     draw_triangle(tip, back + side, back - side, color);
 }
 
+/// 다섯 갈래 별. `turn`은 돌린 각도 (라디안).
+pub fn draw_star(c: Vec2, r: f32, turn: f32, color: Color) {
+    let point = |i: u32| {
+        let a = turn - std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+        c + vec2(a.cos(), a.sin()) * if i % 2 == 0 { r } else { r * 0.45 }
+    };
+    for i in 0..10 {
+        draw_triangle(c, point(i), point(i + 1), color);
+    }
+}
+
 fn draw_joystick(j: &Joystick) {
     let b = j.base;
     draw_circle(b.x, b.y, JOYSTICK_RADIUS, BASE_FILL);
@@ -268,6 +290,7 @@ fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
     draw_circle_lines(c.x, c.y, r, LINE_WIDTH, BUTTON_LINE);
     match b.kind {
         ButtonKind::Jump => draw_arrow_head(c + vec2(0.0, -r * 0.62), vec2(0.0, -1.0), r * 0.42, BUTTON_ICON),
+        ButtonKind::Attack => draw_star(c + vec2(0.0, -r * 0.3), r * 0.42, 0.0, BUTTON_ICON),
     }
     text.centered(b.kind.label(), c.x, c.y + r * 0.42, 32.0, BUTTON_ICON);
 }
@@ -357,6 +380,36 @@ mod tests {
         assert_eq!(button_at(&PLAY_BUTTONS, JUMP + vec2(0.0, -PLAY_BUTTONS[0].radius)), Some(ButtonKind::Jump));
         assert_eq!(button_at(&PLAY_BUTTONS, JUMP + vec2(-PLAY_BUTTONS[0].radius - 30.0, 0.0)), None);
         assert_eq!(button_at(&PLAY_BUTTONS, vec2(100.0, 400.0)), None);
+    }
+
+    const ATTACK: Vec2 = PLAY_BUTTONS[1].center;
+
+    #[test]
+    fn attack_button_attacks_once_and_does_not_jump() {
+        let mut t = TouchControls::new();
+        let f = t.update(&[finger(1, TouchPhase::Started, ATTACK.x, ATTACK.y)], &PLAY_BUTTONS, true);
+        assert!(f.attack_pressed && !f.jump_pressed, "US-040: 공격 버튼 자리는 점프보다 먼저");
+        assert!(t.is_held(ButtonKind::Attack));
+        let f = t.update(&[finger(1, TouchPhase::Stationary, ATTACK.x, ATTACK.y)], &PLAY_BUTTONS, true);
+        assert!(!f.attack_pressed, "꾹 눌러도 공격은 한 번");
+        // 버튼과 버튼 사이는 오른쪽 절반의 나머지 곳이라 점프다
+        let between = (ATTACK + JUMP) / 2.0;
+        let f = t.update(&[finger(2, TouchPhase::Started, between.x, between.y)], &PLAY_BUTTONS, true);
+        assert!(f.jump_pressed && !f.attack_pressed);
+    }
+
+    #[test]
+    fn walking_and_attacking_together_do_not_mix() {
+        let mut t = TouchControls::new();
+        t.update(&[finger(1, TouchPhase::Started, 200.0, 400.0)], &PLAY_BUTTONS, true);
+        t.update(&[finger(1, TouchPhase::Moved, 270.0, 400.0)], &PLAY_BUTTONS, true);
+        let f = t.update(
+            &[finger(1, TouchPhase::Stationary, 270.0, 400.0), finger(2, TouchPhase::Started, ATTACK.x, ATTACK.y)],
+            &PLAY_BUTTONS,
+            true,
+        );
+        assert!(f.right && f.attack_pressed, "US-040: 걷는 손가락이 끊기지 않는다");
+        assert_eq!(t.joystick.unwrap().finger, 1);
     }
 
     #[test]

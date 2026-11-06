@@ -12,6 +12,9 @@ use std::collections::VecDeque;
 
 pub const FONT_PATH: &str = "assets/fonts/Jua-Regular.ttf";
 pub const CHARACTER_SHEET_PATH: &str = "assets/sprites/characters.png";
+/// 좀비 카스테라 픽셀 그림 (D19, D23, D29). 맨 아래 한 줄이 비어 있어서 잘라 내면 그림 아래 끝 = 발이다.
+pub const ZOMBIE_PATH: &str = "assets/sprites/zombie-round.png";
+const ZOMBIE_EMPTY_ROWS_BELOW: u16 = 1;
 
 /// 원화에서 캐릭터별로 잘라 낼 네모 (x, y, 가로, 세로), 원화 픽셀 기준.
 /// 위쪽 손글씨 이름은 빼고, 머리 위 안테나(T자 선, docs/04-scenario.md)와 모자·머리·왕관은 넣었다.
@@ -24,6 +27,11 @@ pub const LOGAN_CUT: (u32, u32, u32, u32) = (382, 115, 130, 255);
 const NIRO_BODY_TOP: u32 = 176;
 const ELLIE_BODY_TOP: u32 = 199;
 const LOGAN_BODY_TOP: u32 = 163;
+
+/// 머리와 몸을 나누는 y (옷 위 끝쯤), 원화 픽셀 기준. 쓰러질 때 머리만 튀어 오른다 (D30).
+const NIRO_NECK: u32 = 262;
+const ELLIE_NECK: u32 = 268;
+const LOGAN_NECK: u32 = 256;
 
 /// 자르는 네모 안에 걸린 이름 글자 조각 (x, y, 가로, 세로), 원화 픽셀 기준. 종이색으로 덮는다.
 const ELLIE_NAME_BITS: &[(u32, u32, u32, u32)] = &[(232, 150, 35, 14), (296, 150, 10, 5)];
@@ -61,6 +69,17 @@ pub fn height_with_antenna(kind: CharacterKind, body_height: f32) -> f32 {
     body_height * h as f32 / (y + h - body_top) as f32
 }
 
+/// 잘라 낸 그림에서 머리 쪽이 차지하는 비율 (위에서부터, 0~1).
+pub fn head_share(kind: CharacterKind) -> f32 {
+    let (_, y, _, h) = character_cut(kind);
+    let neck = match kind {
+        CharacterKind::Niro => NIRO_NECK,
+        CharacterKind::Ellie => ELLIE_NECK,
+        CharacterKind::Logan => LOGAN_NECK,
+    };
+    (neck - y) as f32 / h as f32
+}
+
 fn name_bits(kind: CharacterKind) -> &'static [(u32, u32, u32, u32)] {
     match kind {
         CharacterKind::Niro => &[],
@@ -75,6 +94,9 @@ pub struct Assets {
     pub title: TitleArt,
     /// `CharacterKind::ALL` 순서 (Niro, Ellie, Logan).
     characters: [Texture2D; 3],
+    pub zombie: Texture2D,
+    /// 좀비와 같은 모양의 흰 그림. 색을 곱해 맞은 좀비를 번쩍이게 한다.
+    pub zombie_flash: Texture2D,
     /// 코드로 만든 하늘 그림 (해·달·구름·빛). 시작할 때 한 번만 만든다.
     pub sky: SkyArt,
 }
@@ -96,13 +118,37 @@ impl Assets {
             texture.set_filter(FilterMode::Linear);
             texture
         });
-        Assets { font, title, characters, sky: SkyArt::new() }
+        let zombie_bytes = load_file(ZOMBIE_PATH).await.expect("좀비 그림을 불러오지 못했어요");
+        let zombie_image = cut_zombie(&zombie_bytes);
+        let pixel_texture = |image: &Image| {
+            let texture = Texture2D::from_image(image);
+            texture.set_filter(FilterMode::Nearest);
+            texture
+        };
+        let zombie = pixel_texture(&zombie_image);
+        let zombie_flash = pixel_texture(&white_silhouette(&zombie_image));
+        Assets { font, title, characters, zombie, zombie_flash, sky: SkyArt::new() }
     }
 
     pub fn character(&self, kind: CharacterKind) -> &Texture2D {
         let index = CharacterKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
         &self.characters[index]
     }
+}
+
+/// 좀비 PNG를 읽고 발 아래 빈 줄을 잘라 낸다.
+fn cut_zombie(png: &[u8]) -> Image {
+    let image = Image::from_file_with_format(png, Some(ImageFormat::Png)).expect("좀비 그림(PNG)을 읽지 못했어요");
+    image.sub_image(Rect::new(0.0, 0.0, image.width as f32, (image.height - ZOMBIE_EMPTY_ROWS_BELOW) as f32))
+}
+
+/// 모양(투명도)은 그대로 두고 색만 하얗게.
+fn white_silhouette(image: &Image) -> Image {
+    let mut white = image.clone();
+    for px in white.get_image_data_mut() {
+        *px = [255, 255, 255, px[3]];
+    }
+    white
 }
 
 /// 원화에서 한 캐릭터를 잘라 내고 배경을 투명하게 만든다.
@@ -220,6 +266,36 @@ mod tests {
         }
     }
 
+    /// 몸 위쪽 줄에서 안테나가 있는 칸 (잘라 낸 그림의 x 범위).
+    fn antenna_columns(kind: CharacterKind) -> std::ops::RangeInclusive<usize> {
+        match kind {
+            // Niro는 안테나(x 67~113) 오른쪽 위에 종이 얼룩 점이 하나 있어서 그 칸까지 넣었다.
+            CharacterKind::Niro => 67..=147,
+            CharacterKind::Ellie => 53..=91,
+            CharacterKind::Logan => 80..=113,
+        }
+    }
+
+    #[test]
+    fn only_antenna_is_left_above_the_body() {
+        // REVIEW-005 2번: 덮은 네모가 아니라 몸 위쪽 줄 전체를 봐서, 네모 밖에 남은 이름 조각도 잡는다.
+        let s = sheet();
+        for kind in CharacterKind::ALL {
+            let (_, y, ..) = character_cut(kind);
+            let body_top = match kind {
+                CharacterKind::Niro => NIRO_BODY_TOP,
+                CharacterKind::Ellie => ELLIE_BODY_TOP,
+                CharacterKind::Logan => LOGAN_BODY_TOP,
+            };
+            let img = cut_character(&s, kind);
+            let w = img.width as usize;
+            let data = img.get_image_data();
+            let columns = antenna_columns(kind);
+            let inked: Vec<usize> = (0..(body_top - y) as usize * w).filter(|i| data[*i][3] > 0).map(|i| i % w).collect();
+            assert!(inked.iter().all(|x| columns.contains(x)), "{kind:?} 안테나 밖에 잉크가 있다");
+        }
+    }
+
     #[test]
     fn antenna_stays_joined_to_body_and_name_is_gone() {
         let s = sheet();
@@ -242,6 +318,31 @@ mod tests {
                 }
             }
             assert!(height_with_antenna(kind, 84.0) > 84.0);
+        }
+    }
+
+    #[test]
+    fn zombie_feet_are_at_the_bottom_of_the_picture() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/", "assets/sprites/zombie-round.png")).expect("zombie-round.png");
+        let img = cut_zombie(&bytes);
+        let (w, h) = (img.width as usize, img.height as usize);
+        assert!(img.get_image_data()[(h - 1) * w..].iter().any(|p| p[3] > 0), "맨 아래 줄에 발이 있다");
+        let white = white_silhouette(&img);
+        for (a, b) in img.get_image_data().iter().zip(white.get_image_data()) {
+            assert_eq!((a[3], b[0]), (b[3], 255));
+        }
+    }
+
+    #[test]
+    fn head_and_body_both_have_ink() {
+        let s = sheet();
+        for kind in CharacterKind::ALL {
+            let img = cut_character(&s, kind);
+            let (w, h) = (img.width as usize, img.height as usize);
+            let neck = (head_share(kind) * h as f32) as usize;
+            assert!(neck > h / 4 && neck < h * 3 / 4, "{kind:?} 목 {neck}/{h}");
+            let inked = |rows: std::ops::Range<usize>| img.get_image_data()[rows.start * w..rows.end * w].iter().any(|p| p[3] > 0);
+            assert!(inked(0..neck) && inked(neck..h), "{kind:?}");
         }
     }
 

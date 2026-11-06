@@ -7,6 +7,7 @@
 
 #[path = "../src/config.rs"]
 mod config;
+#[allow(dead_code)] // 이 테스트에서 안 쓰는 logic 함수(체력·번쩍임 등)가 있다
 #[path = "../src/logic/mod.rs"]
 mod logic;
 
@@ -19,11 +20,11 @@ use macroquad::math::{Rect, Vec2};
 const FRAME: f32 = 1.0 / 60.0;
 
 fn input(left: bool, right: bool, jump: bool) -> PlayerInput {
-    PlayerInput { left, right, jump_pressed: jump }
+    PlayerInput { left, right, jump_pressed: jump, attack_pressed: false }
 }
-const NONE: PlayerInput = PlayerInput { left: false, right: false, jump_pressed: false };
-const RIGHT: PlayerInput = PlayerInput { left: false, right: true, jump_pressed: false };
-const LEFT: PlayerInput = PlayerInput { left: true, right: false, jump_pressed: false };
+const NONE: PlayerInput = PlayerInput { left: false, right: false, jump_pressed: false, attack_pressed: false };
+const RIGHT: PlayerInput = PlayerInput { left: false, right: true, jump_pressed: false, attack_pressed: false };
+const LEFT: PlayerInput = PlayerInput { left: true, right: false, jump_pressed: false, attack_pressed: false };
 
 /// main.rs의 start_play와 같은 시작 위치.
 fn spawn(kind: CharacterKind, world: &World) -> Player {

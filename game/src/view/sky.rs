@@ -224,6 +224,8 @@ const DISC_FILL: f32 = 62.0 / 64.0;
 /// 달 그림
 const MOON_SIZE: u16 = 128;
 const MOON_FILL: f32 = 60.0 / 64.0;
+/// 밝아진 새벽 하늘에서도 달 몸통은 이만큼 보인다. 수평선에 닿을 때까지 달이 남는다 (BUG-009).
+const MOON_BODY_MIN_ALPHA: f32 = 0.75;
 /// 빛 기둥: 위(수평선)는 진하고 아래로 사라지며, 옆으로는 부드럽게
 const BEAM_SIZE: (u16, u16) = (64, 128);
 /// 구름 그림
@@ -590,7 +592,7 @@ impl SkyLook {
             let radius = SUN_RADIUS * (1.0 + SUNSET_GROW * set);
             Body { pos: arc_position(progress, radius), radius, amount: set }
         });
-        // 보름달: 새벽에 하늘이 밝아지면서 흐려진다.
+        // 보름달: 새벽에 하늘이 밝아지면서 빛이 흐려진다 (몸통은 수평선까지 남는다, `draw_moon`).
         let moon = arc_progress(minutes, NIGHT_START_HOUR, NIGHT_GAME_MINUTES).map(|progress| Body {
             pos: arc_position(progress, MOON_RADIUS),
             radius: MOON_RADIUS,
@@ -626,6 +628,9 @@ pub fn draw_sky(c: &mut impl Canvas, look: &SkyLook) {
     }
 
     draw_stars(c, look);
+    // 수평선 위쪽 안개는 해·달 뒤에 깐다. 앞에 깔면 뜨고 지는 해·달이 안개에 묻힌다 (BUG-009).
+    let haze = horizon_haze(look);
+    c.vgradient(0.0, VIRTUAL_WIDTH, &[(HORIZON_Y - 34.0, with_alpha(haze, 0.0)), (HORIZON_Y, haze)]);
     if let Some(moon) = look.moon {
         draw_moon(c, &moon);
     }
@@ -660,7 +665,8 @@ pub fn draw_sun(c: &mut impl Canvas, sun: &Body, darkness: f32) {
     let r = sun.radius;
     let p = sun.pos;
     // 해가 수평선에 잠길수록, 밤이 될수록 빛무리도 사라진다
-    let fade = lerp(0.25, 1.0, sun.above_horizon()) * (1.0 - ramp(darkness, 0.6, 1.0));
+    // 뜰 때는 0에서 시작해야 06:00에 빛이 탁 켜지지 않는다. 노을(set = 1) 때는 0.25를 남긴다.
+    let fade = lerp(0.25 * set, 1.0, sun.above_horizon()) * (1.0 - ramp(darkness, 0.6, 1.0));
     let halo = mix(SUN_HALO_DAY, SUN_HALO_SET, set);
     for (size, alpha) in [SUN_HALO_WIDE, SUN_HALO_MID, SUN_HALO_NEAR] {
         // 노을 때는 빛무리가 더 크고 진하다
@@ -676,10 +682,12 @@ pub fn draw_sun(c: &mut impl Canvas, sun: &Body, darkness: f32) {
 pub fn draw_moon(c: &mut impl Canvas, moon: &Body) {
     let a = moon.amount;
     let r = moon.radius;
+    // 수평선 위로 나온 만큼만: 18:00에 빛무리가 탁 켜지지 않는다.
+    let halo = a * moon.above_horizon();
     for (size, alpha) in [MOON_HALO_WIDE, MOON_HALO_NEAR] {
-        c.image(Tex::Glow, square(moon.pos, r * size), with_alpha(MOON_HALO, alpha * a));
+        c.image(Tex::Glow, square(moon.pos, r * size), with_alpha(MOON_HALO, alpha * halo));
     }
-    c.image(Tex::Moon, square(moon.pos, r * 2.0 / MOON_FILL), with_alpha(WHITE, a));
+    c.image(Tex::Moon, square(moon.pos, r * 2.0 / MOON_FILL), with_alpha(WHITE, a.max(MOON_BODY_MIN_ALPHA)));
 }
 
 /// 별: 자리·크기·밝기는 번호로 정해져 늘 같고, 하나하나 다른 빠르기로 부드럽게 반짝인다.
@@ -713,6 +721,11 @@ fn draw_stars(c: &mut impl Canvas, look: &SkyLook) {
 
 /// 바다: 그라데이션 → 수평선 안개 → 해·달 빛 기둥 → 여기저기 반짝이는 물결.
 /// (하얀 물결 거품과 모래는 screens.rs)
+/// 수평선 안개 색: 하늘 아래와 먼 바다를 같이 흐리게 덮는다.
+fn horizon_haze(look: &SkyLook) -> Color {
+    mix(mix(HAZE_DAY, HAZE_NIGHT, look.d), HAZE_DUSK, look.dusk)
+}
+
 pub fn draw_sea(c: &mut impl Canvas, look: &SkyLook, ground_y: f32) {
     let d = look.d;
     let warm = look.dusk * SEA_DUSK_AMOUNT;
@@ -722,14 +735,13 @@ pub fn draw_sea(c: &mut impl Canvas, look: &SkyLook, ground_y: f32) {
     let sea_h = ground_y - HORIZON_Y;
     c.vgradient(0.0, VIRTUAL_WIDTH, &[(HORIZON_Y, far), (HORIZON_Y + sea_h * 0.35, mid), (ground_y + 2.0, near)]);
 
-    // 수평선 안개: 하늘 아래와 먼 바다를 같이 흐리게 덮는다
-    let haze = mix(mix(HAZE_DAY, HAZE_NIGHT, d), HAZE_DUSK, look.dusk);
+    // 수평선 안개의 먼 바다 쪽 (하늘 쪽은 `draw_sky`)
+    let haze = horizon_haze(look);
     let clear = with_alpha(haze, 0.0);
     c.vgradient(
         0.0,
         VIRTUAL_WIDTH,
         &[
-            (HORIZON_Y - 34.0, clear),
             (HORIZON_Y, haze),
             (HORIZON_Y + 10.0, with_alpha(haze, haze.a * 0.35)),
             (HORIZON_Y + 32.0, clear),
@@ -907,6 +919,34 @@ mod tests {
         }
     }
 
+    /// 빛(Glow)이 수평선 위로 얼마나 진하게 번지는지 기록한다.
+    #[derive(Default)]
+    struct GlowAboveHorizon(f32);
+
+    impl Canvas for GlowAboveHorizon {
+        fn vgradient(&mut self, _x: f32, _w: f32, _stops: &[(f32, Color)]) {}
+        fn image(&mut self, tex: Tex, dest: Rect, tint: Color) {
+            if matches!(tex, Tex::Glow) && dest.y < HORIZON_Y {
+                self.0 = self.0.max(tint.a);
+            }
+        }
+    }
+
+    #[test]
+    fn light_does_not_switch_on_at_sunrise_or_moonrise() {
+        // REVIEW-005 3번: 몸이 수평선 아래인 순간에는 빛도 수평선 위로 번지지 않는다.
+        let mut moon_light = GlowAboveHorizon::default();
+        draw_moon(&mut moon_light, &SkyLook::play(0.6, 18 * 60, 0.0).moon.unwrap());
+        assert_eq!(moon_light.0, 0.0);
+        let mut sun_light = GlowAboveHorizon::default();
+        draw_sun(&mut sun_light, &SkyLook::play(0.0, 6 * 60, 0.0).sun.unwrap(), 0.0);
+        assert_eq!(sun_light.0, 0.0);
+        // 조금 뒤에는 빛이 보이기 시작한다
+        let mut later = GlowAboveHorizon::default();
+        draw_moon(&mut later, &SkyLook::play(1.0, 19 * 60, 0.0).moon.unwrap());
+        assert!(later.0 > 0.0);
+    }
+
     // ---------- CPU 그림판: 확인용 PNG ----------
 
     struct CpuCanvas<'a> {
@@ -970,6 +1010,37 @@ mod tests {
         }
     }
 
+    /// 하늘·바다를 CPU로 그린 픽셀.
+    fn rendered(images: &SkyImages, look: &SkyLook) -> Vec<[f32; 3]> {
+        let mut c = CpuCanvas { images, w: 960, h: 540, px: vec![[0.9, 0.76, 0.52]; 960 * 540] };
+        draw_sky(&mut c, look);
+        draw_sea(&mut c, look, crate::config::GROUND_Y);
+        c.px
+    }
+
+    #[test]
+    fn moon_and_sun_show_right_down_to_the_horizon() {
+        // BUG-009: 빠진 그림과 비교해서, 수평선 바로 위 몸통 자리가 눈에 띄게 달라야 보이는 것이다.
+        let images = SkyImages::generate();
+        let difference = |with: SkyLook, without: SkyLook, body: Body| {
+            let (a, b) = (rendered(&images, &with), rendered(&images, &without));
+            let i = (HORIZON_Y - 3.0) as usize * 960 + body.pos.x as usize;
+            (0..3).map(|k| (a[i][k] - b[i][k]).abs()).fold(0.0, f32::max)
+        };
+        // 05:50: 하늘이 거의 밝아진 때 달이 수평선 가까이에 있다
+        let moon = SkyLook::play(0.05, 5 * 60 + 50, 0.0);
+        let body = moon.moon.expect("05:50에는 달이 있다");
+        let no_moon = SkyLook { moon: None, ..SkyLook::play(0.05, 5 * 60 + 50, 0.0) };
+        let seen = difference(moon, no_moon, body);
+        assert!(seen > 0.05, "달 {seen}");
+        // 06:10: 해가 왼쪽 수평선에서 벌써 보인다
+        let sun = SkyLook::play(0.0, 6 * 60 + 10, 0.0);
+        let body = sun.sun.expect("06:10에는 해가 있다");
+        let no_sun = SkyLook { sun: None, ..SkyLook::play(0.0, 6 * 60 + 10, 0.0) };
+        let seen = difference(sun, no_sun, body);
+        assert!(seen > 0.05, "해 {seen}");
+    }
+
     /// 확인용: 하늘·바다를 CPU로 그려 PNG로 저장한다.
     /// `SKY_PREVIEW_DIR=폴더 cargo test sky_preview -- --ignored`
     #[test]
@@ -987,6 +1058,8 @@ mod tests {
             ("dusk_late", SkyLook::play(0.85, 17 * 60 + 45, 3.0)),
             ("midnight", SkyLook::play(1.0, 0, 3.0)),
             ("dawn", SkyLook::play(0.5, 5 * 60 + 24, 3.0)),
+            ("moonset", SkyLook::play(0.05, 5 * 60 + 50, 3.0)),
+            ("sunrise", SkyLook::play(0.0, 6 * 60 + 10, 3.0)),
         ] {
             let (w, h) = (960usize, 540usize);
             let mut c = CpuCanvas { images: &images, w, h, px: vec![[0.9, 0.76, 0.52]; w * h] };

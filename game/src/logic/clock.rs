@@ -5,7 +5,7 @@
 
 use crate::config::{
     DAWN_SECONDS, DAY_GAME_MINUTES, DAY_SECONDS, DAY_START_HOUR, DUSK_SECONDS, MINUTES_PER_GAME_DAY,
-    NIGHT_GAME_MINUTES, NIGHT_SECONDS,
+    NIGHTFALL_SECONDS, NIGHT_GAME_MINUTES, NIGHT_SECONDS, SUNSET_DARKNESS,
 };
 
 /// 지금이 낮인지 밤인지.
@@ -84,14 +84,14 @@ impl Clock {
     }
 
     /// 하늘이 얼마나 어두운지: 0 = 한낮, 1 = 한밤.
-    /// 낮의 마지막 DUSK_SECONDS 동안 0 → 1 (노을), 밤의 마지막 DAWN_SECONDS 동안 1 → 0 (새벽).
-    /// 그래서 밤이 시작되는 순간 딱 1, 아침이 오는 순간 딱 0이다.
+    /// 낮의 마지막 DUSK_SECONDS 동안 0 → SUNSET_DARKNESS (노을은 해가 지는 18:00에 끝난다, D31),
+    /// 밤의 처음 NIGHTFALL_SECONDS 동안 → 1, 밤의 마지막 DAWN_SECONDS 동안 1 → 0 (새벽).
     pub fn sky_darkness(&self) -> f32 {
         let left = self.seconds_left_in_phase();
         match self.phase {
             Phase::Day => {
                 if left < DUSK_SECONDS {
-                    smooth(1.0 - left / DUSK_SECONDS)
+                    SUNSET_DARKNESS * smooth(1.0 - left / DUSK_SECONDS)
                 } else {
                     0.0
                 }
@@ -100,7 +100,7 @@ impl Clock {
                 if left < DAWN_SECONDS {
                     smooth(left / DAWN_SECONDS)
                 } else {
-                    1.0
+                    SUNSET_DARKNESS + (1.0 - SUNSET_DARKNESS) * smooth(self.seconds_in_phase / NIGHTFALL_SECONDS)
                 }
             }
         }
@@ -239,10 +239,10 @@ mod tests {
         let dusk = c.sky_darkness();
         assert!(dusk > 0.0 && dusk < 1.0, "노을 중에는 사이값: {dusk}");
 
-        // 밤 시작 순간 = 1
+        // 해가 지는 순간은 아직 노을빛이다
         c.update(DUSK_SECONDS / 2.0);
         assert!(c.is_night());
-        assert_eq!(c.sky_darkness(), 1.0);
+        assert_eq!(c.sky_darkness(), SUNSET_DARKNESS);
 
         c.update(NIGHT_SECONDS / 2.0);
         assert_eq!(c.sky_darkness(), 1.0, "한밤");
@@ -270,6 +270,21 @@ mod tests {
             assert!(now - last < 0.1, "한 번에 확 바뀌지 않는다");
             last = now;
         }
+    }
+
+    #[test]
+    fn sky_keeps_darkening_smoothly_past_sunset_until_full_night() {
+        let mut c = Clock::new();
+        c.update(DAY_SECONDS - 1.0);
+        let mut last = c.sky_darkness();
+        assert!(last < SUNSET_DARKNESS && SUNSET_DARKNESS - last < 0.01, "노을 끝이 18:00에 이어진다");
+        for _ in 0..(NIGHTFALL_SECONDS as usize + 1) {
+            c.update(1.0);
+            let now = c.sky_darkness();
+            assert!(now >= last && now - last < 0.1, "{last} → {now}");
+            last = now;
+        }
+        assert_eq!(last, 1.0, "해가 지고 곧 한밤");
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub fn merge_touch(keys: PlayerInput, touch: &TouchFrame) -> PlayerInput {
         left: keys.left || touch.left,
         right: keys.right || touch.right,
         jump_pressed: keys.jump_pressed || touch.jump_pressed,
+        attack_pressed: keys.attack_pressed || touch.attack_pressed,
     }
 }
 
@@ -38,12 +39,13 @@ pub fn any_key_pressed() -> bool {
     !get_keys_pressed().is_empty()
 }
 
-/// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프.
+/// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프, X 공격.
 pub fn player_input() -> PlayerInput {
     PlayerInput {
         left: is_key_down(KeyCode::Left),
         right: is_key_down(KeyCode::Right),
         jump_pressed: is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Up),
+        attack_pressed: is_key_pressed(KeyCode::X),
     }
 }
 

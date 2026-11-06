@@ -4,6 +4,8 @@
 pub mod character;
 pub mod clock;
 pub mod coins;
+pub mod combat;
 pub mod game;
+pub mod monster;
 pub mod player;
 pub mod world;

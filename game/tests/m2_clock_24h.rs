@@ -4,6 +4,7 @@
 
 #[path = "../src/config.rs"]
 mod config;
+#[allow(dead_code)] // 이 테스트에서 안 쓰는 logic 함수(체력·번쩍임 등)가 있다
 #[path = "../src/logic/mod.rs"]
 mod logic;
 

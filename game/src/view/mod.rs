@@ -2,6 +2,8 @@
 
 pub mod assets;
 pub mod coin;
+pub mod effects;
+pub mod gameover;
 pub mod hud;
 pub mod input;
 pub mod screen;

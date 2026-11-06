@@ -7,10 +7,12 @@ use std::f32::consts::TAU;
 
 /// 게임 화면에서 안테나를 뺀 캐릭터 몸 높이 (가상 픽셀). 충돌 네모(64)보다 조금 크게.
 pub const PLAY_SPRITE_HEIGHT: f32 = 84.0;
+/// 좀비 그림 높이 (가상 픽셀). 몸 네모(48×64)보다 조금 크게. 가로는 원본 비율로 약 60.
+pub const ZOMBIE_SPRITE_HEIGHT: f32 = 80.0;
 
 /// 대기: 숨쉬기 빠르기(초당 번)와 세기
 const IDLE_BREATHS_PER_SECOND: f32 = 0.8;
-const IDLE_STRETCH: f32 = 0.03;
+pub(super) const IDLE_STRETCH: f32 = 0.03;
 /// 걷기: 초당 걸음 수, 통통 튀는 높이(그림 높이에 대한 비율), 기울기(라디안)
 const WALK_STEPS_PER_SECOND: f32 = 4.4;
 const WALK_BOUNCE: f32 = 0.07;
@@ -18,6 +20,10 @@ const WALK_TILT: f32 = 0.09;
 /// 점프: 올라갈 때 / 내려올 때 위로 늘어나는 정도
 const JUMP_STRETCH_UP: f32 = 0.14;
 const JUMP_STRETCH_DOWN: f32 = 0.05;
+/// 떠오른 좀비: 초당 살랑거리는 번, 기울기(라디안), 위아래 폭(그림 높이에 대한 비율)
+const FLOAT_SWAYS_PER_SECOND: f32 = 0.7;
+const FLOAT_TILT: f32 = 0.16;
+const FLOAT_BOB: f32 = 0.05;
 
 /// 한 순간의 모양.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,6 +58,12 @@ pub fn pose(motion: Motion, time: f32, rising: bool) -> Pose {
             Pose { scale_x: 1.0 - stretch * 0.6, scale_y: 1.0 + stretch, lift: 0.0, tilt: 0.0 }
         }
     }
+}
+
+/// 떠오른 좀비의 살랑살랑 (`time`이 0이면 가만히).
+pub fn float_pose(time: f32) -> Pose {
+    let s = (time * TAU * FLOAT_SWAYS_PER_SECOND).sin();
+    Pose { scale_x: 1.0, scale_y: 1.0, lift: s * FLOAT_BOB, tilt: s * FLOAT_TILT }
 }
 
 /// 그림이 발 가운데에서 옆으로 가장 멀리 뻗는 거리 (숨쉬기로 넓어짐 + 걸을 때 기울기 포함).

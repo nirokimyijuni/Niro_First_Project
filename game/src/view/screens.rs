@@ -4,14 +4,17 @@
 //! (D9, D10): 노을 때 하늘 아래가 주황·분홍, 밤에는 남색 하늘에 별. 해·달은 시계를 따라 호를 그린다 (D31).
 
 use super::assets::{height_with_antenna, Assets};
-use super::coin::{draw_coins, CoinPops};
-use super::hud::draw_hud;
+use super::coin::draw_coins;
+use super::effects::Effects;
+use super::gameover::{draw_down_panel, draw_fallen_player, DownScreen};
+use super::hud::{draw_health, draw_hud};
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
-use super::sprites::{self, draw_character, max_half_width, PLAY_SPRITE_HEIGHT};
+use super::sprites::{self, draw_character, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
+use crate::logic::monster::ZombieState;
 use crate::logic::player::{Facing, Motion};
 use macroquad::prelude::*;
 
@@ -44,6 +47,8 @@ const PICK_BORDER: Color = Color::new(1.0, 0.70, 0.10, 1.0);
 
 /// 밤에 캐릭터에 곱하는 색. 배경보다 훨씬 덜 어둡게 해서 캐릭터가 잘 보이게.
 const CHARACTER_NIGHT_TINT: Color = Color::new(0.82, 0.84, 0.97, 1.0);
+/// 맞은 좀비가 번쩍이는 색
+const ZOMBIE_FLASH: Color = Color::new(1.0, 0.95, 0.45, 0.85);
 /// 밤에 얼마나 어두워지는지 (1 = 밤빛 그대로, 0 = 그대로). 상자는 덜 어둡게.
 const BOX_NIGHT_AMOUNT: f32 = 0.7;
 const FOAM_NIGHT_AMOUNT: f32 = 0.7;
@@ -72,6 +77,9 @@ const PICK_ARROW_BOB: f32 = 4.0;
 // ---- 플레이 화면 배치 ----
 /// 조작 안내는 화면 아래 모래 위 (위쪽은 정보판 자리)
 const PLAY_HINT_Y: f32 = 526.0;
+/// 맞은 뒤 안 맞는 동안 캐릭터가 초당 깜빡이는 번, 깜빡일 때 투명도
+const HURT_BLINKS_PER_SECOND: f32 = 8.0;
+const HURT_BLINK_ALPHA: f32 = 0.35;
 
 /// 캐릭터 고르기 화면에서 `index`번째 카드 네모.
 pub fn select_card_rect(index: usize) -> Rect {
@@ -255,8 +263,39 @@ fn feet_x_on_screen(center_x: f32, half_width: f32) -> f32 {
     center_x.clamp(half_width, (VIRTUAL_WIDTH - half_width).max(half_width))
 }
 
+/// 좀비 카스테라: 플레이어 쪽을 보고, 걸을 때 통통, 떠오르면 살랑살랑, 맞으면 번쩍.
+/// 쓰러진 화면에서는 멈춘다 (US-043). 밤 어두움은 주인공처럼 살짝만 받는다.
+fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
+    let frozen = game.combat.health.is_down();
+    let player_x = game.player.rect().center().x;
+    let half = max_half_width(&assets.zombie, ZOMBIE_SPRITE_HEIGHT);
+    for (i, zombie) in game.combat.zombies.list.iter().enumerate() {
+        let r = zombie.rect();
+        let t = if frozen { 0.0 } else { time() + i as f32 * 0.37 };
+        let pose = match zombie.state {
+            ZombieState::Walking => sprites::pose(Motion::Walk, t, false),
+            ZombieState::Floating => sprites::float_pose(t),
+        };
+        let facing = if player_x < r.center().x { Facing::Left } else { Facing::Right };
+        let feet = vec2(feet_x_on_screen(r.center().x, half), r.y + r.h);
+        draw_character(&assets.zombie, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, tint);
+        if zombie.is_flashing() {
+            draw_character(&assets.zombie_flash, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, ZOMBIE_FLASH);
+        }
+    }
+}
+
 /// `touch_mode`면 키보드 안내 글자는 숨긴다 (터치 조이스틱·버튼은 main이 위에 그린다).
-pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward: bool, pops: &CoinPops, touch_mode: bool) {
+/// `down`이 있으면 쓰러진 화면이다.
+pub fn draw_play(
+    assets: &Assets,
+    text: &TextPainter,
+    game: &Game,
+    fast_forward: bool,
+    effects: &Effects,
+    down: Option<&DownScreen>,
+    touch_mode: bool,
+) {
     let d = game.clock.sky_darkness();
     draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y);
     for b in &game.world.obstacles {
@@ -270,14 +309,25 @@ pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward:
     let height = height_with_antenna(player.kind, PLAY_SPRITE_HEIGHT);
     let half = max_half_width(texture, height);
     let feet = vec2(feet_x_on_screen(r.x + r.w / 2.0, half), r.y + r.h);
-    let pose = sprites::pose(player.motion, time(), player.vel.y < 0.0);
     let tint = mix(WHITE, CHARACTER_NIGHT_TINT, d);
-    draw_character(texture, feet, height, player.facing, pose, tint);
+    draw_zombies(assets, game, tint);
+    if let Some(down) = down {
+        draw_fallen_player(texture, player, &game.world, feet.x, height, tint, down.seconds);
+    } else {
+        let blink = game.combat.health.is_invincible() && (time() * HURT_BLINKS_PER_SECOND).fract() < 0.5;
+        let player_tint = Color { a: if blink { HURT_BLINK_ALPHA } else { 1.0 }, ..tint };
+        let pose = sprites::pose(player.motion, time(), player.vel.y < 0.0);
+        draw_character(texture, feet, height, player.facing, pose, player_tint);
+    }
 
-    pops.draw(text);
+    effects.draw(text, r, player.facing);
     draw_hud(text, &game.clock, game.wallet.coins(), fast_forward);
-    if !touch_mode {
-        text.centered("화살표: 걷기   Space: 점프   Esc: 캐릭터 고르기", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+    draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
+    if !touch_mode && down.is_none() {
+        text.centered("화살표: 걷기   Space: 점프   X: 공격   Esc: 캐릭터 고르기", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+    }
+    if let Some(down) = down {
+        draw_down_panel(text, down);
     }
 }
 
@@ -299,6 +349,15 @@ mod tests {
         for i in 0..3 {
             let r = select_card_rect(i);
             assert!(r.x >= 0.0 && r.x + r.w <= VIRTUAL_WIDTH && r.y + r.h <= VIRTUAL_HEIGHT);
+        }
+    }
+
+    #[test]
+    fn picked_character_stays_inside_card_top() {
+        // REVIEW-005 5번: 숨쉬기로 가장 늘어나도 고른 캐릭터(안테나 포함)가 카드 위로 넘치지 않는다.
+        for kind in CharacterKind::ALL {
+            let top = CARD_FEET_Y - height_with_antenna(kind, CARD_SPRITE_HEIGHT * PICKED_GROW) * (1.0 + sprites::IDLE_STRETCH);
+            assert!(top >= CARD_TOP, "{kind:?} 맨 위 {top}");
         }
     }
 

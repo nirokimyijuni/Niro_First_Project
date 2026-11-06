@@ -68,10 +68,6 @@ pub struct CoinPops {
 }
 
 impl CoinPops {
-    pub fn new() -> CoinPops {
-        CoinPops::default()
-    }
-
     /// 이번 프레임에 주운 코인 자리에 효과를 띄운다.
     /// `visible_before`: 업데이트 전에 각 코인이 보였는지. `picked`: logic이 알려 준 주운 개수.
     /// 보이던 코인이 사라졌으면 그 자리에. 그래도 모자라면(다시 생기자마자 주운 경우)
@@ -135,7 +131,7 @@ mod tests {
         let before: Vec<bool> = coins.list.iter().map(|c| c.is_visible()).collect();
         let picked = coins.update(0.0, coins.list[1].rect);
         assert_eq!(picked, 1);
-        let mut pops = CoinPops::new();
+        let mut pops = CoinPops::default();
         pops.spawn_for_picks(&before, &coins, picked, Vec2::ZERO);
         assert_eq!(pops.list.len(), 1);
         assert_eq!(pops.list[0].0, coins.list[1].rect.center());
@@ -143,7 +139,7 @@ mod tests {
 
     #[test]
     fn pops_go_away_after_a_moment() {
-        let mut pops = CoinPops::new();
+        let mut pops = CoinPops::default();
         pops.list.push((Vec2::ZERO, 0.0));
         pops.update(POP_SECONDS / 2.0);
         assert_eq!(pops.list.len(), 1);

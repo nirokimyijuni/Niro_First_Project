@@ -16,12 +16,8 @@ pub const PLAYER_HP_PER_LEVEL: u32 = 5;
 
 /// D3 좀비 체력 (3번 때리면 쓰러짐). 몬스터 레벨이 올라도 그대로.
 pub const ZOMBIE_HP: u32 = 3;
-/// D3 레벨 1 좀비 공격력
-pub const ZOMBIE_START_ATTACK: u32 = 5;
-/// D3 몬스터 레벨이 오를 때마다 줄어드는 좀비 공격력
-pub const ZOMBIE_ATTACK_DROP_PER_LEVEL: u32 = 2;
-/// D3 좀비 공격력은 이보다 낮아지지 않는다
-pub const ZOMBIE_MIN_ATTACK: u32 = 1;
+/// D32 좀비 공격력. 몬스터 레벨이 올라도 그대로.
+pub const ZOMBIE_ATTACK: u32 = 2;
 
 /// M8 상점에서도 쓰는 코인 최대 개수
 pub const COIN_MAX: u32 = 5000;
@@ -67,8 +63,14 @@ pub const PHYSICS_STEP_SECONDS: f32 = 1.0 / 120.0;
 pub const DUSK_SECONDS: f32 = 60.0;
 /// M2 새벽 길이 (초). US-011: 밤의 마지막 1분. 밤의 마지막 이만큼 동안 하늘이 천천히 밝아진다.
 pub const DAWN_SECONDS: f32 = 60.0;
+/// 해가 지는 18:00의 하늘 어둠 (0 한낮 ~ 1 한밤). 노을빛이 가장 센 때쯤이다 (sky.rs `dusk_glow`).
+pub const SUNSET_DARKNESS: f32 = 0.6;
+/// 해가 진 뒤 한밤처럼 어두워질 때까지 (초). 20초 = 게임 시계 24분.
+pub const NIGHTFALL_SECONDS: f32 = 20.0;
 /// D12 빨리감기(F 키)를 켰을 때 시간이 몇 배 빨리 가는지. 호출하는 쪽이 dt에 곱한다.
 pub const DEV_FAST_FORWARD_SCALE: f32 = 10.0;
+/// D33 새 게임을 빨리감기가 켜진 채로 시작하는지. 정식 릴리즈 전에 다시 정한다.
+pub const DEV_FAST_FORWARD_AT_START: bool = true;
 
 /// M2 한 프레임에 흘려 보내는 가장 긴 시간 (초). 다른 탭에 다녀오면 프레임 시간이 수십 초가 될 수 있는데,
 /// 그만큼 한꺼번에 흘리지 않고 여기서 자른다 → 탭을 떠나 있는 동안은 게임이 멈춘 것처럼 된다 (US-009).
@@ -85,6 +87,15 @@ pub const NIGHT_START_HOUR: u32 = 18;
 pub const DAY_GAME_MINUTES: u32 = (NIGHT_START_HOUR - DAY_START_HOUR) * 60;
 /// D14 게임 시계에서 밤이 차지하는 분 (18:00~다음 날 06:00 = 12시간).
 pub const NIGHT_GAME_MINUTES: u32 = MINUTES_PER_GAME_DAY - DAY_GAME_MINUTES;
+/// D31 정보판 시간대 이름: (시작 시각, 이름). 시작 시각이 커지는 순서로 둔다.
+pub const DAY_PERIODS: [(u32, &str); 6] = [
+    (0, "새벽"),
+    (DAY_START_HOUR, "아침"),
+    (10, "낮"),
+    (14, "오후"),
+    (NIGHT_START_HOUR, "저녁"),
+    (21, "밤"),
+];
 
 /// M2 게임을 시작할 때 캐릭터 왼쪽 위 x 위치 (상자가 없는 왼쪽).
 pub const PLAYER_SPAWN_X: f32 = 120.0;
@@ -95,6 +106,38 @@ pub const COIN_SIZE: f32 = 24.0;
 pub const COIN_GAP_ABOVE_BOX: f32 = 8.0;
 /// D11 코인을 주운 뒤 같은 자리에 다시 생길 때까지 (초)
 pub const COIN_RESPAWN_SECONDS: f32 = 10.0;
+
+// ---- M4 좀비 카스테라 (처음 값은 니로가 정했다. 해 보고 조절한다) ----
+
+/// US-039 좀비 크기 (가로, 세로). 수산나가 정한 처음 값: 플레이어와 같다.
+pub const ZOMBIE_WIDTH: f32 = 48.0;
+pub const ZOMBIE_HEIGHT: f32 = 64.0;
+/// US-039 좀비가 걷는 속도 (초당 픽셀). 플레이어보다 느려야 한다. 수산나가 정한 처음 값.
+pub const ZOMBIE_WALK_SPEED: f32 = 80.0;
+/// US-039 다음 좀비가 나올 때까지 (초). 3마리가 꽉 차 있는 동안은 세지 않는다.
+pub const ZOMBIE_SPAWN_SECONDS: f32 = 20.0;
+/// US-039 화면에 함께 있을 수 있는 좀비 수
+pub const ZOMBIE_MAX_ON_SCREEN: usize = 3;
+/// 좀비가 왼쪽 끝에서 나올 확률. 나머지는 오른쪽 끝.
+pub const ZOMBIE_SPAWN_LEFT_CHANCE: f32 = 0.5;
+/// 좀비가 나오는 화면 끝이 플레이어와 이만큼 가까우면 반대쪽 끝에서 나온다 (픽셀).
+/// 나오자마자 맞는 일이 없게 수산나가 정한 처음 값.
+pub const ZOMBIE_SPAWN_MIN_DISTANCE: f32 = 200.0;
+/// US-042 나타난 좀비가 날아오르는 좀비일 확률 (3마리 중 1마리쯤)
+pub const ZOMBIE_FLOAT_CHANCE: f32 = 1.0 / 3.0;
+/// US-042 나타나고 몇 초 뒤 떠오르는지
+pub const ZOMBIE_FLOAT_START_SECONDS: f32 = 10.0;
+/// US-042 떠오르고 몇 초 뒤 팔을 내려 펑 터지는지
+pub const ZOMBIE_FLOAT_SECONDS: f32 = 5.0;
+/// US-042 떠오르는 속도 (초당 픽셀). 수산나가 정한 처음 값.
+pub const ZOMBIE_FLOAT_RISE_SPEED: f32 = 30.0;
+/// US-040 맞은 좀비가 반짝이는 시간 (초). 수산나가 정한 처음 값.
+pub const ZOMBIE_HIT_FLASH_SECONDS: f32 = 0.2;
+
+/// US-040 플레이어 앞쪽으로 공격이 닿는 거리 (픽셀). 수산나가 정한 처음 값.
+pub const PLAYER_ATTACK_RANGE: f32 = 60.0;
+/// US-041 맞은 뒤 다시 맞지 않는 시간 (초)
+pub const PLAYER_HURT_INVINCIBLE_SECONDS: f32 = 1.0;
 
 #[cfg(test)]
 mod tests {
@@ -107,12 +150,11 @@ mod tests {
         assert_eq!(PLAYER_START_HP, 7);
         assert_eq!(PLAYER_HP_PER_LEVEL, 5);
         assert_eq!(ZOMBIE_HP, 3);
-        assert_eq!(ZOMBIE_START_ATTACK, 5);
-        assert_eq!(ZOMBIE_ATTACK_DROP_PER_LEVEL, 2);
-        assert_eq!(ZOMBIE_MIN_ATTACK, 1);
+        assert_eq!(ZOMBIE_ATTACK, 2);
         assert_eq!(COIN_MAX, 5000);
         assert_eq!(COIN_RESPAWN_SECONDS, 10.0);
         assert_eq!(DEV_FAST_FORWARD_SCALE, 10.0);
+        assert!(DEV_FAST_FORWARD_AT_START, "D33");
         assert_eq!((DUSK_SECONDS, DAWN_SECONDS), (60.0, 60.0));
         assert!(MINE_SECONDS_BARE_HAND > MINE_SECONDS_PICKAXE);
         assert_eq!((CRAFT_GRID_WIDTH, CRAFT_GRID_HEIGHT), (4, 3));

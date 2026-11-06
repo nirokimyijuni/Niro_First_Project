@@ -1,17 +1,18 @@
-//! 게임 한 판의 상태를 한데 묶는다: 플레이어, 맵, 낮/밤 시계, 코인, 지갑.
+//! 게임 한 판의 상태를 한데 묶는다: 플레이어, 맵, 낮/밤 시계, 코인, 지갑, 싸움(체력·좀비).
 //! Esc로 나갔다가 새 게임을 하면 `Game::new`로 새로 만든다.
 
 
 use super::character::CharacterKind;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
+use super::combat::{Combat, CombatEvent};
 use super::player::{Player, PlayerInput};
 use super::world::World;
 use crate::config::{PLAYER_HEIGHT, PLAYER_SPAWN_X};
 use macroquad::math::Vec2;
 
 /// 화면(로건)이 보고 팝업·소리를 낼 일.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GameEvent {
     /// 밤이 시작됐다.
     NightStarted,
@@ -19,6 +20,8 @@ pub enum GameEvent {
     DayStarted { day_number: u32 },
     /// 코인을 주웠다 (`count`개, 보통 1).
     CoinsPicked { count: u32 },
+    /// 좀비·체력에 생긴 일.
+    Combat(CombatEvent),
 }
 
 pub struct Game {
@@ -27,11 +30,13 @@ pub struct Game {
     pub clock: Clock,
     pub coins: Coins,
     pub wallet: Wallet,
+    pub combat: Combat,
 }
 
 impl Game {
     /// 고른 캐릭터로 새 게임. 1일째 낮, 코인 0개, 상자마다 코인 하나.
-    pub fn new(kind: CharacterKind) -> Game {
+    /// `seed`가 같으면 좀비가 나오는 쪽과 날아오르는 좀비가 늘 똑같다.
+    pub fn new(kind: CharacterKind, seed: u32) -> Game {
         let world = World::m1();
         let spawn = Vec2::new(PLAYER_SPAWN_X, world.ground_y - PLAYER_HEIGHT);
         Game {
@@ -40,12 +45,17 @@ impl Game {
             world,
             clock: Clock::new(),
             wallet: Wallet::new(),
+            combat: Combat::new(seed),
         }
     }
 
-    /// 한 프레임 진행. 빨리감기 중이면 부르는 쪽이 `dt`에 DEV_FAST_FORWARD_SCALE을 곱해서 넣는다.
+    /// 한 프레임 진행. 빨리감기는 main.rs `update_with_time_scale`이 같은 순서로 맡는다.
+    /// 쓰러진 뒤에는 시계·플레이어·코인·좀비 모두 멈춘다 (US-043).
     pub fn update(&mut self, input: &PlayerInput, dt: f32) -> Vec<GameEvent> {
         let mut events = Vec::new();
+        if self.combat.health.is_down() {
+            return events;
+        }
 
         self.player.update(input, dt, &self.world);
 
@@ -62,7 +72,20 @@ impl Game {
             events.push(GameEvent::CoinsPicked { count: picked });
         }
 
+        self.update_combat(input, dt, &mut events);
         events
+    }
+
+    /// 공격 버튼을 처리하고 좀비 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
+    /// 이번 프레임의 낮/밤을 본다. 빨리감기여도 `dt`는 진짜 시간이다 (D13: 빨라지는 건 시계·코인뿐).
+    pub fn update_combat(&mut self, input: &PlayerInput, dt: f32, events: &mut Vec<GameEvent>) {
+        let player_rect = self.player.rect();
+        if input.attack_pressed {
+            let hits = self.combat.player_attack(player_rect, self.player.facing);
+            events.extend(hits.into_iter().map(GameEvent::Combat));
+        }
+        let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
+        events.extend(happened.into_iter().map(GameEvent::Combat));
     }
 }
 
@@ -72,6 +95,7 @@ mod tests {
     use crate::config::{COIN_RESPAWN_SECONDS, DAY_SECONDS};
 
     const FRAME: f32 = 1.0 / 60.0;
+    const SEED: u32 = 7;
 
     fn no_input() -> PlayerInput {
         PlayerInput::default()
@@ -87,7 +111,7 @@ mod tests {
 
     #[test]
     fn new_game_starts_fresh() {
-        let g = Game::new(CharacterKind::Ellie);
+        let g = Game::new(CharacterKind::Ellie, SEED);
         assert_eq!(g.player.kind, CharacterKind::Ellie);
         assert_eq!(g.clock.day_number(), 1);
         assert!(!g.clock.is_night());
@@ -99,7 +123,7 @@ mod tests {
     #[test]
     fn walking_on_ground_does_not_pick_coins() {
         // 상자 옆을 땅으로 걷기만 하면 코인에 안 닿는다 (상자에 막힐 때까지 밀어 본다).
-        let mut g = Game::new(CharacterKind::Niro);
+        let mut g = Game::new(CharacterKind::Niro, SEED);
         let events = run(&mut g, PlayerInput { right: true, ..Default::default() }, 120);
         assert!(g.player.on_ground);
         assert_eq!(g.wallet.coins(), 0);
@@ -109,7 +133,7 @@ mod tests {
     #[test]
     fn standing_on_a_box_touches_its_coin() {
         // 진짜 Player 움직임으로: 첫 상자 앞에서 점프해 올라서기.
-        let mut g = Game::new(CharacterKind::Niro);
+        let mut g = Game::new(CharacterKind::Niro, SEED);
         let box_ = g.world.obstacles[0];
         g.player.pos.x = box_.x - 100.0;
         run(&mut g, no_input(), 10);
@@ -134,7 +158,7 @@ mod tests {
 
     #[test]
     fn standing_still_on_box_coin_stays_at_most_one_per_10_seconds() {
-        let mut g = Game::new(CharacterKind::Logan);
+        let mut g = Game::new(CharacterKind::Logan, SEED);
         let box_ = g.world.obstacles[0];
         // 상자 위에 떨어뜨린다.
         g.player.pos = Vec2::new(box_.x, box_.y - 200.0);
@@ -145,7 +169,7 @@ mod tests {
 
     #[test]
     fn clock_events_come_through_game() {
-        let mut g = Game::new(CharacterKind::Niro);
+        let mut g = Game::new(CharacterKind::Niro, SEED);
         let events = g.update(&no_input(), DAY_SECONDS);
         assert!(events.contains(&GameEvent::NightStarted));
         assert!(g.clock.is_night());
