@@ -5,6 +5,7 @@
 //! 좌표는 모두 가상 화면(960×540).
 
 #[allow(dead_code)]
+#[path = "../src/view"]
 mod view {
     pub mod screen {
         pub const VIRTUAL_WIDTH: f32 = 960.0;
@@ -21,7 +22,7 @@ mod view {
             pub fn centered(&self, _t: &str, _x: f32, _y: f32, _size: f32, _c: Color) {}
         }
     }
-    #[path = "../../src/view/touch.rs"]
+    #[path = "touch.rs"]
     pub mod touch;
 }
 
