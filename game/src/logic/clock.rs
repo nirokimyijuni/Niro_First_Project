@@ -68,7 +68,7 @@ impl Clock {
         self.phase == Phase::Night
     }
 
-    /// 지금 구간(낮 또는 밤)이 끝날 때까지 남은 초. 화면 시계에 쓴다.
+    /// 지금 구간(낮 또는 밤)이 끝날 때까지 남은 초. 하늘 색(노을·새벽)과 테스트에 쓴다.
     pub fn seconds_left_in_phase(&self) -> f32 {
         (self.phase_length() - self.seconds_in_phase).max(0.0)
     }

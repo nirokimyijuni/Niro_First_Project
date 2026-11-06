@@ -1,0 +1,42 @@
+{
+  "zombie": {
+    "asset_id": "0a67f330-bf54-448c-b715-373799abd116",
+    "sha12": "58e901cf1a2d"
+  },
+  "zombie-red": {
+    "asset_id": "0f6b6c6c-11dd-4e8c-8381-43d31f072901",
+    "sha12": "e2656529909e"
+  },
+  "zombie-square": {
+    "asset_id": "6d99e87f-8eab-45c9-b96c-a8eaef3f5297",
+    "sha12": "5ac499d9678e"
+  },
+  "zombie-round": {
+    "based_on": "zombie-square",
+    "sha12": "74d7fc549ef2"
+  },
+  "skeleton-normal": {
+    "asset_id": "72cbe851-3cf1-45d0-a2ea-90c8d9cb7977",
+    "sha12": "5421ec7c7051"
+  },
+  "skeleton-half": {
+    "asset_id": "81d6e6e2-857d-4631-bd30-f88ec4cb7369",
+    "sha12": "fc09f357de41"
+  },
+  "niro": {
+    "asset_id": "2a8c1ccf-de5e-44b1-b05c-0b2cf0b8847c",
+    "sha12": "f2fa53ffebb7"
+  },
+  "ellie": {
+    "asset_id": "7f38382e-6828-431a-ac0c-46da22acd387",
+    "sha12": "dfced1290130"
+  },
+  "logan": {
+    "asset_id": "a0f0e70f-42d2-41f5-9d44-082add4d69f4",
+    "sha12": "2c50e979925b"
+  },
+  "skeleton-full": {
+    "based_on": "art/concept/완전-레벨업-스켈레톤.webp",
+    "sha12": "3983ac544d75"
+  }
+}

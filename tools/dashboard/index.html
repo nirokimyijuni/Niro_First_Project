@@ -35,7 +35,8 @@
   .top { display: flex; gap: 14px; align-items: center; }
   .avatar {
     width: 76px; height: 86px; flex: none; border-radius: 16px; background-color: #fffaf0;
-    background-repeat: no-repeat; display: grid; place-items: center; font-size: 46px;
+    background-repeat: no-repeat; background-position: center; background-size: contain;
+    image-rendering: pixelated; display: grid; place-items: center; font-size: 46px;
     border: 2px solid var(--line);
   }
   .card.working .avatar { animation: bob 1s ease-in-out infinite; }
@@ -99,18 +100,15 @@
   <div class="feed" id="feed"></div>
 </main>
 <script>
-// 원화(characters.png 547x428)에서 캐릭터를 자르는 좌표: game/src/view/assets.rs 와 같은 값
-const ART = { w: 547, h: 428,
-  niro: [34, 176, 182, 236], ellie: [232, 199, 132, 181], logan: [382, 163, 130, 207] };
-
 const AGENTS = [
   { key: "main",   name: "Claude", role: "감독 · 일 나눠 주기", emoji: "🎬" },
   { key: "niro",   name: "니로",   role: "이야기 · 유저스토리", art: "niro" },
-  { key: "susanna", name: "수산나", role: "게임 규칙 (백엔드)",  emoji: "⚙️" },
+  { key: "susanna", name: "수산나", role: "게임 규칙 (백엔드)",  sun: true },
   { key: "logan",  name: "로건",   role: "화면 · 그림 (프론트)", art: "logan" },
-  { key: "bob",    name: "밥",     role: "코드 리뷰",            emoji: "🔍" },
+  { key: "hailey", name: "헤일리", role: "캐릭터 디자인",        art: "zombie-round" },
+  { key: "bob",    name: "밥",     role: "코드 리뷰",            art: "skeleton-normal" },
   { key: "ellie",  name: "엘리",   role: "테스터",              art: "ellie" },
-  { key: "kevin",  name: "케빈",   role: "빌드 · 배포",          emoji: "🚀" },
+  { key: "kevin",  name: "케빈",   role: "빌드 · 배포",          art: "skeleton-full" },
 ];
 const NAME = Object.fromEntries(AGENTS.map(a => [a.key, a.name]));
 // 이름이 바뀐 에이전트: 예전 이름으로 남은 기록도 새 카드에 모은다
@@ -164,12 +162,8 @@ const hhmm = ts => new Date(ts * 1000).toLocaleTimeString("ko-KR", { hour: "2-di
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function avatarStyle(a) {
-  if (!a.art) return "";
-  const [x, y, w, h] = ART[a.art];
-  const k = Math.min(76 / w, 86 / h);
-  const ox = (76 - w * k) / 2, oy = (86 - h * k) / 2;
-  return `background-image:url(/characters.png);background-size:${ART.w * k}px ${ART.h * k}px;` +
-         `background-position:${ox - x * k}px ${oy - y * k}px`;
+  if (a.sun) return "background-image:radial-gradient(circle,#fffbe0 0 16%,#ffd23f 30% 38%,rgba(255,190,60,.45) 52%,transparent 70%)";
+  return a.art ? `background-image:url(/${a.art}.png)` : "";
 }
 
 function render(records) {
@@ -202,7 +196,7 @@ function render(records) {
     const task = tasks[a.key];
     return `<div class="card ${working ? "working" : ""}">
       <div class="top">
-        <div class="avatar" style="${avatarStyle(a)}">${a.art ? "" : a.emoji}</div>
+        <div class="avatar" style="${avatarStyle(a)}">${a.emoji || ""}</div>
         <div>
           <div class="name">${a.name}</div>
           <div class="role">${a.role}</div>

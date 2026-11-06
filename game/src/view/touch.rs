@@ -1,4 +1,4 @@
-//! 폰 터치 조작 (D16): 왼쪽 떠다니는 조이스틱 + 오른쪽 큰 버튼들 + 왼쪽 위 "고르기" 버튼.
+//! 폰 터치 조작 (D16, D25): 왼쪽 떠다니는 조이스틱 + 오른쪽 절반 아무 곳이나 점프 + 왼쪽 위 "고르기" 버튼.
 //! 위쪽은 판정(손가락 추적·데드존·버튼 영역)만 하는 작은 함수들이라 단위 테스트를 한다.
 //! 아래쪽 `draw_*`는 판정 결과를 보여 주기만 한다. 좌표는 모두 가상 화면(960×540) 기준.
 //! 게임 규칙은 없다: 결과는 키보드와 같은 `PlayerInput` 모양(왼쪽/오른쪽/점프 새로 누름)이다.
@@ -15,7 +15,7 @@ pub const JOYSTICK_RADIUS: f32 = 85.0;
 const KNOB_RADIUS: f32 = 40.0;
 /// 받침 반지름의 이 비율보다 덜 밀면 멈춤 (데드존)
 pub const JOYSTICK_DEADZONE: f32 = 0.25;
-/// 이 x보다 왼쪽에 손가락을 대면 조이스틱 (가상 화면 왼쪽 절반)
+/// 이 x보다 왼쪽에 손가락을 대면 조이스틱, 오른쪽이면 점프 (D25)
 pub const JOYSTICK_AREA_RIGHT: f32 = VIRTUAL_WIDTH / 2.0;
 
 /// 오른쪽 버튼 반지름 (지름 136)
@@ -41,7 +41,7 @@ const BUTTON_ICON: Color = Color::new(1.0, 1.0, 1.0, 0.95);
 const BACK_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.55);
 const LINE_WIDTH: f32 = 5.0;
 
-/// 오른쪽 버튼 종류. M4에 공격, M6에 캐기를 여기와 `PLAY_BUTTONS`에 더하면 된다.
+/// 오른쪽 버튼 종류. M4에 공격, M7에 캐기를 여기와 `PLAY_BUTTONS`에 더하면 된다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
     Jump,
@@ -62,8 +62,8 @@ pub struct TouchButton {
     pub radius: f32,
 }
 
-/// 플레이 화면 오른쪽 버튼 목록. 지금은 점프 하나 (오른쪽 아래 구석).
-/// 버튼이 늘면 점프 왼쪽·위로 하나씩 놓는다.
+/// 플레이 화면 오른쪽 버튼 목록. 지금은 점프 하나 (오른쪽 아래 구석, 안내용 그림. 판정은 오른쪽 절반 전체).
+/// 버튼이 늘면 점프 왼쪽·위로 하나씩 놓는다. 버튼 자리가 오른쪽 절반 점프보다 먼저 판정된다.
 pub const PLAY_BUTTONS: [TouchButton; 1] = [TouchButton {
     kind: ButtonKind::Jump,
     center: Vec2::new(
@@ -81,16 +81,21 @@ pub fn button_at(buttons: &[TouchButton], point: Vec2) -> Option<ButtonKind> {
         .map(|b| b.kind)
 }
 
+/// 버튼 자리가 아닌 오른쪽 절반은 어디든 점프 (D25).
+fn right_half_button(point: Vec2) -> Option<ButtonKind> {
+    (point.x >= JOYSTICK_AREA_RIGHT).then_some(ButtonKind::Jump)
+}
+
 /// 받침 가운데: 손가락을 댄 자리를 받침이 화면(가상 960×540) 안에 다 보이게 당긴다.
-/// 손잡이는 `knob_offset`으로 손가락 쪽으로 밀리므로 방향은 그대로 맞는다 (REVIEW-003 3번).
+/// 받침은 그림일 뿐이고, 걷기 판정은 처음 댄 자리(`Joystick::start`)에서 잰다 (REVIEW-003 3번, BUG-005).
 pub fn joystick_base(finger: Vec2) -> Vec2 {
     let r = JOYSTICK_RADIUS;
     finger.clamp(vec2(r, r), vec2(VIRTUAL_WIDTH - r, VIRTUAL_HEIGHT - r))
 }
 
-/// 손잡이 자리: 받침 가운데에서 손가락 쪽으로, 받침 반지름까지만.
-pub fn knob_offset(base: Vec2, finger: Vec2, radius: f32) -> Vec2 {
-    (finger - base).clamp_length_max(radius)
+/// 손잡이 자리: 중립(처음 댄 자리)에서 손가락까지, 받침 반지름까지만.
+pub fn knob_offset(start: Vec2, finger: Vec2, radius: f32) -> Vec2 {
+    (finger - start).clamp_length_max(radius)
 }
 
 /// 손잡이 가로 위치 → (왼쪽, 오른쪽). 세로는 쓰지 않는다. 데드존 안이면 둘 다 false.
@@ -137,7 +142,9 @@ pub struct Joystick {
     pub finger: u64,
     /// 받침 가운데 (처음 댄 자리. 화면 끝이면 받침이 다 보이게 안쪽으로)
     pub base: Vec2,
-    /// 받침 가운데에서 손잡이까지 (반지름 안)
+    /// 처음 댄 자리 = 중립. 받침이 안쪽으로 당겨져도 여기서 밀어야 걷는다 (BUG-005)
+    pub start: Vec2,
+    /// 중립에서 손가락까지 민 만큼 (반지름 안). 그림은 받침 가운데에서 이만큼 옮겨 그린다
     pub knob: Vec2,
 }
 
@@ -171,10 +178,13 @@ impl TouchControls {
 
     /// 플레이 화면이 아닐 때 (메뉴, 세로 안내): 조이스틱·버튼은 놓고, 화면에 있는 손가락만 기억한다.
     /// 그래서 메뉴에서 누른 채로 플레이가 시작되어도 그 손가락이 점프나 조이스틱이 되지 않는다.
-    pub fn idle(&mut self, fingers: &[Finger]) {
+    /// 돌려주는 값은 이번 프레임에 새로 닿은 손가락 자리 (메뉴 탭). 대고 있던 손가락이 움직여도 탭이 아니다.
+    pub fn idle(&mut self, fingers: &[Finger]) -> Option<Vec2> {
+        let tap = fingers.iter().find(|f| f.phase == TouchPhase::Started || !self.known.contains(&f.id)).map(|f| f.pos);
         self.joystick = None;
         self.held.clear();
         self.known = fingers.iter().filter(|f| !f.lifted()).map(|f| f.id).collect();
+        tap
     }
 
     /// 플레이 화면에서 한 프레임.
@@ -195,20 +205,20 @@ impl TouchControls {
             if !self.known.contains(&f.id) {
                 if show_back && BACK_BUTTON.contains(f.pos) {
                     out.back_pressed = true;
-                } else if let Some(kind) = button_at(buttons, f.pos) {
+                } else if let Some(kind) = button_at(buttons, f.pos).or(right_half_button(f.pos)) {
                     match kind {
                         ButtonKind::Jump => out.jump_pressed = true,
                     }
                     if !f.lifted() {
                         self.held.push((f.id, kind));
                     }
-                } else if f.pos.x < JOYSTICK_AREA_RIGHT && self.joystick.is_none() && !f.lifted() {
-                    self.joystick = Some(Joystick { finger: f.id, base: joystick_base(f.pos), knob: Vec2::ZERO });
+                } else if self.joystick.is_none() && !f.lifted() {
+                    self.joystick = Some(Joystick { finger: f.id, base: joystick_base(f.pos), start: f.pos, knob: Vec2::ZERO });
                 }
             }
             if let Some(j) = self.joystick.as_mut() {
                 if j.finger == f.id {
-                    j.knob = knob_offset(j.base, f.pos, JOYSTICK_RADIUS);
+                    j.knob = knob_offset(j.start, f.pos, JOYSTICK_RADIUS);
                 }
             }
         }
@@ -405,10 +415,28 @@ mod tests {
     }
 
     #[test]
-    fn right_half_touch_is_not_joystick() {
+    fn right_half_touch_jumps_instead_of_joystick() {
         let mut t = TouchControls::new();
-        t.update(&[finger(1, TouchPhase::Started, 600.0, 300.0)], &PLAY_BUTTONS, true);
+        let f = t.update(&[finger(1, TouchPhase::Started, 600.0, 100.0)], &PLAY_BUTTONS, true);
+        assert!(f.jump_pressed, "버튼 그림 밖이어도 오른쪽 절반이면 점프 (D25)");
         assert!(t.joystick.is_none());
+        assert!(t.is_held(ButtonKind::Jump));
+        let f = t.update(&[finger(1, TouchPhase::Stationary, 600.0, 100.0)], &PLAY_BUTTONS, true);
+        assert!(!f.jump_pressed, "꾹 눌러도 한 번");
+    }
+
+    #[test]
+    fn menu_tap_is_only_a_new_finger() {
+        let mut t = TouchControls::new();
+        // 폰을 쥔 엄지가 먼저 닿아 있다
+        assert_eq!(t.idle(&[finger(1, TouchPhase::Started, 20.0, 500.0)]), Some(vec2(20.0, 500.0)));
+        // 그 엄지가 살짝 움직여도 탭이 아니다
+        assert_eq!(t.idle(&[finger(1, TouchPhase::Moved, 25.0, 500.0)]), None);
+        // 다른 손가락으로 그림을 누른 자리는 엄지가 같은 프레임에 움직여도 그대로다
+        let thumb = finger(1, TouchPhase::Moved, 30.0, 500.0);
+        assert_eq!(t.idle(&[thumb, finger(2, TouchPhase::Started, 240.0, 250.0)]), Some(vec2(240.0, 250.0)));
+        // 한 프레임 안에 대고 뗀 짧은 톡도 탭이다
+        assert_eq!(t.idle(&[finger(3, TouchPhase::Ended, 480.0, 250.0)]), Some(vec2(480.0, 250.0)));
     }
 
     #[test]
@@ -502,10 +530,16 @@ mod tests {
         let j = t.joystick.unwrap();
         let r = JOYSTICK_RADIUS;
         assert!(j.base.x - r >= 0.0 && j.base.y + r <= VIRTUAL_HEIGHT, "받침이 화면 안: {}", j.base);
-        // 손가락을 오른쪽으로 밀면 손잡이가 따라가고 걷는다 (손가락-손잡이 관계 유지)
+        assert_eq!(j.knob, Vec2::ZERO, "대기만 하면 손잡이는 가운데 (BUG-005)");
+        // 처음 댄 자리에서 오른쪽으로 밀면 손잡이가 따라가고 걷는다
         let f = t.update(&[finger(1, TouchPhase::Moved, 200.0, 520.0)], &PLAY_BUTTONS, true);
         assert!(f.right && !f.left);
-        assert_eq!(t.joystick.unwrap().knob, knob_offset(j.base, vec2(200.0, 520.0), r));
+        assert_eq!(t.joystick.unwrap().knob, knob_offset(j.start, vec2(200.0, 520.0), r));
+        // 왼쪽 끝 가까이 대고 왼쪽으로 밀어도 걷는다 (받침 가운데보다 왼쪽이어도 민 만큼만 잰다)
+        let mut t = TouchControls::new();
+        t.update(&[finger(1, TouchPhase::Started, 60.0, 300.0)], &PLAY_BUTTONS, true);
+        let f = t.update(&[finger(1, TouchPhase::Moved, 30.0, 300.0)], &PLAY_BUTTONS, true);
+        assert!(f.left && !f.right);
         // 화면 가운데 쪽에 대면 그 자리 그대로
         assert_eq!(joystick_base(vec2(200.0, 300.0)), vec2(200.0, 300.0));
     }

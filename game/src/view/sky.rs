@@ -5,11 +5,12 @@
 //!   ([`SkyImages::generate`] → [`SkyArt`]). 매 프레임에는 만든 그림을 늘이고 색을 곱해서 그리기만 한다.
 //! - 나중에 아이·엄마가 그린 해·달·구름으로 바꾸려면 [`SkyArt`]의 텍스처만 그림 파일로 바꿔 끼우면 된다
 //!   (그리는 함수 [`draw_sun`], [`draw_moon`], [`draw_cloud`]는 그대로).
-//! - logic이 주는 값은 `sky_darkness`(0 한낮 ~ 1 한밤) 하나만 쓴다. 게임 규칙은 없다.
+//! - logic이 주는 값은 `sky_darkness`(0 한낮 ~ 1 한밤)와 시각(`time_of_day_minutes`)뿐이다. 게임 규칙은 없다.
 //! - 색·크기·빠르기는 그림 값이라 config.rs가 아니라 이 파일 위쪽 상수에 모았다.
 //! - 그리는 일은 [`Canvas`]를 거친다: 게임에서는 GPU([`GpuCanvas`]), 테스트에서는 CPU로 PNG를 뽑아 본다.
 
 use super::screen::VIRTUAL_WIDTH;
+use crate::config::{DAY_GAME_MINUTES, DAY_START_HOUR, MINUTES_PER_GAME_DAY, NIGHT_GAME_MINUTES, NIGHT_START_HOUR};
 use macroquad::prelude::*;
 
 // ================= 그림 값 (색·크기·빠르기) =================
@@ -131,13 +132,13 @@ const GLITTER_NIGHT: Color = Color::new(0.95, 0.93, 0.80, 0.28);
 
 // ---- 해·달 자리 ----
 
-/// 해·달 자리. 메뉴 화면은 오른쪽 위에 해. 플레이는 위쪽에 정보판이 있어서 조금 아래.
-pub struct SkyLayout {
-    pub sun: (f32, f32),
-    pub moon: (f32, f32),
-}
-pub const MENU_SKY: SkyLayout = SkyLayout { sun: (870.0, 80.0), moon: (150.0, 120.0) };
-pub const PLAY_SKY: SkyLayout = SkyLayout { sun: (850.0, 150.0), moon: (170.0, 140.0) };
+/// 메뉴 화면의 해 자리 (오른쪽 위에 고정).
+const MENU_SUN: (f32, f32) = (870.0, 80.0);
+/// 플레이 화면 해·달이 지나는 호 (D31): 왼쪽 수평선 → 가운데 꼭대기 → 오른쪽 수평선.
+/// 꼭대기는 해 가까운 빛까지 정보판(y 66까지) 아래에 오는 높이.
+const ARC_LEFT_X: f32 = 70.0;
+const ARC_RIGHT_X: f32 = 890.0;
+const ARC_TOP_Y: f32 = 125.0;
 
 // ================= 작은 도우미 =================
 
@@ -535,6 +536,19 @@ impl Canvas for GpuCanvas<'_> {
 
 // ================= 이번 프레임의 하늘 =================
 
+/// `rise_hour`에 떠서 `up_minutes`분 동안 하늘에 있는 해나 달이 `minutes`(00:00부터 분) 때 얼마나 갔는지.
+/// 0 = 막 뜸, 1 = 질 때. 하늘에 없는 시각이면 `None`.
+fn arc_progress(minutes: u32, rise_hour: u32, up_minutes: u32) -> Option<f32> {
+    let since_rise = (minutes + MINUTES_PER_GAME_DAY - rise_hour * 60) % MINUTES_PER_GAME_DAY;
+    (since_rise < up_minutes).then(|| since_rise as f32 / up_minutes as f32)
+}
+
+/// 호 위의 자리. 양 끝에서는 몸 전체가 수평선 바로 아래라, 바다 뒤에서 나타나고 사라진다.
+fn arc_position(progress: f32, radius: f32) -> Vec2 {
+    let height = (progress * std::f32::consts::PI).sin();
+    vec2(lerp(ARC_LEFT_X, ARC_RIGHT_X, progress), lerp(HORIZON_Y + radius, ARC_TOP_Y, height))
+}
+
 /// 해나 달 하나
 #[derive(Clone, Copy, Debug)]
 pub struct Body {
@@ -561,22 +575,26 @@ pub struct SkyLook {
 }
 
 impl SkyLook {
-    pub fn new(darkness: f32, layout: &SkyLayout, time: f32) -> SkyLook {
+    /// 타이틀·고르기: 언제나 한낮, 해는 제자리.
+    pub fn menu(time: f32) -> SkyLook {
+        let sun = Body { pos: vec2(MENU_SUN.0, MENU_SUN.1), radius: SUN_RADIUS, amount: 0.0 };
+        SkyLook { d: 0.0, dusk: 0.0, time, sun: Some(sun), moon: None }
+    }
+
+    /// 플레이: `minutes`(00:00부터 분)로 해·달 자리를 정한다. 바다가 나중에 그려져서 수평선 아래는 가려진다.
+    pub fn play(darkness: f32, minutes: u32, time: f32) -> SkyLook {
         let d = darkness.clamp(0.0, 1.0);
-        // 해: 어두워질수록 주황빛으로 커지며 수평선 아래로 (바다가 나중에 그려져서 가려진다).
-        let sun = (d < 1.0).then(|| {
+        // 해: 어두워질수록 주황빛으로 커진다.
+        let sun = arc_progress(minutes, DAY_START_HOUR, DAY_GAME_MINUTES).map(|progress| {
             let set = ramp(d, 0.05, 0.6);
             let radius = SUN_RADIUS * (1.0 + SUNSET_GROW * set);
-            let sink = ramp(d, 0.0, 0.85);
-            let y = lerp(layout.sun.1, HORIZON_Y + radius * 1.8, sink);
-            Body { pos: vec2(layout.sun.0, y), radius, amount: set }
+            Body { pos: arc_position(progress, radius), radius, amount: set }
         });
-        // 보름달: 해가 지는 동안 수평선에서 떠오르고, 새벽에 다시 내려가며 사라진다.
-        let moon_alpha = ramp(d, 0.3, 0.9);
-        let moon = (moon_alpha > 0.0).then(|| {
-            let rise = ramp(d, 0.2, 1.0);
-            let y = lerp(HORIZON_Y + MOON_RADIUS * 2.0, layout.moon.1, rise);
-            Body { pos: vec2(layout.moon.0, y), radius: MOON_RADIUS, amount: moon_alpha }
+        // 보름달: 새벽에 하늘이 밝아지면서 흐려진다.
+        let moon = arc_progress(minutes, NIGHT_START_HOUR, NIGHT_GAME_MINUTES).map(|progress| Body {
+            pos: arc_position(progress, MOON_RADIUS),
+            radius: MOON_RADIUS,
+            amount: ramp(d, 0.3, 0.9),
         });
         SkyLook { d, dusk: dusk_glow(d), time, sun, moon }
     }
@@ -598,9 +616,10 @@ pub fn draw_sky(c: &mut impl Canvas, look: &SkyLook) {
         .collect();
     c.vgradient(0.0, VIRTUAL_WIDTH, &stops);
 
-    // 노을·새벽: 해 쪽 수평선을 따라 따뜻한 빛이 옆으로 길게 번진다
+    // 노을·새벽: 해 쪽 수평선을 따라 따뜻한 빛이 옆으로 길게 번진다.
+    // 새벽에는 해가 아직 없으니 곧 해가 뜰 왼쪽 끝에 번진다.
     if look.dusk > 0.0 {
-        let x = look.sun.map(|s| s.pos.x).unwrap_or(VIRTUAL_WIDTH * 0.75);
+        let x = look.sun.map(|s| s.pos.x).unwrap_or(ARC_LEFT_X);
         let (w, h, a) = DUSK_BAND;
         let tint = with_alpha(DUSK_SKY[2], a * look.dusk);
         c.image(Tex::Glow, Rect::new(x - w / 2.0, HORIZON_Y - h / 2.0, w, h), tint);
@@ -799,22 +818,54 @@ mod tests {
     }
 
     #[test]
-    fn sun_sets_fully_below_horizon_at_night() {
-        // 해가 다 내려가면 바다에 가려진다 (커진 노을 해도).
-        let look = SkyLook::new(0.9, &PLAY_SKY, 0.0);
-        let sun = look.sun.expect("아직 해가 있다");
-        assert!(sun.pos.y - sun.radius > HORIZON_Y);
-        assert_eq!(sun.above_horizon(), 0.0);
-        assert!(SkyLook::new(1.0, &PLAY_SKY, 0.0).sun.is_none());
-        // 한낮엔 달이 없고 해는 다 떠 있다
-        let noon = SkyLook::new(0.0, &PLAY_SKY, 0.0);
-        assert!(noon.moon.is_none());
-        assert_eq!(noon.sun.unwrap().above_horizon(), 1.0);
-        // 한밤 달은 다 떠 있다
-        assert_eq!(SkyLook::new(1.0, &PLAY_SKY, 0.0).moon.unwrap().above_horizon(), 1.0);
-        // 플레이 화면 해·달은 정보판(맨 위 약 70픽셀) 아래.
-        assert!(PLAY_SKY.sun.1 - SUN_RADIUS > 70.0);
-        assert!(PLAY_SKY.moon.1 - MOON_RADIUS > 70.0);
+    fn sun_and_moon_ride_the_arc() {
+        let body_at = |minutes: u32| {
+            let look = SkyLook::play(0.0, minutes, 0.0);
+            (look.sun, look.moon)
+        };
+        // 06:00 왼쪽 수평선에서 뜨고 18:00 오른쪽 수평선으로 진다. 달은 18:00에 뜨고 06:00에 진다.
+        let sunrise = body_at(360).0.expect("06:00에 해가 뜬다");
+        assert_eq!(sunrise.pos.x, ARC_LEFT_X);
+        assert_eq!(sunrise.above_horizon(), 0.0);
+        let sunset = body_at(1079).0.expect("17:59에는 아직 해가 있다");
+        assert!(sunset.pos.x > ARC_RIGHT_X - 2.0 && sunset.above_horizon() < 0.1);
+        assert!(body_at(1080).0.is_none(), "18:00에는 해가 졌다");
+        let moonrise = body_at(1080).1.expect("18:00에 달이 뜬다");
+        assert_eq!(moonrise.pos.x, ARC_LEFT_X);
+        assert_eq!(moonrise.above_horizon(), 0.0);
+        let moonset = body_at(359).1.expect("05:59에는 아직 달이 있다");
+        assert!(moonset.pos.x > ARC_RIGHT_X - 2.0 && moonset.above_horizon() < 0.1);
+        assert!(body_at(360).1.is_none(), "06:00에는 달이 졌다");
+
+        // 12:00·00:00이 가장 높고, 늘 왼쪽에서 오른쪽으로 간다
+        let noon = body_at(720).0.unwrap();
+        assert_eq!(noon.pos.y, ARC_TOP_Y);
+        assert_eq!(noon.above_horizon(), 1.0);
+        assert!(body_at(720).1.is_none(), "한낮에는 달이 없다");
+        let midnight = body_at(0);
+        assert_eq!(midnight.1.unwrap().pos.y, ARC_TOP_Y);
+        assert!(midnight.0.is_none(), "한밤에는 해가 없다");
+        let mut last_x = f32::MIN;
+        for minutes in 360..1080 {
+            let sun = body_at(minutes).0.unwrap();
+            assert!(sun.pos.x > last_x);
+            assert!(sun.pos.y >= noon.pos.y, "{minutes}분");
+            last_x = sun.pos.x;
+        }
+    }
+
+    #[test]
+    fn arc_stays_below_info_panel() {
+        // 정보판은 y 66까지. 가장 높을 때 해의 가까운 빛과 달이 그 아래에 있다.
+        assert!(ARC_TOP_Y - SUN_RADIUS * SUN_HALO_NEAR.0 / 2.0 > 66.0);
+        assert!(ARC_TOP_Y - MOON_RADIUS > 66.0);
+    }
+
+    #[test]
+    fn menu_sun_stays_put() {
+        let look = SkyLook::menu(3.0);
+        assert_eq!(look.sun.unwrap().pos, vec2(MENU_SUN.0, MENU_SUN.1));
+        assert!(look.moon.is_none());
     }
 
     #[test]
@@ -927,17 +978,18 @@ mod tests {
         let dir = std::env::var("SKY_PREVIEW_DIR").expect("SKY_PREVIEW_DIR");
         let images = SkyImages::generate();
         let ground_y = crate::config::GROUND_Y;
-        for (name, d, layout) in [
-            ("menu", 0.0, &MENU_SKY),
-            ("day", 0.0, &PLAY_SKY),
-            ("dusk_early", 0.3, &PLAY_SKY),
-            ("dusk", 0.5, &PLAY_SKY),
-            ("dusk_late", 0.7, &PLAY_SKY),
-            ("night", 1.0, &PLAY_SKY),
+        for (name, look) in [
+            ("menu", SkyLook::menu(3.0)),
+            ("morning", SkyLook::play(0.0, 7 * 60 + 30, 3.0)),
+            ("noon", SkyLook::play(0.0, 12 * 60, 3.0)),
+            ("afternoon", SkyLook::play(0.0, 15 * 60 + 30, 3.0)),
+            ("dusk", SkyLook::play(0.5, 17 * 60 + 24, 3.0)),
+            ("dusk_late", SkyLook::play(0.85, 17 * 60 + 45, 3.0)),
+            ("midnight", SkyLook::play(1.0, 0, 3.0)),
+            ("dawn", SkyLook::play(0.5, 5 * 60 + 24, 3.0)),
         ] {
             let (w, h) = (960usize, 540usize);
             let mut c = CpuCanvas { images: &images, w, h, px: vec![[0.9, 0.76, 0.52]; w * h] };
-            let look = SkyLook::new(d, layout, 3.0);
             draw_sky(&mut c, &look);
             draw_sea(&mut c, &look, ground_y);
             // export_png는 위아래를 뒤집어 저장하므로 미리 뒤집는다.

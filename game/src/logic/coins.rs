@@ -2,7 +2,7 @@
 //!
 //! - 상자마다 위쪽 가운데에 코인이 하나 떠 있다.
 //! - 플레이어가 닿으면 사라지고, COIN_RESPAWN_SECONDS 뒤 같은 자리에 다시 생긴다.
-//! - 지갑은 코인을 COIN_MAX개보다 많이 담지 않는다. 상점(M7)에서도 쓴다.
+//! - 지갑은 코인을 COIN_MAX개보다 많이 담지 않는다. 상점(M8)에서도 쓴다.
 
 
 use super::world::World;
@@ -84,7 +84,7 @@ impl Wallet {
     }
 
     /// 코인을 쓴다. 모자라면 쓰지 않고 false.
-    // 상점(M7)에서 쓸 함수라 아직 부르는 곳이 없다. 상점을 붙이면 이 줄을 지운다.
+    // 상점(M8)에서 쓸 함수라 아직 부르는 곳이 없다. 상점을 붙이면 이 줄을 지운다.
     #[allow(dead_code)]
     pub fn spend(&mut self, amount: u32) -> bool {
         if amount > self.coins {

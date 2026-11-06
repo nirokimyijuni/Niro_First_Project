@@ -1,4 +1,4 @@
-//! 정보판(HUD): 화면 맨 위에 크게. 왼쪽 = 낮/밤 + 24시간 시계(HH:MM, D14), 가운데 = N일째 · 버틴 날, 오른쪽 = 코인.
+//! 정보판(HUD): 화면 맨 위에 크게. 왼쪽 = 시간대 이름 + 24시간 시계(HH:MM, D14), 가운데 = N일째 · 버틴 날, 오른쪽 = 코인.
 //! 빨리감기(D12)가 켜져 있으면 정보판 줄 바로 아래 오른쪽(해 그림 왼쪽)에 "빨리감기 x10" 판.
 //! 값은 모두 logic(clock, wallet)이 준 그대로 보여 준다.
 
@@ -26,14 +26,27 @@ const MID_TEXT: f32 = 34.0;
 const ICON_X: f32 = 32.0;
 const ICON_TEXT_GAP: f32 = 58.0;
 const PANEL_PAD_RIGHT: f32 = 20.0;
-/// 빨리감기 판: 정보판 줄 바로 아래. 해(가운데 x 850, 빛 반지름 약 59)와 겹치지 않게
-/// 판 오른쪽 끝을 해 빛 왼쪽(791)보다 조금 왼쪽에 맞춘다.
+/// 빨리감기 판: 정보판 줄 바로 아래. 개발용이고 판이 위에 그려져서 지나가는 해와 겹쳐도 글자는 보인다.
 const FAST_PANEL_TOP: f32 = PANEL_TOP + PANEL_HEIGHT + 8.0;
 const FAST_PANEL_HEIGHT: f32 = 48.0;
 const FAST_PANEL_RIGHT: f32 = 775.0;
 const FAST_ICON_H: f32 = 24.0;
 const FAST_PAD_LEFT: f32 = 20.0;
 const FAST_ICON_TEXT_GAP: f32 = 12.0;
+
+/// 시간대 이름 (D31). [`draw_hud`]가 이 목록으로 판 폭을 잰다.
+const PERIOD_NAMES: [&str; 5] = ["아침", "낮", "오후", "저녁", "새벽"];
+
+/// 시각(00:00부터 분) → 시간대 이름: 아침 06~10시, 낮 10~14시, 오후 14~18시, 저녁 18~24시, 새벽 0~6시.
+pub fn period_name(minutes: u32) -> &'static str {
+    PERIOD_NAMES[match minutes / 60 {
+        6..=9 => 0,
+        10..=13 => 1,
+        14..=17 => 2,
+        18..=23 => 3,
+        _ => 4,
+    }]
+}
 
 /// 24시간 시계의 (시, 분) → "HH:MM". 두 자리씩. 시는 23, 분은 59를 넘지 않는다.
 pub fn hh_mm(hour: u32, minute: u32) -> String {
@@ -95,26 +108,23 @@ pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: boo
     let mid_y = PANEL_TOP + PANEL_HEIGHT / 2.0;
     let baseline = PANEL_TOP + TEXT_BASELINE;
 
-    // 왼쪽: 낮/밤 + 24시간 시계. 판 폭은 숫자가 바뀌어도 흔들리지 않게 고정 견본으로 잰다.
-    let label = match clock.phase() {
-        Phase::Day => "낮",
-        Phase::Night => "밤",
-    };
-    let is_night = clock.is_night();
+    // 왼쪽: 시간대 이름 + 24시간 시계. 판 폭은 숫자가 바뀌어도 흔들리지 않게 고정 견본으로 잰다.
     let (hour, minute) = clock.hour_minute();
-    let time_text = format!("{label} {}", hh_mm(hour, minute));
+    let time_text = format!("{} {}", period_name(clock.time_of_day_minutes()), hh_mm(hour, minute));
     // 숫자마다 폭이 다른 글꼴이어도 넘치지 않게 가장 넓은 견본에 맞춘다.
-    let sample_w = ["밤 00:00", "낮 00:00", "밤 88:88", "낮 88:88"]
+    let sample_w = PERIOD_NAMES
         .iter()
-        .map(|s| text.width(s, BIG_TEXT))
+        .flat_map(|name| ["00:00", "88:88"].map(|t| format!("{name} {t}")))
+        .map(|s| text.width(&s, BIG_TEXT))
         .fold(0.0, f32::max);
     let left_w = ICON_TEXT_GAP + sample_w + PANEL_PAD_RIGHT;
     draw_pill(MARGIN, PANEL_TOP, left_w, PANEL_HEIGHT, PANEL);
     let icon = vec2(MARGIN + ICON_X, mid_y);
-    if is_night {
-        draw_moon_icon(icon, 17.0);
-    } else {
-        draw_sun_icon(icon, 12.0);
+    // shortcut: logic에 같은 뜻의 is_night()와 phase()가 둘 다 있어서 여기서 맞춰 본다, 수산나가 하나를 지우면 이 줄도 지운다.
+    debug_assert_eq!(clock.is_night(), clock.phase() == Phase::Night);
+    match clock.phase() {
+        Phase::Day => draw_sun_icon(icon, 12.0),
+        Phase::Night => draw_moon_icon(icon, 17.0),
     }
     text.left(&time_text, MARGIN + ICON_TEXT_GAP, baseline, BIG_TEXT, WHITE);
 
@@ -157,6 +167,24 @@ mod tests {
         assert_eq!(hh_mm(0, 0), "00:00");
         assert_eq!(hh_mm(23, 59), "23:59");
         assert_eq!(hh_mm(24, 60), "23:59", "24:00이나 세 자리는 안 나온다");
+    }
+
+    #[test]
+    fn period_names_change_on_the_hour() {
+        for (hour, minute, name) in [
+            (0, 0, "새벽"),
+            (5, 59, "새벽"),
+            (6, 0, "아침"),
+            (9, 59, "아침"),
+            (10, 0, "낮"),
+            (13, 59, "낮"),
+            (14, 0, "오후"),
+            (17, 59, "오후"),
+            (18, 0, "저녁"),
+            (23, 59, "저녁"),
+        ] {
+            assert_eq!(period_name(hour * 60 + minute), name, "{hour}:{minute}");
+        }
     }
 
     #[test]

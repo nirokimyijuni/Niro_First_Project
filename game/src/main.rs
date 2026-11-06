@@ -82,6 +82,8 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    // 흉내 마우스는 다른 손가락이 움직이면 탭 자리가 덮어써진다. 터치는 fingers()로만 받는다.
+    simulate_mouse_with_touch(false);
     let assets = Assets::load().await;
     let mut scene = Scene::Title;
     let mut first_frame = true;
@@ -98,12 +100,15 @@ async fn main() {
         let (sw, sh) = (screen_width(), screen_height());
         // 세로 화면 안내 중에는 어떤 입력도 받지 않고 게임도 멈춘다 (아래).
         let rotate_hint = show_rotate_hint(touch_mode, sw, sh);
-        let menu = if rotate_hint { MenuInput::default() } else { menu_input(&letterbox) };
+        let mut menu = if rotate_hint { MenuInput::default() } else { menu_input(&letterbox) };
         let dt = cap_frame_seconds(get_frame_time());
         // 플레이 중이 아니거나 안내 중이면 조이스틱·버튼을 놓고, 지금 닿아 있는 손가락만 기억한다.
         // (메뉴에서 누른 손가락, 안내 전에 대고 있던 손가락이 플레이에서 저절로 걷기·점프가 되지 않게)
         if rotate_hint || !matches!(scene, Scene::Play { .. }) {
-            touch.idle(&fingers);
+            let tap = touch.idle(&fingers);
+            if !rotate_hint {
+                menu.tap = menu.tap.or(tap);
+            }
         }
 
         // 1) 입력 → 장면 바꾸기 / logic 업데이트. 장면이 바뀐 프레임에는 새 장면을 업데이트하지 않는다
@@ -137,7 +142,7 @@ async fn main() {
                     }
                 }
                 Scene::Play { game, fast_forward, pops } => {
-                    // 플레이 중 터치는 조이스틱·버튼으로만 (마우스로 흉내 낸 menu.tap은 쓰지 않는다).
+                    // 플레이 중 터치는 조이스틱·버튼으로만.
                     let touched = touch.update(&fingers, &PLAY_BUTTONS, touch_mode);
                     if menu.back || touched.back_pressed {
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
@@ -153,7 +158,7 @@ async fn main() {
                             game.update(&input, dt)
                         };
                         // 2) 이벤트 처리: 지금은 코인 반짝 효과만. 낮/밤이 바뀌는 건 하늘 색과 정보판이 보여 준다.
-                        //    (아침 인사 문구·소리는 아이와 정한 뒤에 — US-012, M6 사운드)
+                        //    (아침 인사 문구·소리는 아이와 정한 뒤에 — US-012, M7 사운드)
                         for event in events {
                             if let GameEvent::CoinsPicked { count } = event {
                                 pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());

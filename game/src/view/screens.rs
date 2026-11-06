@@ -1,13 +1,13 @@
 //! 화면 그리기: 타이틀, 캐릭터 고르기, 플레이. 좌표는 모두 가상 화면(960×540) 기준.
 //! 배경은 해변: 하늘·바다 빛(sky.rs) → 하얀 물결 → 모래. 바다는 그림일 뿐 규칙은 없다.
 //! 플레이 중에는 logic 시계의 `sky_darkness`(0 한낮 ~ 1 한밤)로 낮 그림과 밤 그림을 부드럽게 섞는다
-//! (D9, D10): 노을 때 하늘 아래가 주황·분홍, 해는 수평선 아래로, 밤에는 남색 하늘에 별과 달.
+//! (D9, D10): 노을 때 하늘 아래가 주황·분홍, 밤에는 남색 하늘에 별. 해·달은 시계를 따라 호를 그린다 (D31).
 
-use super::assets::Assets;
+use super::assets::{height_with_antenna, Assets};
 use super::coin::{draw_coins, CoinPops};
 use super::hud::draw_hud;
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
-use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook, MENU_SKY, PLAY_SKY};
+use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
 use super::sprites::{self, draw_character, max_half_width, PLAY_SPRITE_HEIGHT};
 use super::text::TextPainter;
 use crate::logic::character::CharacterKind;
@@ -58,7 +58,8 @@ const CARD_WIDTH: f32 = 220.0;
 const CARD_TOP: f32 = 110.0;
 const CARD_HEIGHT: f32 = 340.0;
 const CARD_FEET_Y: f32 = 370.0;
-const CARD_SPRITE_HEIGHT: f32 = 190.0;
+/// 안테나를 뺀 몸 높이. 가장 큰 키(고른 Ellie)도 카드 위로 넘치지 않게 맞췄다.
+const CARD_SPRITE_HEIGHT: f32 = 170.0;
 /// 골라진 캐릭터는 이만큼 크게
 const PICKED_GROW: f32 = 1.15;
 /// "캐릭터를 골라요" 바닥선. 고른 카드 위 주황 세모와 겹치지 않게 위로 올렸다 (BUG-002).
@@ -191,10 +192,10 @@ fn draw_background(assets: &Assets, look: &SkyLook, ground_y: f32) {
 
 /// 타이틀. `version`이 있으면(웹 배포판) 오른쪽 아래 구석에 작게 보여 준다 (US-031).
 pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32, version: Option<&str>) {
-    draw_background(assets, &SkyLook::new(0.0, &MENU_SKY, time()), ground_y);
+    draw_background(assets, &SkyLook::menu(time()), ground_y);
     for (i, kind) in CharacterKind::ALL.into_iter().enumerate() {
         let pose = sprites::pose(Motion::Idle, time() + i as f32 * 0.37, false);
-        draw_character(assets.character(kind), vec2(CARD_CENTERS_X[i], ground_y + 4.0), 150.0, Facing::Right, pose, WHITE);
+        draw_character(assets.character(kind), vec2(CARD_CENTERS_X[i], ground_y + 4.0), height_with_antenna(kind, 150.0), Facing::Right, pose, WHITE);
     }
     // 제목: 하늘 부분에서 살짝 둥실둥실. 자모마다 아이가 정한 색 (view/title.rs)
     let bob = (time() * 2.0).sin() * 6.0;
@@ -214,7 +215,7 @@ pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32, version: O
 // ---- 캐릭터 고르기 ----
 
 pub fn draw_select(assets: &Assets, text: &TextPainter, ground_y: f32, picked: usize) {
-    draw_background(assets, &SkyLook::new(0.0, &MENU_SKY, time()), ground_y);
+    draw_background(assets, &SkyLook::menu(time()), ground_y);
     text.centered("캐릭터를 골라요", VIRTUAL_WIDTH / 2.0, SELECT_TITLE_Y, 56.0, TEXT_COLOR);
 
     for (i, kind) in CharacterKind::ALL.into_iter().enumerate() {
@@ -238,7 +239,7 @@ pub fn draw_select(assets: &Assets, text: &TextPainter, ground_y: f32, picked: u
         }
         let height = if is_picked { CARD_SPRITE_HEIGHT * PICKED_GROW } else { CARD_SPRITE_HEIGHT };
         let pose = sprites::pose(Motion::Idle, time() + i as f32 * 0.37, false);
-        draw_character(assets.character(kind), vec2(r.x + r.w / 2.0, CARD_FEET_Y), height, Facing::Right, pose, WHITE);
+        draw_character(assets.character(kind), vec2(r.x + r.w / 2.0, CARD_FEET_Y), height_with_antenna(kind, height), Facing::Right, pose, WHITE);
         let name_size = if is_picked { 50.0 } else { 42.0 };
         text.centered(kind.name(), r.x + r.w / 2.0, r.y + r.h - 22.0, name_size, TEXT_COLOR);
     }
@@ -257,7 +258,7 @@ fn feet_x_on_screen(center_x: f32, half_width: f32) -> f32 {
 /// `touch_mode`면 키보드 안내 글자는 숨긴다 (터치 조이스틱·버튼은 main이 위에 그린다).
 pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward: bool, pops: &CoinPops, touch_mode: bool) {
     let d = game.clock.sky_darkness();
-    draw_background(assets, &SkyLook::new(d, &PLAY_SKY, time()), game.world.ground_y);
+    draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y);
     for b in &game.world.obstacles {
         draw_wood_box(*b, d);
     }
@@ -266,11 +267,12 @@ pub fn draw_play(assets: &Assets, text: &TextPainter, game: &Game, fast_forward:
     let player = &game.player;
     let texture = assets.character(player.kind);
     let r = player.rect();
-    let half = max_half_width(texture, PLAY_SPRITE_HEIGHT);
+    let height = height_with_antenna(player.kind, PLAY_SPRITE_HEIGHT);
+    let half = max_half_width(texture, height);
     let feet = vec2(feet_x_on_screen(r.x + r.w / 2.0, half), r.y + r.h);
     let pose = sprites::pose(player.motion, time(), player.vel.y < 0.0);
     let tint = mix(WHITE, CHARACTER_NIGHT_TINT, d);
-    draw_character(texture, feet, PLAY_SPRITE_HEIGHT, player.facing, pose, tint);
+    draw_character(texture, feet, height, player.facing, pose, tint);
 
     pops.draw(text);
     draw_hud(text, &game.clock, game.wallet.coins(), fast_forward);

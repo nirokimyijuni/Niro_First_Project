@@ -1,7 +1,7 @@
 //! 키보드·마우스·터치 입력을 읽어서 logic이 쓰는 모양으로 바꾼다.
-//! 메뉴 화면: 터치는 macroquad가 마우스 클릭으로도 알려 주므로(기본 설정 simulate_mouse_with_touch)
-//! 마우스와 같이 `tap`으로 처리된다.
-//! 플레이 화면: 마우스 `tap`은 쓰지 않고, 터치는 `touches()`로 받아 조이스틱·버튼(touch.rs)으로만 처리한다.
+//! 터치는 메뉴·플레이 모두 `fingers()` 한 길로 받는다 (main이 마우스 흉내를 끈다).
+//! 메뉴: 진짜 마우스 클릭은 `menu_input`의 `tap`, 터치는 `TouchControls::idle`이 돌려주는 새 손가락 자리.
+//! 플레이: 터치는 조이스틱·버튼(touch.rs)으로만 처리한다.
 
 use super::screen::Letterbox;
 use super::touch::{Finger, TouchFrame};
@@ -56,7 +56,7 @@ pub struct MenuInput {
     pub confirm: bool,
     /// Esc
     pub back: bool,
-    /// 마우스 클릭/화면 터치 위치 (가상 화면 좌표)
+    /// 마우스 클릭 또는 (main이 넣는) 새 손가락 위치 (가상 화면 좌표)
     pub tap: Option<Vec2>,
 }
 

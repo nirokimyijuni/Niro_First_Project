@@ -5,7 +5,7 @@ use crate::logic::player::{Facing, Motion};
 use macroquad::prelude::*;
 use std::f32::consts::TAU;
 
-/// 게임 화면에서 캐릭터 그림 높이 (가상 픽셀). 충돌 네모(64)보다 조금 크게.
+/// 게임 화면에서 안테나를 뺀 캐릭터 몸 높이 (가상 픽셀). 충돌 네모(64)보다 조금 크게.
 pub const PLAY_SPRITE_HEIGHT: f32 = 84.0;
 
 /// 대기: 숨쉬기 빠르기(초당 번)와 세기

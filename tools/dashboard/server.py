@@ -4,7 +4,7 @@
 - /              대시보드 화면 (index.html)
 - /api/activity  활동 기록의 마지막 줄들 (JSON 배열)
 - /api/roadmap   마일스톤별 스토리 진행 상황 (docs/02-plan.md 표 + stories/backlog.md)
-- /font.ttf, /characters.png  게임 에셋을 그대로 보여 준다
+- /font.ttf, /<이름>.png  게임 에셋을 그대로 보여 준다 (에이전트 프로필 그림)
 """
 import json
 import re
@@ -26,7 +26,8 @@ TAIL_LINES = 600
 FILES = {
     "/": (HERE / "index.html", "text/html; charset=utf-8"),
     "/font.ttf": (ROOT / "game" / "assets" / "fonts" / "Jua-Regular.ttf", "font/ttf"),
-    "/characters.png": (ROOT / "game" / "assets" / "sprites" / "characters.png", "image/png"),
+    **{f"/{n}.png": (ROOT / "art" / "spritecook" / f"{n}.png", "image/png")
+       for n in ("niro", "ellie", "logan", "zombie-round", "skeleton-normal", "skeleton-full")},
 }
 
 

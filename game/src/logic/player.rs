@@ -6,8 +6,8 @@
 use super::character::CharacterKind;
 use super::world::World;
 use crate::config::{
-    GRAVITY, MAX_FALL_SPEED, PHYSICS_STEP_SECONDS, PLAYER_HEIGHT, PLAYER_JUMP_SPEED,
-    PLAYER_WALK_SPEED, PLAYER_WIDTH,
+    GRAVITY, MAX_FALL_SPEED, PHYSICS_STEP_SECONDS, PLAYER_EDGE_SLIDE_SPEED, PLAYER_HEIGHT,
+    PLAYER_JUMP_SPEED, PLAYER_WALK_SPEED, PLAYER_WIDTH,
 };
 use macroquad::math::{Rect, Vec2};
 
@@ -139,7 +139,16 @@ impl Player {
                 if self.vel.y > 0.0 {
                     self.pos.y = block.y - self.size.y;
                     self.vel.y = 0.0;
-                    self.on_ground = true;
+                    // 몸 가운데가 윗면 위(끝 포함)일 때만 선다. 밖이면 바깥쪽으로 미끄러져 떨어진다.
+                    // shortcut: 상자끼리 붙어 있거나 틈이 캐릭터보다 좁으면 못 빠져나간다, 그런 맵을 만들 때 고친다.
+                    let center_x = self.pos.x + self.size.x / 2.0;
+                    if center_x < block.x {
+                        self.pos.x -= PLAYER_EDGE_SLIDE_SPEED * step;
+                    } else if center_x > block.x + block.w {
+                        self.pos.x += PLAYER_EDGE_SLIDE_SPEED * step;
+                    } else {
+                        self.on_ground = true;
+                    }
                 } else if self.vel.y < 0.0 {
                     self.pos.y = block.y + block.h;
                     self.vel.y = 0.0;

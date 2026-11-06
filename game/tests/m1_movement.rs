@@ -273,6 +273,123 @@ fn jumping_while_pushing_into_box_never_gets_stuck_inside() {
     }
 }
 
+// ---------- BUG-006 상자 끝에서 중심 잡기 ----------
+
+/// 몸 가운데 x가 `center_x`가 되게 상자 조금 위에서 떨어뜨린다.
+fn drop_with_center_at(center_x: f32, b: Rect) -> Player {
+    Player::new(CharacterKind::Niro, Vec2::new(center_x - PLAYER_WIDTH / 2.0, b.y - PLAYER_HEIGHT - 40.0))
+}
+
+/// 2초 동안 안 끼는지 보며 자리 잡게 한 뒤, 3초 더 지나도 위치가 똑같은지(떨림 없음) 확인한다.
+fn settle_and_assert_still(p: &mut Player, w: &World, what: &str) {
+    for _ in 0..120 {
+        p.update(&NONE, FRAME, w);
+        assert_legal(p, w, what);
+    }
+    let settled = p.pos;
+    for _ in 0..180 {
+        p.update(&NONE, FRAME, w);
+        assert_eq!(p.pos, settled, "{what}: 자리 잡은 뒤 떨림");
+        assert!(p.on_ground, "{what}: 자리 잡은 뒤 공중");
+    }
+}
+
+/// 상자 왼쪽 또는 오른쪽 땅에, 상자에 끼지 않고 내려왔는지.
+fn assert_on_ground_beside(p: &Player, b: Rect, w: &World, left_side: bool) {
+    assert_eq!(p.pos.y + p.size.y, w.ground_y, "땅까지 떨어진다");
+    if left_side {
+        assert!(p.pos.x + p.size.x <= b.x, "상자 왼쪽 바깥 x={}", p.pos.x);
+    } else {
+        assert!(p.pos.x >= b.x + b.w, "상자 오른쪽 바깥 x={}", p.pos.x);
+    }
+}
+
+#[test]
+fn center_over_box_stands_even_exactly_on_the_edge() {
+    // 사용자 예시: 가운데가 상자 끝 바로 위면 한 발이 밖이어도 중심을 잡고 서 있다.
+    let w = World::m1();
+    for b in &w.obstacles {
+        for center_x in [b.x, b.x + 1.0, b.x + b.w / 2.0, b.x + b.w - 1.0, b.x + b.w] {
+            let mut p = drop_with_center_at(center_x, *b);
+            settle_and_assert_still(&mut p, &w, "가운데가 상자 위");
+            assert_eq!(p.pos.y + p.size.y, b.y, "가운데 {center_x}: 상자 위에 선다");
+            assert_eq!(p.pos.x + PLAYER_WIDTH / 2.0, center_x, "가운데 {center_x}: 옆으로 안 밀린다");
+        }
+    }
+}
+
+#[test]
+fn center_off_box_falls_to_ground_on_both_sides() {
+    // 네모 끝만 걸린 경우부터 가운데가 끝을 살짝 벗어난 경우까지.
+    let w = World::m1();
+    for b in &w.obstacles {
+        for off in [0.5_f32, 1.0, 10.0, PLAYER_WIDTH / 2.0 - 1.0] {
+            let mut left = drop_with_center_at(b.x - off, *b);
+            settle_and_assert_still(&mut left, &w, "왼쪽 끝 착지");
+            assert_on_ground_beside(&left, *b, &w, true);
+
+            let mut right = drop_with_center_at(b.x + b.w + off, *b);
+            settle_and_assert_still(&mut right, &w, "오른쪽 끝 착지");
+            assert_on_ground_beside(&right, *b, &w, false);
+        }
+    }
+}
+
+#[test]
+fn walking_past_the_edge_then_stopping_still_falls() {
+    let w = World::m1();
+    for b in &w.obstacles {
+        for (dir, left_side) in [(LEFT, true), (RIGHT, false)] {
+            let mut p = drop_with_center_at(b.x + b.w / 2.0, *b);
+            run(&mut p, NONE, 60, &w);
+            // 가운데가 상자 밖으로 나가는 순간 손을 뗀다.
+            for _ in 0..60 {
+                let center_x = p.pos.x + PLAYER_WIDTH / 2.0;
+                if center_x < b.x || center_x > b.x + b.w {
+                    break;
+                }
+                p.update(&dir, FRAME, &w);
+            }
+            settle_and_assert_still(&mut p, &w, "걸어서 끝을 지남");
+            assert_on_ground_beside(&p, *b, &w, left_side);
+        }
+    }
+}
+
+#[test]
+fn pushing_back_toward_box_while_slipping_never_gets_stuck() {
+    // 미끄러지는 동안 상자 쪽으로 계속 밀어도 공중에 멈추지 않고, 상자 위로 올라선다.
+    let w = World::m1();
+    for b in &w.obstacles {
+        for (center_x, dir) in [(b.x - 5.0, RIGHT), (b.x + b.w + 5.0, LEFT)] {
+            let mut p = drop_with_center_at(center_x, *b);
+            // 발이 상자 윗면에 닿아 미끄러지기 시작할 때까지 기다린다.
+            while p.pos.y + p.size.y < b.y {
+                p.update(&NONE, FRAME, &w);
+            }
+            assert!(!p.on_ground, "가운데가 밖이면 서 있지 못한다");
+            for _ in 0..10 {
+                p.update(&dir, FRAME, &w);
+                assert_legal(&p, &w, "미끄러지며 상자 쪽으로 밀기");
+            }
+            assert!(p.on_ground, "공중에 멈추지 않는다");
+            assert_eq!(p.pos.y + p.size.y, b.y);
+        }
+    }
+}
+
+#[test]
+fn big_dt_edge_landing_does_not_enter_box() {
+    let w = World::m1();
+    let b = w.obstacles[0];
+    let mut p = drop_with_center_at(b.x - 10.0, b);
+    for _ in 0..8 {
+        p.update(&NONE, 0.25, &w);
+        assert_legal(&p, &w, "느린 프레임 끝 착지");
+    }
+    assert_on_ground_beside(&p, b, &w, true);
+}
+
 // ---------- US-008 화면 밖 ----------
 
 #[test]
@@ -323,10 +440,12 @@ fn slow_frames_can_still_jump_onto_a_box() {
     let mut p = Player::new(CharacterKind::Niro, Vec2::new(tall.x - PLAYER_WIDTH, w.ground_y - PLAYER_HEIGHT));
     p.update(&NONE, 0.25, &w);
     p.update(&input(false, true, true), 0.25, &w);
+    // 상자보다 높이 올라갈 때까지 옆면에 막혀서 첫 0.25초로는 가운데가 상자 위까지 못 간다 (BUG-006).
+    p.update(&RIGHT, 0.25, &w);
     for _ in 0..8 {
         p.update(&NONE, 0.25, &w);
     }
-    // 0.25초 동안 오른쪽으로 55픽셀 이동 → 상자 위 또는 상자 너머 땅. 어느 쪽이든 상자 속은 아님.
     assert_legal(&p, &w, "느린 프레임 점프");
-    assert!(p.pos.x > tall.x - PLAYER_WIDTH, "상자 앞에서 점프하면 앞으로 나아간다");
+    assert!(p.on_ground);
+    assert_eq!(p.pos.y + p.size.y, tall.y, "가운데가 상자 위까지 가면 올라선다");
 }

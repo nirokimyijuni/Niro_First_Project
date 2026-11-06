@@ -23,10 +23,10 @@ pub const ZOMBIE_ATTACK_DROP_PER_LEVEL: u32 = 2;
 /// D3 좀비 공격력은 이보다 낮아지지 않는다
 pub const ZOMBIE_MIN_ATTACK: u32 = 1;
 
-/// M7 상점에서도 쓰는 코인 최대 개수
+/// M8 상점에서도 쓰는 코인 최대 개수
 pub const COIN_MAX: u32 = 5000;
 
-/// D5 광석 하나 캐는 시간 (초). 맨손은 곡괭이보다 느리다. M6(제작과 동굴)에서 해 보고 조절한다.
+/// D5 광석 하나 캐는 시간 (초). 맨손은 곡괭이보다 느리다. M7(제작과 동굴)에서 해 보고 조절한다.
 pub const MINE_SECONDS_BARE_HAND: f32 = 3.0;
 pub const MINE_SECONDS_PICKAXE: f32 = 1.0;
 
@@ -49,6 +49,9 @@ pub const PLAYER_HEIGHT: f32 = 64.0;
 
 /// M1 좌우로 걷는 속도 (초당 픽셀)
 pub const PLAYER_WALK_SPEED: f32 = 220.0;
+/// BUG-006 몸 가운데가 상자 밖일 때 상자 바깥쪽으로 미끄러지는 속도 (초당 픽셀).
+/// 걷는 속도보다 느려야 상자 쪽으로 걸어서 다시 올라설 수 있다 (같으면 공중에 멈춘다).
+pub const PLAYER_EDGE_SLIDE_SPEED: f32 = 120.0;
 /// M1 점프할 때 위로 튀어 오르는 속도 (초당 픽셀). 최고 높이 ≈ 속도² / (2 × 중력) ≈ 97픽셀.
 pub const PLAYER_JUMP_SPEED: f32 = 520.0;
 /// M1 중력: 매초 아래쪽 속도가 이만큼 커진다 (초당 픽셀²)

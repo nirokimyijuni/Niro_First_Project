@@ -16,6 +16,7 @@
 | `niro` 니로 | 스토리텔러 · 유저스토리 관리 | `stories/` |
 | `susanna` 수산나 | 백엔드 (게임 규칙·로직) | `game/src/logic/` |
 | `logan` 로건 | 프론트 (그림·입력·UI·사운드) | `game/src/view/`, `game/assets/`, `web/` |
+| `hailey` 헤일리 | 캐릭터 디자이너 (SpriteCook으로 그림 만들기) | `art/spritecook/` |
 | `bob` 밥 | 코드 리뷰어 (고치지 않고 읽고 지적) | `qa/reviews/` |
 | `ellie` 엘리 | 테스터 | `qa/`, `game/tests/` |
 | `kevin` 케빈 | 배포 관리 | `deploy/`, `.github/workflows/` |

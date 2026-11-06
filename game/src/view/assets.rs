@@ -14,11 +14,22 @@ pub const FONT_PATH: &str = "assets/fonts/Jua-Regular.ttf";
 pub const CHARACTER_SHEET_PATH: &str = "assets/sprites/characters.png";
 
 /// 원화에서 캐릭터별로 잘라 낼 네모 (x, y, 가로, 세로), 원화 픽셀 기준.
-/// 위쪽 손글씨 이름과 이름에서 내려오는 선은 빼고, 모자·머리·왕관은 넣었다.
+/// 위쪽 손글씨 이름은 빼고, 머리 위 안테나(T자 선, docs/04-scenario.md)와 모자·머리·왕관은 넣었다.
 /// 아래쪽은 발끝에 딱 맞춰 잘라서, 그림 아래 끝 = 발 위치가 된다.
-pub const NIRO_CUT: (u32, u32, u32, u32) = (34, 176, 182, 236);
-pub const ELLIE_CUT: (u32, u32, u32, u32) = (232, 199, 132, 181);
-pub const LOGAN_CUT: (u32, u32, u32, u32) = (382, 163, 130, 207);
+pub const NIRO_CUT: (u32, u32, u32, u32) = (34, 147, 182, 265);
+pub const ELLIE_CUT: (u32, u32, u32, u32) = (232, 150, 132, 230);
+pub const LOGAN_CUT: (u32, u32, u32, u32) = (382, 115, 130, 255);
+
+/// 안테나를 뺀 몸(모자·머리·왕관) 맨 위 y, 원화 픽셀 기준. 안테나가 있어도 몸 크기가 그대로이게 키를 늘릴 때 쓴다.
+const NIRO_BODY_TOP: u32 = 176;
+const ELLIE_BODY_TOP: u32 = 199;
+const LOGAN_BODY_TOP: u32 = 163;
+
+/// 자르는 네모 안에 걸린 이름 글자 조각 (x, y, 가로, 세로), 원화 픽셀 기준. 종이색으로 덮는다.
+const ELLIE_NAME_BITS: &[(u32, u32, u32, u32)] = &[(232, 150, 35, 14), (296, 150, 10, 5)];
+const LOGAN_NAME_BITS: &[(u32, u32, u32, u32)] = &[(468, 115, 7, 4)];
+/// 이름 조각을 덮는 색. [`is_paper`]가 종이로 보는 색이라 배경과 함께 투명해진다.
+const COVER_PAPER_COLOR: [u8; 4] = [200, 200, 195, 255];
 
 /// 이 밝기(0~255) 이상이고
 const PAPER_MIN_BRIGHTNESS: u8 = 148;
@@ -36,6 +47,25 @@ pub fn character_cut(kind: CharacterKind) -> (u32, u32, u32, u32) {
         CharacterKind::Niro => NIRO_CUT,
         CharacterKind::Ellie => ELLIE_CUT,
         CharacterKind::Logan => LOGAN_CUT,
+    }
+}
+
+/// 몸 높이가 `body_height`일 때, 안테나까지 넣은 그림 높이.
+pub fn height_with_antenna(kind: CharacterKind, body_height: f32) -> f32 {
+    let (_, y, _, h) = character_cut(kind);
+    let body_top = match kind {
+        CharacterKind::Niro => NIRO_BODY_TOP,
+        CharacterKind::Ellie => ELLIE_BODY_TOP,
+        CharacterKind::Logan => LOGAN_BODY_TOP,
+    };
+    body_height * h as f32 / (y + h - body_top) as f32
+}
+
+fn name_bits(kind: CharacterKind) -> &'static [(u32, u32, u32, u32)] {
+    match kind {
+        CharacterKind::Niro => &[],
+        CharacterKind::Ellie => ELLIE_NAME_BITS,
+        CharacterKind::Logan => LOGAN_NAME_BITS,
     }
 }
 
@@ -79,6 +109,15 @@ impl Assets {
 pub fn cut_character(sheet: &Image, kind: CharacterKind) -> Image {
     let (x, y, w, h) = character_cut(kind);
     let mut image = sheet.sub_image(Rect::new(x as f32, y as f32, w as f32, h as f32));
+    let width = w as usize;
+    let data = image.get_image_data_mut();
+    for &(bx, by, bw, bh) in name_bits(kind) {
+        for py in by - y..by - y + bh {
+            for px in bx - x..bx - x + bw {
+                data[py as usize * width + px as usize] = COVER_PAPER_COLOR;
+            }
+        }
+    }
     remove_paper_background(&mut image);
     image
 }
@@ -178,6 +217,31 @@ mod tests {
             // 캐릭터 몸이 충분히 남아 있다 (전체의 1/4 이상 보임)
             let visible = data.iter().filter(|p| p[3] > 0).count();
             assert!(visible * 4 > w * h, "{kind:?} 남은 픽셀 {visible}/{}", w * h);
+        }
+    }
+
+    #[test]
+    fn antenna_stays_joined_to_body_and_name_is_gone() {
+        let s = sheet();
+        for kind in CharacterKind::ALL {
+            let (x, y, ..) = character_cut(kind);
+            let img = cut_character(&s, kind);
+            let data = img.get_image_data();
+            let (w, h) = (img.width as usize, img.height as usize);
+            let row_has_ink = |row: usize| data[row * w..(row + 1) * w].iter().any(|p| p[3] > 0);
+            // 안테나 위 끝이 위쪽에 있고, 거기서 발까지 끊긴 줄이 없다 (연한 선이 종이로 지워지지 않았다)
+            let top = (0..h).find(|&row| row_has_ink(row)).unwrap();
+            assert!(top < 10, "{kind:?} 안테나 맨 위 {top}");
+            let bottom = (0..h).rfind(|&row| row_has_ink(row)).unwrap();
+            assert!((top..bottom).all(row_has_ink), "{kind:?} 안테나가 끊겼다");
+            for &(bx, by, bw, bh) in name_bits(kind) {
+                for py in by - y..by - y + bh {
+                    for px in bx - x..bx - x + bw {
+                        assert_eq!(data[py as usize * w + px as usize][3], 0, "{kind:?} 이름이 남았다");
+                    }
+                }
+            }
+            assert!(height_with_antenna(kind, 84.0) > 84.0);
         }
     }
 

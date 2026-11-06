@@ -160,11 +160,26 @@ fn us034_back_button_only_on_first_press_not_when_joystick_passes() {
     assert!(o.back_pressed && t.joystick.is_none(), "처음 누른 곳이 버튼이면 돌아가기, 조이스틱은 안 생김");
 }
 
-/// BUG-005: 왼쪽 끝 가까이(받침 반지름 - 데드존 안쪽, 가상 x < 약 64)에 엄지를 **가만히** 대기만 해도
-/// 받침은 화면 안으로 당겨지고 손잡이는 손가락 쪽(왼쪽)으로 밀려 바로 왼쪽으로 걷는다.
-/// 고쳐지면 #[ignore]를 지운다.
+/// D25: 오른쪽 절반은 어디든 새 손가락이면 점프. 왼쪽 절반과 "고르기" 버튼은 그대로.
 #[test]
-#[ignore = "BUG-005: 화면 왼쪽 끝에 엄지를 가만히 대도 왼쪽으로 걸어감"]
+fn d25_anywhere_on_right_half_jumps_once() {
+    for (x, y) in [(VIRTUAL_WIDTH / 2.0, 270.0), (600.0, 60.0), (700.0, 300.0), (950.0, 530.0)] {
+        let mut t = TouchControls::new();
+        let o = t.update(&[f(1, TouchPhase::Started, x, y)], &PLAY_BUTTONS, true);
+        assert!(o.jump_pressed && t.joystick.is_none(), "({x}, {y})");
+        for _ in 0..10 {
+            let o = t.update(&[f(1, TouchPhase::Stationary, x, y)], &PLAY_BUTTONS, true);
+            assert!(!o.jump_pressed, "꾹 눌러도 다시 점프하지 않는다");
+        }
+    }
+    let mut t = TouchControls::new();
+    let o = t.update(&[f(1, TouchPhase::Started, VIRTUAL_WIDTH / 2.0 - 1.0, 270.0)], &PLAY_BUTTONS, true);
+    assert!(!o.jump_pressed && t.joystick.is_some(), "왼쪽 절반은 조이스틱");
+}
+
+/// BUG-005: 왼쪽 끝 가까이(받침 반지름 - 데드존 안쪽, 가상 x < 약 64)에 엄지를 **가만히** 대기만 하면
+/// 받침이 화면 안으로 당겨져도 걷지 않는다.
+#[test]
 fn bug005_resting_thumb_near_left_edge_does_not_walk() {
     for (x, y) in [(-50.0, 520.0), (0.0, 300.0), (30.0, 300.0), (60.0, 450.0)] {
         assert!(!walks_while_resting(x, y, 30), "({x}, {y})에 가만히 대었는데 걸음");
