@@ -4,6 +4,7 @@
 use crate::logic::player::{Facing, Motion};
 use crate::logic::skeleton::{Projectile, ProjectileKind, SkeletonStage};
 use crate::logic::weapon::Weapon;
+use crate::logic::world::nearest_copy;
 use macroquad::prelude::*;
 use std::f32::consts::TAU;
 
@@ -94,9 +95,9 @@ pub fn skeleton_art_faces_left(stage: SkeletonStage) -> bool {
 }
 
 /// 화살이나 총알 하나. 네모(`rect`) 크기대로, 날아가는 쪽이 앞이다. 튕긴 것은 분홍빛으로 살짝 기운다.
-pub fn draw_projectile(shot: &Projectile) {
+pub fn draw_projectile(shot: &Projectile, view_x: f32) {
     let tilt = if shot.bounced { BOUNCED_TILT } else { 0.0 };
-    let r = shot.rect();
+    let r = nearest_copy(shot.rect(), view_x);
     let forward = vec2(tilt.cos() * shot.direction, tilt.sin());
     let side = vec2(-forward.y, forward.x);
     let (tip, tail) = (r.center() + forward * r.w / 2.0, r.center() - forward * r.w / 2.0);
@@ -122,13 +123,6 @@ pub fn draw_projectile(shot: &Projectile) {
             draw_circle(front.x, front.y, r.h / 2.0, color);
         }
     }
-}
-
-/// 그림이 발 가운데에서 옆으로 가장 멀리 뻗는 거리 (숨쉬기로 넓어짐 + 걸을 때 기울기 포함).
-/// 화면 끝에서 그림이 잘리지 않게 할 때 쓴다 (BUG-001).
-pub fn max_half_width(texture: &Texture2D, height: f32) -> f32 {
-    let width = height * texture.width() / texture.height();
-    width / 2.0 * (1.0 + IDLE_STRETCH) + height * WALK_TILT.sin()
 }
 
 /// 비율을 지키면서 긴 쪽이 `size`가 되는 크기 (무기 그림은 가로세로가 제각각이다).

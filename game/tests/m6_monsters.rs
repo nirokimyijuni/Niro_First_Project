@@ -14,7 +14,7 @@ use logic::game::Game;
 use logic::monster::{pick_left_side, spawn_x_on_side, SeededRandom, Zombie};
 use logic::player::PlayerInput;
 use logic::skeleton::{Projectile, ProjectileKind, Skeleton, SkeletonStage};
-use logic::world::{really_overlaps, World};
+use logic::world::{really_overlaps, shortest_dx, World};
 use macroquad::math::Rect;
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -32,7 +32,7 @@ fn body_at(x: f32, w: &World) -> Rect {
 }
 
 fn spawn_xs(player: Rect, w: &World, tries: u32) -> Vec<f32> {
-    (0..tries).map(|seed| spawn_x_on_side(pick_left_side(&mut SeededRandom::new(seed)), player, ZOMBIE_WIDTH, w, &[])).collect()
+    (0..tries).filter_map(|seed| spawn_x_on_side(pick_left_side(&mut SeededRandom::new(seed)), player, ZOMBIE_WIDTH, w, &[])).collect()
 }
 
 // ---- 임시-1 나오는 자리 ----
@@ -40,7 +40,8 @@ fn spawn_xs(player: Rect, w: &World, tries: u32) -> Vec<f32> {
 #[test]
 fn monsters_appear_just_outside_the_screen_on_both_sides_anywhere_in_the_middle() {
     let w = map_without_boxes();
-    for player_x in [700.0, 1100.0, 2300.0, 3000.0] {
+    // 화면과 그 바로 바깥에 벽이 없는 자리들. 벽이 있는 자리는 아래 시험이 본다.
+    for player_x in [700.0, 1000.0, 3300.0] {
         let player = body_at(player_x, &w);
         let left = w.camera_left(player.center().x);
         let xs = spawn_xs(player, &w, 40);
@@ -61,36 +62,38 @@ fn half_and_half_like_before() {
 }
 
 #[test]
-fn at_map_end_the_outer_side_uses_the_map_end_spot() {
+fn near_the_seam_both_sides_are_still_just_outside_the_screen() {
     let w = map_without_boxes();
-    let near_start = body_at(PLAYER_SPAWN_X, &w);
-    let xs = spawn_xs(near_start, &w, 40);
-    assert!(xs.contains(&0.0), "왼쪽 바깥이 맵 밖이면 맵 끝: {xs:?}");
-    assert!(xs.contains(&SCREEN_WIDTH), "오른쪽은 화면 바로 바깥: {xs:?}");
-
-    let near_end = body_at(MAP_WIDTH - 200.0, &w);
-    let xs = spawn_xs(near_end, &w, 40);
-    assert!(xs.contains(&(MAP_WIDTH - ZOMBIE_WIDTH)), "{xs:?}");
-    assert!(xs.contains(&(MAP_WIDTH - SCREEN_WIDTH - ZOMBIE_WIDTH)), "{xs:?}");
+    for player_x in [0.0, PLAYER_SPAWN_X, MAP_WIDTH - 200.0, MAP_WIDTH - PLAYER_WIDTH] {
+        let player = body_at(player_x, &w);
+        let left = w.camera_left(player.center().x);
+        let xs = spawn_xs(player, &w, 40);
+        assert!(xs.contains(&w.wrap_x(left - ZOMBIE_WIDTH)), "왼쪽은 이음매 너머여도 화면 바로 바깥: {xs:?}");
+        assert!(xs.contains(&w.wrap_x(left + SCREEN_WIDTH)), "오른쪽은 화면 바로 바깥: {xs:?}");
+    }
 }
 
 #[test]
-fn player_on_the_map_end_spot_sends_monsters_to_the_other_side() {
+fn player_at_the_seam_still_gets_monsters_from_both_sides() {
     let w = map_without_boxes();
-    let xs = spawn_xs(body_at(0.0, &w), &w, 40);
-    assert!(xs.iter().all(|x| *x == SCREEN_WIDTH), "{xs:?}");
+    let player = body_at(0.0, &w);
+    let xs = spawn_xs(player, &w, 40);
+    let on_left = |x: &&f32| shortest_dx(player.center().x, **x) < 0.0;
+    assert!(xs.iter().any(|x| on_left(&x)) && !xs.iter().all(|x| on_left(&x)), "{xs:?}");
+    let distance = |x: &f32| shortest_dx(player.center().x, x + ZOMBIE_WIDTH / 2.0).abs();
+    assert!(xs.iter().all(|x| distance(x) >= SCREEN_WIDTH / 2.0), "화면 안에서 나오지 않는다: {xs:?}");
 }
 
 #[test]
-fn spawn_spot_on_a_box_or_hole_moves_farther_from_the_screen() {
+fn spawn_spot_behind_a_box_or_hole_moves_to_the_players_side_of_it() {
     // 화면 왼쪽 바로 바깥이 구멍이 되는 자리: 카메라 왼쪽이 구멍 오른쪽 끝 + 10.
-    let w = map_without_boxes();
+    let w = World { width: MAP_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
     let hole = w.hole().unwrap();
     let camera = hole.x + hole.w + 10.0;
     let player = body_at(camera + SCREEN_WIDTH / 2.0 - PLAYER_WIDTH / 2.0, &w);
-    let left_side: Vec<f32> = spawn_xs(player, &w, 40).into_iter().filter(|x| *x < camera).collect();
+    let left_side: Vec<f32> = spawn_xs(player, &w, 40).into_iter().filter(|x| *x < player.x).collect();
     assert!(!left_side.is_empty());
-    assert!(left_side.iter().all(|x| *x + ZOMBIE_WIDTH == hole.x), "구멍 왼쪽 빈 땅: {left_side:?}");
+    assert!(left_side.iter().all(|x| *x == hole.x + hole.w), "구멍의 주인공 쪽 빈 땅: {left_side:?}");
 
     // 화면 오른쪽 바로 바깥에 상자 두 개가 이어져 있다.
     let mut w = map_without_boxes();
@@ -100,7 +103,7 @@ fn spawn_spot_on_a_box_or_hole_moves_farther_from_the_screen() {
     w.obstacles.push(Rect::new(right_x - 10.0, top, BOX_BIG_SIZE, BOX_BIG_SIZE));
     w.obstacles.push(Rect::new(right_x + BOX_BIG_SIZE - 10.0, top, BOX_BIG_SIZE, BOX_BIG_SIZE));
     let xs = spawn_xs(player, &w, 40);
-    assert!(xs.contains(&(right_x + BOX_BIG_SIZE * 2.0 - 10.0)), "{xs:?}");
+    assert!(xs.contains(&(right_x - 10.0 - ZOMBIE_WIDTH)), "가까운 상자의 주인공 쪽: {xs:?}");
 }
 
 #[test]
@@ -152,7 +155,7 @@ fn each_turn_brings_one_monster_from_each_side() {
 }
 
 #[test]
-fn player_on_the_end_spot_gets_both_from_the_other_side_without_overlap() {
+fn monsters_never_appear_on_a_player_at_the_end_spot_or_the_seam() {
     let long = map_without_boxes();
     let small = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
     for w in [&long, &small] {
@@ -258,7 +261,7 @@ fn skeleton_off_screen_does_not_shoot_then_shoots_when_it_comes_in() {
 }
 
 #[test]
-fn shots_vanish_at_the_map_end_and_far_from_the_player() {
+fn shots_pass_the_seam_and_vanish_far_from_the_player() {
     let w = map_without_boxes();
     let mut c = Combat::new(7);
     let player = body_at(100.0, &w);
@@ -273,7 +276,18 @@ fn shots_vanish_at_the_map_end_and_far_from_the_player() {
     for _ in 0..10 {
         c.update(FRAME, true, body_at(w.width - 300.0, &w), &w);
     }
-    assert!(c.skeletons.projectiles.iter().all(|shot| shot.pos.x < w.width), "맵 끝에서 사라진다");
+    assert_eq!(c.skeletons.projectiles.len(), 1, "이음매에서 사라지지 않는다");
+    let shot = &c.skeletons.projectiles[0];
+    assert!(shot.pos.x < w.width / 2.0, "이음매를 넘어 맵 왼쪽으로 감겼다: {}", shot.pos.x);
+
+    // M1 연습 맵은 끝에서 사라진다.
+    let small = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
+    let mut c = Combat::new(7);
+    c.skeletons.projectiles.push(Projectile::new(small.width - 1.0, 1.0, ProjectileKind::Bullet, 4, &small));
+    for _ in 0..10 {
+        c.update(FRAME, true, body_at(100.0, &small), &small);
+    }
+    assert!(c.skeletons.projectiles.is_empty(), "M1 맵 끝에서 사라진다");
 }
 
 #[test]

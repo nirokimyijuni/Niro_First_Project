@@ -15,11 +15,12 @@ use logic::game::{Game, GameEvent};
 use logic::monster::{pick_left_side, spawn_x_on_side, walk_x, SeededRandom};
 use logic::player::PlayerInput;
 use logic::skeleton::SkeletonStage;
-use logic::world::{really_overlaps, World};
+use logic::world::{really_overlaps, shortest_dx, World};
 use macroquad::math::Rect;
 
 const FRAME: f32 = 1.0 / 60.0;
-const SEEDS: u32 = 500;
+/// 측정 시험 모두가 `timeout 300` 안에 끝나는 판 수. 옛 기록은 500판이라 비율로 비교한다.
+const SEEDS: u32 = 100;
 
 /// `player_x`에 가만히 서서 밤을 `seconds`초 버틴 판 수.
 fn games_without_a_scratch(world_of: impl Fn(u32) -> World, player_x: f32, seconds: f32, seeds: u32) -> u32 {
@@ -39,16 +40,16 @@ fn games_without_a_scratch(world_of: impl Fn(u32) -> World, player_x: f32, secon
 
 #[test]
 #[ignore]
-fn left_end_is_much_safer_than_one_step_to_the_right() {
-    for (name, seconds) in [("35초", 35.0), ("밤 끝까지 60초(빨리감기 기준)", 60.0)] {
-        for x in [0.0, 47.0, 48.0, 120.0] {
+fn old_left_end_is_not_a_safe_zone() {
+    for (name, seconds) in [("35초", 35.0)] {
+        for x in [0.0, 48.0, 120.0] {
             let safe = games_without_a_scratch(World::long_map, x, seconds, SEEDS);
             println!("긴 맵 x={x}, {name}: 체력 그대로 {safe}/{SEEDS}");
         }
     }
     let left_end = games_without_a_scratch(World::long_map, 0.0, 35.0, SEEDS);
-    let one_step = games_without_a_scratch(World::long_map, PLAYER_WIDTH, 35.0, SEEDS);
-    assert!(left_end > one_step, "왼쪽 끝 {left_end}, 한 걸음 옆 {one_step}");
+    // D61 전에는 왼쪽 끝이 훨씬 안전했다 (x=0 밤 끝까지 395/500). 벽 안쪽에서 나오면서 10% 아래로 내려왔다.
+    assert!(left_end * 10 <= SEEDS, "왼쪽 끝 {left_end}/{SEEDS}");
 }
 
 /// 몬스터가 `from_x`에서 걸어서 주인공 몸에 닿으면 true. 몬스터 폭보다 짧게 걸어서 벽을 뚫지 않는다.
@@ -72,9 +73,9 @@ fn zombie_can_reach(from_x: f32, player: Rect, w: &World) -> bool {
 /// (왼쪽에서 오는가, 오른쪽에서 오는가). 나오는 자리는 진짜 규칙으로 뽑는다.
 fn reachable_sides(player: Rect, w: &World) -> (bool, bool) {
     let center = player.center().x;
-    let spots: Vec<f32> = (0..24).map(|seed| spawn_x_on_side(pick_left_side(&mut SeededRandom::new(seed)), player, ZOMBIE_WIDTH, w, &[])).collect();
-    let left = spots.iter().filter(|x| **x < center).any(|x| zombie_can_reach(*x, player, w));
-    let right = spots.iter().filter(|x| **x > center).any(|x| zombie_can_reach(*x, player, w));
+    let spots: Vec<f32> = (0..24).filter_map(|seed| spawn_x_on_side(pick_left_side(&mut SeededRandom::new(seed)), player, ZOMBIE_WIDTH, w, &[])).collect();
+    let left = spots.iter().filter(|x| shortest_dx(center, **x) < 0.0).any(|x| zombie_can_reach(*x, player, w));
+    let right = spots.iter().filter(|x| shortest_dx(center, **x) > 0.0).any(|x| zombie_can_reach(*x, player, w));
     (left, right)
 }
 
@@ -106,6 +107,7 @@ fn how_often_monsters_cannot_reach_the_player_on_foot() {
     let mut by_place = [Tally::default(); PLACE_NAMES.len()];
     let mut start = Tally::default();
     let mut map_with_a_no_side_spot = 0;
+    let mut nobody_appears = 0;
     for seed in 0..SEEDS {
         let w = World::long_map(seed.wrapping_mul(7919));
         let start_body = Rect::new(PLAYER_SPAWN_X, w.ground_y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
@@ -120,6 +122,7 @@ fn how_often_monsters_cannot_reach_the_player_on_foot() {
             }
             let sides = reachable_sides(body, &w);
             all.add(sides);
+            nobody_appears += u32::from(spawn_x_on_side(true, body, ZOMBIE_WIDTH, &w, &[]).is_none());
             any_no_side |= !sides.0 && !sides.1;
             by_place[w.place_index_at(x as f32)].add(sides);
             let left = w.camera_left(body.center().x);
@@ -130,6 +133,7 @@ fn how_often_monsters_cannot_reach_the_player_on_foot() {
     }
     println!("긴 맵 땅 위 전체 {}", all.line());
     println!("양쪽 다 못 오는 자리가 하나라도 있는 판: {map_with_a_no_side_spot}/{SEEDS}");
+    println!("몬스터가 아무도 안 나오는 땅: {nobody_appears}/{} ({:.1}%)", all.spots, nobody_appears as f32 * 100.0 / all.spots as f32);
     println!("시작 자리(x=120) {}", start.line());
     for (i, tally) in by_place.iter().enumerate() {
         println!("{} {}", PLACE_NAMES[i], tally.line());

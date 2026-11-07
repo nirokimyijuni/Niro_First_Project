@@ -11,10 +11,35 @@ use crate::config::{
 use crate::config::WORLD_WIDTH;
 use macroquad::math::Rect;
 
+/// D61 고리에서 `to_x`를 `from_x` 가까이로 옮기려면 더할 값. 이미 짧은 쪽이면 정확히 0이다.
+/// 긴 맵 절반보다 짧은 M1 맵은 늘 0이라서, 맵을 몰라도 고리가 아닌 맵을 바꾸지 않는다.
+fn ring_shift(from_x: f32, to_x: f32) -> f32 {
+    let distance = to_x - from_x;
+    if distance.abs() <= MAP_WIDTH / 2.0 {
+        0.0
+    } else {
+        -MAP_WIDTH * (distance / MAP_WIDTH).round()
+    }
+}
+
+/// `from_x`에서 `to_x`로 가는 고리의 짧은 쪽 거리 (임시-21). 음수면 왼쪽이다.
+/// 거리를 잴 때는 늘 이것을 쓴다.
+pub fn shortest_dx(from_x: f32, to_x: f32) -> f32 {
+    to_x - from_x + ring_shift(from_x, to_x)
+}
+
+/// `rect`를 고리 한 바퀴씩 옮겨서 `near_x`에 가장 가까운 자리로 놓은 것.
+/// 이음매 너머의 것을 맞대어 볼 때와, 화면에 그릴 자리를 구할 때 쓴다.
+pub fn nearest_copy(rect: Rect, near_x: f32) -> Rect {
+    Rect { x: rect.x + ring_shift(near_x, rect.center().x), ..rect }
+}
+
 /// 두 네모가 정말로 겹치는지. 모서리끼리 딱 닿기만 한 건 겹친 게 아니다
 /// (`Rect::overlaps`는 닿기만 해도 겹침이다). 상자 위에 서서 옆으로 걸어도 "옆면에 막힘"으로
 /// 오해하지 않고, 상자 옆에 붙은 몬스터가 건너뛰지 않고, 상자 위 발이 몬스터 머리에 맞지 않는다.
+/// 이음매 너머에 있어도 맞대어 본다.
 pub fn really_overlaps(a: Rect, b: Rect) -> bool {
+    let a = nearest_copy(a, b.center().x);
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
@@ -73,9 +98,32 @@ impl World {
         world
     }
 
-    /// 구멍·구조물·미스·시민은 긴 맵에만 있다. M1 연습 맵은 옛 규칙 그대로다.
+    /// 구멍·구조물·미스·시민과 고리(D61)는 긴 맵에만 있다. M1 연습 맵은 옛 규칙 그대로다.
     pub fn is_long_map(&self) -> bool {
         self.width >= MAP_WIDTH
+    }
+
+    /// 긴 맵이면 `x`를 0 이상 폭 미만으로 감는다. M1 연습 맵은 그대로 둔다.
+    pub fn wrap_x(&self, x: f32) -> f32 {
+        if !self.is_long_map() {
+            return x;
+        }
+        // rem_euclid는 아주 작은 음수에서 폭 자체를 돌려줄 수 있다.
+        let wrapped = x.rem_euclid(self.width);
+        if wrapped >= self.width {
+            0.0
+        } else {
+            wrapped
+        }
+    }
+
+    /// 폭이 `body_width`인 몸의 왼쪽 `x`를 맵에 맞춘다: 긴 맵은 감고, M1 연습 맵은 끝에서 멈춘다.
+    pub fn keep_on_map(&self, x: f32, body_width: f32) -> f32 {
+        if self.is_long_map() {
+            self.wrap_x(x)
+        } else {
+            x.clamp(0.0, self.width - body_width)
+        }
     }
 
     /// US-051 화산의 구멍. 땅 윗면 아래의 네모라서 y는 땅이고 h는 깊이다.
@@ -125,25 +173,34 @@ impl World {
     pub fn surface_y_under(&self, body: Rect) -> f32 {
         self.obstacles
             .iter()
+            .map(|b| nearest_copy(*b, body.center().x))
             .filter(|b| b.x < body.x + body.w && body.x < b.x + b.w)
             .fold(self.floor_y_under(body), |top, b| top.min(b.y))
     }
 
-    /// 카메라 왼쪽 끝 x. 주인공을 가운데에 두고, 맵 끝에서는 멈춘다 (US-050).
-    /// 로건은 화면에 그릴 때 월드 x에서 이 값을 뺀다.
+    /// 카메라 왼쪽 끝 x. 주인공을 가운데에 둔다 (US-050).
+    /// 긴 맵은 끝이 없어서 멈추지 않고, 0보다 작거나 폭에 가까운 값이 된다 (D61).
+    /// 로건은 `nearest_copy(몸, camera_left + SCREEN_WIDTH / 2.0)`의 x에서 이 값을 빼서 그린다.
+    /// M1 연습 맵은 끝에서 멈춘다.
     pub fn camera_left(&self, player_center_x: f32) -> f32 {
-        (player_center_x - SCREEN_WIDTH / 2.0).clamp(0.0, (self.width - SCREEN_WIDTH).max(0.0))
+        let centered = player_center_x - SCREEN_WIDTH / 2.0;
+        if self.is_long_map() {
+            centered
+        } else {
+            centered.clamp(0.0, (self.width - SCREEN_WIDTH).max(0.0))
+        }
     }
 
     /// 월드 `x`가 주인공이 보는 화면 안에 있는지.
     pub fn is_on_screen(&self, x: f32, player_center_x: f32) -> bool {
         let left = self.camera_left(player_center_x);
+        let x = x + ring_shift(player_center_x, x);
         left <= x && x <= left + SCREEN_WIDTH
     }
 
     /// 월드 `x`가 있는 장소 번호 (`PLACE_NAMES` 순서).
     pub fn place_index_at(&self, x: f32) -> usize {
-        ((x / SCREEN_WIDTH) as usize).min(PLACE_NAMES.len() - 1)
+        ((self.wrap_x(x) / SCREEN_WIDTH) as usize).min(PLACE_NAMES.len() - 1)
     }
 
     /// 월드 `x`가 있는 장소 이름.

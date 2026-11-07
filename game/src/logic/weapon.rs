@@ -63,9 +63,9 @@ pub struct DroppedWeapon {
 }
 
 impl DroppedWeapon {
-    /// 화면 바로 위에서 가운데가 `center_x`인 자리로 떨어지기 시작한다. 맵 밖 자리면 맵 안으로 옮긴다.
+    /// 화면 바로 위에서 가운데가 `center_x`인 자리로 떨어지기 시작한다. 맵 밖 자리면 맵 안으로 옮긴다 (긴 맵은 감는다).
     pub fn above(kind: Weapon, center_x: f32, world: &World) -> DroppedWeapon {
-        let x = (center_x - WEAPON_SIZE / 2.0).clamp(0.0, world.width - WEAPON_SIZE);
+        let x = world.keep_on_map(center_x - WEAPON_SIZE / 2.0, WEAPON_SIZE);
         let rect = Rect::new(x, -WEAPON_SIZE, WEAPON_SIZE, WEAPON_SIZE);
         let landing_y = world.surface_y_under(rect) - WEAPON_SIZE;
         DroppedWeapon { kind, rect, landing_y, seconds_left: WEAPON_GROUND_SECONDS }

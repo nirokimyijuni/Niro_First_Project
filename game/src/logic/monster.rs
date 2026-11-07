@@ -4,9 +4,9 @@
 //! - 맞고 쓰러지는 일과 플레이어 체력은 `combat.rs`가 맡는다.
 
 use super::combat::CombatEvent;
-use super::world::{really_overlaps, World};
+use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
-    SCREEN_WIDTH, SKELETON_HEIGHT, ZOMBIE_FLOAT_RISE_SPEED, ZOMBIE_FLOAT_SECONDS, ZOMBIE_FLOAT_START_SECONDS,
+    MONSTER_SPAWN_MIN_DISTANCE, SCREEN_WIDTH, SKELETON_HEIGHT, ZOMBIE_FLOAT_RISE_SPEED, ZOMBIE_FLOAT_SECONDS, ZOMBIE_FLOAT_START_SECONDS,
     ZOMBIE_HEIGHT, ZOMBIE_HIT_FLASH_SECONDS, ZOMBIE_HP, ZOMBIE_SPAWN_LEFT_CHANCE, ZOMBIE_WALK_SPEED, ZOMBIE_WIDTH,
 };
 use macroquad::math::{Rect, Vec2};
@@ -83,16 +83,18 @@ impl Zombie {
     }
 }
 
-/// 땅 위의 몬스터 `body`가 `target_x` 쪽으로 걸은 뒤의 x. 상자와 구멍은 넘지 못한다 (US-039, D35, US-051).
+/// 땅 위의 몬스터 `body`가 `target_x` 쪽으로 걸은 뒤의 x. 고리의 가까운 쪽으로 걷는다 (임시-21).
+/// 상자와 구멍은 넘지 못한다 (US-039, D35, US-051).
 pub fn walk_x(body: Rect, target_x: f32, longest_move: f32, world: &World) -> f32 {
-    let move_x = (target_x - body.center().x).clamp(-longest_move, longest_move);
+    let move_x = shortest_dx(body.center().x, target_x).clamp(-longest_move, longest_move);
     let mut moved = Rect::new(body.x + move_x, body.y, body.w, body.h);
     for wall in world.monster_walls() {
         if really_overlaps(moved, wall) {
+            let wall = nearest_copy(wall, moved.center().x);
             moved.x = if move_x > 0.0 { wall.x - body.w } else { wall.x + wall.w };
         }
     }
-    moved.x
+    world.wrap_x(moved.x)
 }
 
 /// 이번 차례 첫 몬스터가 왼쪽에서 나오면 true.
@@ -100,25 +102,74 @@ pub fn pick_left_side(random: &mut SeededRandom) -> bool {
     random.next_unit() < ZOMBIE_SPAWN_LEFT_CHANCE
 }
 
-/// 보이는 화면의 `from_left` 쪽 바로 바깥의 x (임시-1). 그쪽이 맵 밖이면 맵 끝 자리다 (D36).
-/// 주인공이 그 자리에 있으면 겹치지 않게 반대쪽이다. 점프 중이어도 내려오면 겹치니까 가로만 본다.
-/// `width`는 나올 몬스터 폭.
-/// `taken`은 이번 차례에 먼저 나온 몬스터들의 x. 겹치면 화면에서 더 먼 쪽으로 비켜 선다.
-pub fn spawn_x_on_side(from_left: bool, player_rect: Rect, width: f32, world: &World, taken: &[f32]) -> f32 {
+/// 몬스터가 나올 x. `from_left` 쪽에 자리가 없으면 반대쪽이고, 양쪽 다 없으면 None이라 이번에는 안 나온다.
+/// 긴 맵은 `spot_on_long_map`이 정한다. M1 연습 맵은 보이는 화면의 끝 자리에서 나오고,
+/// 주인공이 그 자리에 있으면 겹치지 않게 반대쪽이다 (D36).
+/// `width`는 나올 몬스터 폭. `taken`은 이번 차례에 먼저 나온 몬스터들의 x.
+pub fn spawn_x_on_side(from_left: bool, player_rect: Rect, width: f32, world: &World, taken: &[f32]) -> Option<f32> {
+    if world.is_long_map() {
+        let spot = |left| spot_on_long_map(left, player_rect, width, world, taken);
+        return spot(from_left).or_else(|| spot(!from_left));
+    }
     let screen_left = world.camera_left(player_rect.center().x);
-    let left_x = free_ground_x((screen_left - width).max(0.0), -1.0, width, world);
-    let right_x = free_ground_x((screen_left + SCREEN_WIDTH).min(world.width - width), 1.0, width, world);
+    let left_x = free_ground_x(world.keep_on_map(screen_left - width, width), -1.0, width, world);
+    let right_x = free_ground_x(world.keep_on_map(screen_left + SCREEN_WIDTH, width), 1.0, width, world);
     let (wanted_x, other_x) = if from_left { (left_x, right_x) } else { (right_x, left_x) };
+    // 점프 중이어도 내려오면 겹치니까 가로만 본다.
     let player_is_there = player_rect.x < wanted_x + width && wanted_x < player_rect.x + player_rect.w;
     let x = if player_is_there { other_x } else { wanted_x };
     let away = if x == left_x { -1.0 } else { 1.0 };
-    step_aside_from_taken(x, away, width, world, taken)
+    Some(step_aside_from_taken(x, away, width, world, taken))
 }
 
-/// 먼저 나온 몬스터와 겹치지 않을 때까지 `away` 쪽으로 비킨다. 맵 끝이라 못 가면 반대쪽으로.
+/// 긴 맵에서 `from_left` 쪽에 나올 x. 보이는 화면 바로 바깥이지만 (임시-1), 그 사이에 몬스터가 못 넘는 벽이
+/// 있으면 가장 가까운 벽의 주인공 쪽에 붙어서 나온다 (D48을 지키면서 상자 뒤에 숨지 못하게 한다).
+/// 몸 가운데끼리 `MONSTER_SPAWN_MIN_DISTANCE`보다 가까우면 None이다.
+/// 주인공이 밟고 있는 벽(상자 위, 구멍 위·안)과 거기 이어진 벽은 사이의 벽으로 치지 않고 그 바깥부터 본다.
+fn spot_on_long_map(from_left: bool, player_rect: Rect, width: f32, world: &World, taken: &[f32]) -> Option<f32> {
+    let height = ZOMBIE_HEIGHT.max(SKELETON_HEIGHT);
+    let center = player_rect.center().x;
+    let walls: Vec<Rect> = world
+        .monster_walls()
+        .filter(|wall| wall.y < world.ground_y && world.ground_y - height < wall.y + wall.h)
+        .map(|wall| nearest_copy(wall, center))
+        .collect();
+
+    let (mut left, mut right) = (player_rect.x, player_rect.x + player_rect.w);
+    if walls.iter().any(|wall| wall.x < right && left < wall.x + wall.w) {
+        for _ in 0..walls.len() {
+            for wall in &walls {
+                if wall.x <= right && left <= wall.x + wall.w {
+                    left = left.min(wall.x);
+                    right = right.max(wall.x + wall.w);
+                }
+            }
+        }
+    }
+
+    let screen_left = world.camera_left(center);
+    let mut x = if from_left {
+        let wall_edge = walls.iter().map(|wall| wall.x + wall.w).filter(|edge| *edge <= left).fold(f32::MIN, f32::max);
+        (screen_left - width).max(wall_edge)
+    } else {
+        let wall_edge = walls.iter().map(|wall| wall.x).filter(|edge| *edge >= right).fold(f32::MAX, f32::min);
+        (screen_left + SCREEN_WIDTH).min(wall_edge - width)
+    };
+    // 먼저 나온 몬스터가 있으면 주인공 쪽으로 비킨다. 바깥쪽은 벽일 수 있다.
+    for _ in 0..taken.len() {
+        if taken.iter().any(|other| shortest_dx(x, *other).abs() < width) {
+            x += if from_left { width } else { -width };
+        }
+    }
+    let fits = if from_left { x + width <= left } else { x >= right };
+    let distance = shortest_dx(center, x + width / 2.0).abs();
+    (fits && distance >= MONSTER_SPAWN_MIN_DISTANCE).then(|| world.wrap_x(x))
+}
+
+/// 먼저 나온 몬스터와 겹치지 않을 때까지 `away` 쪽으로 비킨다. M1 맵 끝이라 못 가면 반대쪽으로.
 fn step_aside_from_taken(mut x: f32, away: f32, width: f32, world: &World, taken: &[f32]) -> f32 {
     for _ in 0..taken.len() {
-        if !taken.iter().any(|other| (x - other).abs() < width) {
+        if !taken.iter().any(|other| shortest_dx(x, *other).abs() < width) {
             break;
         }
         let farther = free_ground_x(x + away * width, away, width, world);
@@ -135,9 +186,10 @@ fn free_ground_x(mut x: f32, away: f32, width: f32, world: &World) -> f32 {
         let Some(wall) = world.monster_walls().find(|wall| really_overlaps(body, *wall)) else {
             break;
         };
+        let wall = nearest_copy(wall, body.center().x);
         x = if away < 0.0 { wall.x - width } else { wall.x + wall.w };
     }
-    x.clamp(0.0, world.width - width)
+    world.keep_on_map(x, width)
 }
 
 /// 시드를 넣으면 늘 같은 순서로 나오는 작은 난수. 테스트에서 결과를 고정할 수 있다.

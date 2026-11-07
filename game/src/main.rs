@@ -1,6 +1,6 @@
 //! 미스 찾기 — 게임 루프: 입력 → logic 업데이트 → 이벤트 처리 → 그리기.
 //! 화면 흐름: 타이틀 → 캐릭터 고르기 → 플레이 (Esc를 누르면 다시 고르기, 다시 고르면 새 게임).
-//! 플레이에서 쓰러지면 같은 장면 위에 쓰러진 화면이 나오고, "다시 하기"로 고르기에 간다.
+//! 플레이에서 쓰러지거나 클리어하면 같은 장면 위에 끝난 화면이 나오고, "다시 하기"로 고르기에 간다.
 
 mod config;
 mod logic;
@@ -14,7 +14,7 @@ use logic::player::PlayerInput;
 use macroquad::prelude::*;
 use view::assets::Assets;
 use view::effects::Effects;
-use view::gameover::{DownScreen, RETRY_BUTTON};
+use view::gameover::{EndScreen, RETRY_BUTTON};
 use view::input::{any_key_pressed, fast_forward_pressed, fingers, menu_input, merge_touch, player_input, switch_weapon_pressed, MenuInput};
 use view::touch::{draw_rotate_hint, draw_touch_controls, next_touch_mode, play_buttons, show_rotate_hint, TouchControls, TouchFrame};
 use view::screen::Letterbox;
@@ -32,14 +32,14 @@ enum Scene {
         /// 코인·공격·좀비 효과 (화면 전용)
         effects: Effects,
         /// 쓰러졌으면 그 화면 상태 (US-043)
-        down: Option<DownScreen>,
+        ended: Option<EndScreen>,
     },
 }
 
 fn start_play(kind: CharacterKind) -> Scene {
     // 판마다 좀비가 다르게 나오도록 지금 시각(밀리초)을 시드로 쓴다.
     let seed = (macroquad::miniquad::date::now() * 1000.0) as u64 as u32;
-    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), down: None }
+    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None }
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
@@ -57,7 +57,7 @@ fn cap_frame_seconds(frame_time: f32) -> f32 {
 /// `time_scale`이 1이면 `Game::update`와 결과가 똑같다 (아래 테스트).
 fn update_with_time_scale(game: &mut Game, input: &PlayerInput, dt: f32, time_scale: f32) -> Vec<GameEvent> {
     let mut events = Vec::new();
-    if game.combat.health.is_down() {
+    if game.is_over() {
         return events;
     }
     let world_dt = dt * time_scale;
@@ -89,6 +89,14 @@ fn keep_record(days: u32, best_days: &mut u32) {
     }
 }
 
+/// 점수가 최고 점수보다 크면 올리고 저장한다 (US-069: 쓰러질 때도, 클리어할 때도, 나갈 때도).
+fn keep_score(score: u32, best_score: &mut u32) {
+    if score > *best_score {
+        *best_score = score;
+        view::web::save_best_score(score);
+    }
+}
+
 fn window_conf() -> Conf {
     Conf {
         window_title: "미스 찾기".to_owned(),
@@ -113,6 +121,7 @@ async fn main() {
     let version = view::web::game_version();
     // 최고 기록 (US-044). 브라우저 저장소에서 읽고, 새 기록이 나오면 저장한다.
     let mut best_days = view::web::load_best_days();
+    let mut best_score = view::web::load_best_score();
 
     loop {
         let letterbox = Letterbox::current();
@@ -125,7 +134,7 @@ async fn main() {
         let dt = cap_frame_seconds(get_frame_time());
         // 플레이 중이 아니거나(쓰러진 화면 포함) 안내 중이면 조이스틱·버튼을 놓고, 지금 닿아 있는 손가락만 기억한다.
         // (메뉴에서 누른 손가락, 안내 전에 대고 있던 손가락이 플레이에서 저절로 걷기·점프가 되지 않게)
-        if rotate_hint || !matches!(scene, Scene::Play { down: None, .. }) {
+        if rotate_hint || !matches!(scene, Scene::Play { ended: None, .. }) {
             let tap = touch.idle(&fingers);
             if !rotate_hint {
                 menu.tap = menu.tap.or(tap);
@@ -162,26 +171,27 @@ async fn main() {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, effects, down } => {
+                Scene::Play { game, fast_forward, effects, ended } => {
                     // 플레이 중 터치는 조이스틱·버튼으로만. 쓰러진 화면의 터치는 위 idle이 메뉴 탭으로 준다.
                     let buttons = play_buttons(!game.weapons.owned().is_empty());
-                    let touched = if down.is_none() { touch.update(&fingers, buttons, touch_mode) } else { TouchFrame::default() };
-                    let retry = down.as_mut().is_some_and(|screen| {
+                    let touched = if ended.is_none() { touch.update(&fingers, buttons, touch_mode) } else { TouchFrame::default() };
+                    let retry = ended.as_mut().is_some_and(|screen| {
                         screen.seconds += dt;
                         screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
                     });
                     if menu.back || touched.back_pressed || retry {
                         keep_record(game.clock.nights_survived(), &mut best_days);
+                        keep_score(game.score(), &mut best_score);
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
                     } else {
                         if fast_forward_pressed() {
                             *fast_forward = !*fast_forward;
                         }
-                        if down.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
+                        if ended.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
                             game.switch_weapon();
                         }
                         let input = merge_touch(player_input(), &touched);
-                        if input.attack_pressed && down.is_none() {
+                        if input.attack_pressed && ended.is_none() {
                             effects.start_swing(game.weapons.held());
                         }
                         let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
@@ -197,10 +207,10 @@ async fn main() {
                                 GameEvent::CoinsPicked { count } => {
                                     effects.pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
                                 }
-                                GameEvent::Combat(CombatEvent::PlayerDown) => {
-                                    let days = game.clock.nights_survived();
-                                    *down = Some(DownScreen::new(days, best_days));
-                                    keep_record(days, &mut best_days);
+                                GameEvent::Combat(CombatEvent::PlayerDown) | GameEvent::GameCleared => {
+                                    *ended = Some(EndScreen::new(game, best_days, best_score));
+                                    keep_record(game.clock.nights_survived(), &mut best_days);
+                                    keep_score(game.score(), &mut best_score);
                                 }
                                 GameEvent::Combat(combat) => effects.on_combat(combat),
                                 GameEvent::NightStarted | GameEvent::DayStarted { .. } => {}
@@ -226,9 +236,9 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, effects, down } => {
-                screens::draw_play(&assets, &text, game, *fast_forward, effects, down.as_ref(), touch_mode);
-                if touch_mode && down.is_none() {
+            Scene::Play { game, fast_forward, effects, ended } => {
+                screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode);
+                if touch_mode && ended.is_none() {
                     draw_touch_controls(&text, &touch, play_buttons(!game.weapons.owned().is_empty()));
                 }
             }
@@ -401,6 +411,31 @@ mod tests {
         let x = g.player.pos.x;
         assert!(update_with_time_scale(&mut g, &right, FRAME, DEV_FAST_FORWARD_SCALE).is_empty());
         assert_eq!((g.clock.seconds_left_in_phase(), g.player.pos.x), (left, x));
+    }
+
+    #[test]
+    fn fast_forward_also_stops_after_clearing() {
+        let mut g = m1_game(CharacterKind::Niro);
+        for _ in 0..config::DAYS_TO_CLEAR {
+            g.clock.update(DAY_SECONDS);
+            g.clock.update(config::NIGHT_SECONDS);
+        }
+        let events = update_with_time_scale(&mut g, &PlayerInput::default(), FRAME, DEV_FAST_FORWARD_SCALE);
+        assert!(events.contains(&GameEvent::GameCleared));
+        assert!(g.is_cleared());
+        let (left, x) = (g.clock.seconds_left_in_phase(), g.player.pos.x);
+        let right = PlayerInput { right: true, ..Default::default() };
+        assert!(update_with_time_scale(&mut g, &right, FRAME, DEV_FAST_FORWARD_SCALE).is_empty());
+        assert_eq!((g.clock.seconds_left_in_phase(), g.player.pos.x), (left, x));
+    }
+
+    #[test]
+    fn score_keeps_only_a_better_best() {
+        let mut best = 9;
+        keep_score(9, &mut best);
+        assert_eq!(best, 9);
+        keep_score(10, &mut best);
+        assert_eq!(best, 10);
     }
 
     #[test]

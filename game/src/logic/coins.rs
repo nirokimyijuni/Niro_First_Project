@@ -5,7 +5,7 @@
 //! - 지갑은 코인을 COIN_MAX개보다 많이 담지 않는다. 상점(M8)에서도 쓴다.
 
 
-use super::world::World;
+use super::world::{nearest_copy, World};
 use crate::config::{COIN_GAP_ABOVE_BOX, COIN_MAX, COIN_RESPAWN_SECONDS, COIN_SIZE};
 use macroquad::math::Rect;
 
@@ -34,12 +34,14 @@ impl Coin {
 /// 맵에 있는 코인 전부.
 pub struct Coins {
     pub list: Vec<Coin>,
+    /// 이번 판에 주운 코인 수. 지갑이 꽉 차도 늘고, 코인을 써도 줄지 않는다 (점수에 쓴다).
+    pub picked_total: u32,
 }
 
 impl Coins {
     /// 월드의 상자마다 코인 하나씩. 나무 발판과 바위 계단에는 놓이지 않는다 (US-051).
     pub fn on_boxes(world: &World) -> Coins {
-        Coins { list: world.boxes().into_iter().map(Coin::above_box).collect() }
+        Coins { list: world.boxes().into_iter().map(Coin::above_box).collect(), picked_total: 0 }
     }
 
     /// 시간을 흘리고, 플레이어 몸(`player_rect`)에 닿은 코인을 줍는다.
@@ -55,6 +57,7 @@ impl Coins {
                 picked += 1;
             }
         }
+        self.picked_total += picked;
         picked
     }
 }
@@ -97,6 +100,7 @@ impl Wallet {
 
 /// 두 네모가 겹치는지. 모서리끼리 딱 닿아도 주운 것으로 친다 (줍기는 너그럽게).
 fn touches(a: Rect, b: Rect) -> bool {
+    let a = nearest_copy(a, b.center().x);
     a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h
 }
 

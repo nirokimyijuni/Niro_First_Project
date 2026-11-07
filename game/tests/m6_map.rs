@@ -13,7 +13,7 @@ use logic::game::Game;
 use logic::monster::walk_x;
 use logic::player::{Player, PlayerInput};
 use logic::skeleton::{Projectile, ProjectileKind};
-use logic::world::{really_overlaps, World};
+use logic::world::{really_overlaps, shortest_dx, World};
 use macroquad::math::{Rect, Vec2};
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -29,12 +29,12 @@ fn stand_at(x: f32, w: &World) -> Player {
     p
 }
 
-/// `going_right` 쪽 끝까지 걷고 막히면 점프한다. 끝에 닿으면 걸린 초를 돌려준다.
-fn run_to_the_end(p: &mut Player, going_right: bool, w: &World, limit_seconds: f32) -> Option<f32> {
-    let end_x = if going_right { w.width - p.size.x } else { 0.0 };
+/// `going_right` 쪽으로 한 바퀴 걷고 막히면 점프한다. 다 돌면 걸린 초를 돌려준다.
+fn run_one_lap(p: &mut Player, going_right: bool, w: &World, limit_seconds: f32) -> Option<f32> {
     let walk = PlayerInput { left: !going_right, right: going_right, ..Default::default() };
+    let mut walked = 0.0;
     for frame in 0..(limit_seconds / FRAME) as usize {
-        if p.pos.x == end_x {
+        if walked >= w.width {
             return Some(frame as f32 * FRAME);
         }
         let before = p.pos.x;
@@ -42,6 +42,9 @@ fn run_to_the_end(p: &mut Player, going_right: bool, w: &World, limit_seconds: f
         if p.pos.x == before {
             p.update(&PlayerInput { jump_pressed: true, ..walk }, FRAME, w);
         }
+        assert!((0.0..w.width).contains(&p.pos.x), "x는 맵 안으로 감긴다: {:?}", p.pos);
+        let moved = shortest_dx(before, p.pos.x);
+        walked += if going_right { moved } else { -moved };
     }
     None
 }
@@ -121,11 +124,11 @@ fn climb_rock(p: &mut Player, w: &World) {
 fn map_is_four_screens_with_places_in_order() {
     let w = World::long_map(1);
     assert_eq!(w.width, 3840.0);
-    let names: Vec<&str> = [0.0, 959.0, 960.0, 1919.0, 1920.0, 2879.0, 2880.0, 3839.0, 3840.0]
+    let names: Vec<&str> = [0.0, 959.0, 960.0, 1919.0, 1920.0, 2879.0, 2880.0, 3839.0, 3840.0, 3850.0, -10.0]
         .iter()
         .map(|x| w.place_name_at(*x))
         .collect();
-    assert_eq!(names, ["해변", "해변", "화산", "화산", "산", "산", "집", "집", "집"]);
+    assert_eq!(names, ["해변", "해변", "화산", "화산", "산", "산", "집", "집", "해변", "해변", "집"], "이음매 너머는 다음 장소다");
 }
 
 #[test]
@@ -134,17 +137,17 @@ fn new_game_starts_on_the_beach_on_the_long_map() {
     assert_eq!(g.world.width, MAP_WIDTH);
     assert_eq!(g.player.pos.x, PLAYER_SPAWN_X);
     assert_eq!(g.place_name(), "해변");
-    assert_eq!(g.camera_left(), 0.0);
+    assert_eq!(g.camera_left(), PLAYER_SPAWN_X + PLAYER_WIDTH / 2.0 - SCREEN_WIDTH / 2.0, "시작할 때도 주인공이 가운데");
 }
 
 #[test]
-fn camera_follows_the_player_and_stops_at_both_map_ends() {
+fn camera_follows_the_player_and_never_stops_on_the_long_map() {
     let w = World::long_map(1);
-    assert_eq!(w.camera_left(100.0), 0.0, "왼쪽 끝에서 멈춘다");
+    assert_eq!(w.camera_left(100.0), -380.0, "해변 왼쪽 너머도 보여서 멈추지 않는다");
     assert_eq!(w.camera_left(480.0), 0.0);
     assert_eq!(w.camera_left(1500.0), 1020.0, "주인공이 가운데");
     assert_eq!(w.camera_left(3360.0), 2880.0);
-    assert_eq!(w.camera_left(3800.0), 2880.0, "오른쪽 끝에서 멈춘다");
+    assert_eq!(w.camera_left(3800.0), 3320.0, "집 오른쪽 너머도 보여서 멈추지 않는다");
 }
 
 #[test]
@@ -255,31 +258,35 @@ fn coins_sit_only_on_boxes_not_on_branches_or_steps() {
 // ---- 왕복과 낙하 ----
 
 #[test]
-fn player_crosses_every_map_both_ways_within_30_seconds() {
+fn player_laps_every_map_both_ways_within_30_seconds() {
     let mut slowest: f32 = 0.0;
     for (seed, w) in maps() {
-        let mut p = stand_at(0.0, &w);
-        let there = run_to_the_end(&mut p, true, &w, 30.0);
-        assert!(there.is_some(), "seed {seed}: 오른쪽으로 못 감, {:?}", p.pos);
-        let back = run_to_the_end(&mut p, false, &w, 30.0);
-        assert!(back.is_some(), "seed {seed}: 왼쪽으로 못 감, {:?}", p.pos);
+        let mut p = stand_at(PLAYER_SPAWN_X, &w);
+        let there = run_one_lap(&mut p, true, &w, 30.0);
+        assert!(there.is_some(), "seed {seed}: 오른쪽으로 한 바퀴 못 돎, {:?}", p.pos);
+        let back = run_one_lap(&mut p, false, &w, 30.0);
+        assert!(back.is_some(), "seed {seed}: 왼쪽으로 한 바퀴 못 돎, {:?}", p.pos);
         slowest = slowest.max(there.unwrap_or(0.0)).max(back.unwrap_or(0.0));
     }
-    println!("가장 오래 걸린 편도: {slowest:.1}초");
+    println!("가장 오래 걸린 한 바퀴: {slowest:.1}초");
 }
 
 #[test]
-fn player_cannot_leave_either_map_end_even_jumping() {
+fn player_crosses_the_seam_even_jumping_and_stays_on_the_map() {
     let w = World::long_map(1);
     for (x, input) in [
         (10.0, PlayerInput { left: true, jump_pressed: true, ..Default::default() }),
         (w.width - 60.0, PlayerInput { right: true, jump_pressed: true, ..Default::default() }),
     ] {
         let mut p = stand_at(x, &w);
+        let mut crossed = false;
         for _ in 0..120 {
+            let before = p.pos.x;
             p.update(&input, FRAME, &w);
-            assert!(p.pos.x >= 0.0 && p.pos.x + p.size.x <= w.width);
+            assert!((0.0..w.width).contains(&p.pos.x), "{:?}", p.pos);
+            crossed |= (p.pos.x - before).abs() > w.width / 2.0;
         }
+        assert!(crossed, "{x}에서 이음매를 넘는다");
     }
 }
 
@@ -287,7 +294,7 @@ fn player_cannot_leave_either_map_end_even_jumping() {
 fn player_never_hangs_in_the_air_wherever_they_land() {
     for (seed, w) in maps().take(6) {
         let mut x = 0.0;
-        while x <= w.width - PLAYER_WIDTH {
+        while x < w.width {
             let mut p = Player::new(CharacterKind::Ellie, Vec2::new(x, 100.0));
             for _ in 0..(2.0 / FRAME) as usize {
                 p.update(&PlayerInput::default(), FRAME, &w);

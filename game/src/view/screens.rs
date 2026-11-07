@@ -6,12 +6,12 @@
 use super::assets::{height_with_antenna, Assets};
 use super::coin::draw_coins;
 use super::effects::{draw_bubble, Effects};
-use super::gameover::{draw_down_panel, draw_fallen_player, DownScreen};
+use super::gameover::{draw_end_panel, draw_fallen_player, EndScreen};
 use super::hud::{draw_health, draw_hud, draw_level, draw_weapons};
 use super::places;
 use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
-use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
+use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
 use crate::config::CITIZEN_HELP_TEXT;
 use crate::logic::character::CharacterKind;
@@ -20,6 +20,7 @@ use crate::logic::monster::ZombieState;
 use crate::logic::player::{Facing, Motion};
 use crate::logic::skeleton::SkeletonState;
 use crate::logic::weapon::Weapon;
+use crate::logic::world::{nearest_copy, shortest_dx};
 use macroquad::prelude::*;
 
 // ---- 색 ----
@@ -203,9 +204,11 @@ fn draw_background(assets: &Assets, look: &SkyLook, ground_y: f32, camera_x: f32
     }
     Letterbox::current().look_at(camera_x);
     places::draw_ground_band(look, ground_y, camera_x);
-    if camera_x < places::BEACH_END {
-        draw_beach(&assets.sky, look, ground_y);
-    }
+    places::on_ring_cameras(camera_x, |camera| {
+        if camera < places::BEACH_END && camera + VIRTUAL_WIDTH > 0.0 {
+            draw_beach(&assets.sky, look, ground_y);
+        }
+    });
     places::draw_land(&assets.sky, look, ground_y, camera_x);
 }
 
@@ -272,25 +275,24 @@ pub fn draw_select(assets: &Assets, text: &TextPainter, ground_y: f32, picked: u
 
 /// 그림을 그릴 발 x: 충돌 네모 가운데지만, 그림(옆으로 뻗은 팔 포함)이 맵 밖으로
 /// 나가지 않게 맵 안으로 당긴다 (BUG-001). 규칙(충돌 네모)은 그대로다.
-fn feet_x_on_map(center_x: f32, half_width: f32, map_width: f32) -> f32 {
-    center_x.clamp(half_width, (map_width - half_width).max(half_width))
+fn view_center(game: &Game) -> f32 {
+    game.camera_left() + VIRTUAL_WIDTH / 2.0
 }
 
 /// 좀비 카스테라: 플레이어 쪽을 보고, 걸을 때 통통, 떠오르면 살랑살랑, 맞으면 번쩍.
 /// 쓰러진 화면에서는 멈춘다 (US-043). 밤 어두움은 주인공처럼 살짝만 받는다.
 fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
-    let frozen = game.combat.health.is_down();
+    let frozen = game.is_over();
     let player_x = game.player.rect().center().x;
-    let half = max_half_width(&assets.zombie, ZOMBIE_SPRITE_HEIGHT);
     for (i, zombie) in game.combat.zombies.list.iter().enumerate() {
-        let r = zombie.rect();
+        let r = nearest_copy(zombie.rect(), view_center(game));
         let t = if frozen { 0.0 } else { time() + i as f32 * 0.37 };
         let pose = match zombie.state {
             ZombieState::Walking => sprites::pose(Motion::Walk, t, false),
             ZombieState::Floating => sprites::float_pose(t),
         };
-        let facing = if player_x < r.center().x { Facing::Left } else { Facing::Right };
-        let feet = vec2(feet_x_on_map(r.center().x, half, game.world.width), r.y + r.h);
+        let facing = if shortest_dx(player_x, r.center().x) > 0.0 { Facing::Left } else { Facing::Right };
+        let feet = vec2(r.center().x, r.y + r.h);
         draw_character(&assets.zombie, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, tint);
         if zombie.is_flashing() {
             draw_character(&assets.zombie_flash, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, ZOMBIE_FLASH);
@@ -301,14 +303,14 @@ fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
 /// 스켈레톤: 플레이어 쪽을 보고, 걸을 때 통통, 서 있으면 숨쉬기, 피할 때 뒤로 젖히고, 맞으면 번쩍.
 /// 좀비와 같은 밤 색을 받고, 쓰러진 화면에서는 멈춘다.
 fn draw_skeletons(assets: &Assets, game: &Game, tint: Color) {
-    let frozen = game.combat.health.is_down();
+    let frozen = game.is_over();
     let player_x = game.player.rect().center().x;
     for (i, skeleton) in game.combat.skeletons.list.iter().enumerate() {
         let (picture, flash) = assets.skeleton(skeleton.stage);
         let height = sprites::skeleton_sprite_height(skeleton.stage);
-        let r = skeleton.rect();
+        let r = nearest_copy(skeleton.rect(), view_center(game));
         let t = if frozen { 0.0 } else { time() + i as f32 * 0.37 };
-        let player_on_left = player_x < r.center().x;
+        let player_on_left = shortest_dx(player_x, r.center().x) > 0.0;
         let pose = match skeleton.state {
             SkeletonState::Walking => sprites::pose(Motion::Walk, t, false),
             SkeletonState::Standing => sprites::pose(Motion::Idle, t, false),
@@ -319,7 +321,7 @@ fn draw_skeletons(assets: &Assets, game: &Game, tint: Color) {
         };
         // `draw_character`는 Left일 때 뒤집으니, 왼쪽을 보는 그림은 반대로 준다.
         let facing = if player_on_left != sprites::skeleton_art_faces_left(skeleton.stage) { Facing::Left } else { Facing::Right };
-        let feet = vec2(feet_x_on_map(r.center().x, max_half_width(picture, height), game.world.width), r.y + r.h);
+        let feet = vec2(r.center().x, r.y + r.h);
         draw_character(picture, feet, height, facing, pose, tint);
         if skeleton.is_flashing() {
             draw_character(flash, feet, height, facing, pose, ZOMBIE_FLASH);
@@ -348,7 +350,7 @@ fn draw_dropped_weapons(assets: &Assets, game: &Game) {
         if w.seconds_left() <= WEAPON_BLINK_FROM && (time() * WEAPON_BLINKS_PER_SECOND).fract() < 0.5 {
             continue;
         }
-        let c = w.rect.center();
+        let c = nearest_copy(w.rect, view_center(game)).center();
         if !w.is_falling() {
             let glow = Color { a: WEAPON_GLOW.a * (0.7 + 0.3 * (time() * 4.0).sin()), ..WEAPON_GLOW };
             draw_circle(c.x, c.y, WEAPON_GLOW_RADIUS, glow);
@@ -370,73 +372,76 @@ fn draw_held_weapon(assets: &Assets, weapon: Weapon, feet: Vec2, facing: Facing,
 }
 
 /// `touch_mode`면 키보드 안내 대신 조이스틱 안내를 보여 준다 (터치 조이스틱·버튼은 main이 위에 그린다).
-/// `down`이 있으면 쓰러진 화면이다.
+/// `ended`가 있으면 판이 끝난 화면이다 (쓰러짐이나 클리어).
 pub fn draw_play(
     assets: &Assets,
     text: &TextPainter,
     game: &Game,
     fast_forward: bool,
     effects: &Effects,
-    down: Option<&DownScreen>,
+    ended: Option<&EndScreen>,
     touch_mode: bool,
 ) {
     let d = game.clock.sky_darkness();
+    let (camera_x, view_x) = (game.camera_left(), view_center(game));
     // 여기부터 맵 좌표: 아래 `look_at(0.0)`까지는 카메라를 따라 움직인다.
-    draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y, game.camera_left());
-    places::draw_structures(&game.world, d);
+    // 움직이는 것은 화면에 가장 가까운 한 자리(`nearest_copy`)에만 그려서 두 번 보이지 않는다 (D61).
+    draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y, camera_x);
+    places::on_ring_cameras(camera_x, |_| places::draw_structures(&game.world, d));
     // 미스 → 가리는 앞그림 → 상자. 상자가 먼저면 집 앞 상자가 집에 묻힌다.
     if let Some(miss) = game.miss.as_ref().filter(|m| m.is_hiding()) {
-        draw_miss_like(&assets.m6.miss, miss.rect(&game.world), time(), WHITE);
+        draw_miss_like(&assets.m6.miss, nearest_copy(miss.rect(&game.world), view_x), time(), WHITE);
     }
-    places::draw_covers(&game.world, d);
+    places::on_ring_cameras(camera_x, |_| places::draw_covers(&game.world, d));
     for b in game.world.boxes() {
-        draw_wood_box(b, d);
+        draw_wood_box(nearest_copy(b, view_x), d);
     }
-    draw_coins(&game.coins, d, time());
+    draw_coins(&game.coins, d, time(), view_x);
 
     let player = &game.player;
     let texture = assets.character(player.kind);
     let r = player.rect();
     let height = height_with_antenna(player.kind, PLAY_SPRITE_HEIGHT);
-    let half = max_half_width(texture, height);
-    let feet = vec2(feet_x_on_map(r.x + r.w / 2.0, half, game.world.width), r.y + r.h);
+    let feet = vec2(r.center().x, r.y + r.h);
     let tint = mix(WHITE, CHARACTER_NIGHT_TINT, d);
     for (i, citizen) in game.citizens.list.iter().enumerate() {
         if citizen.is_standing() {
-            draw_miss_like(&assets.m6.miss_citizen_bomb, citizen.rect, time() + i as f32 * 0.37, tint);
+            draw_miss_like(&assets.m6.miss_citizen_bomb, nearest_copy(citizen.rect, view_x), time() + i as f32 * 0.37, tint);
         }
     }
     for (i, walker) in game.citizens.walkers.iter().enumerate() {
-        let r = walker.rect;
+        let r = nearest_copy(walker.rect, view_x);
         let motion = if walker.is_walking() { Motion::Walk } else { Motion::Idle };
         // 쓰러진 화면에서는 시간을 멈춰서 숨쉬기 흔들림도 멈춘다
-        let t = if down.is_some() { 0.0 } else { time() + i as f32 * 0.37 };
+        let t = if ended.is_some() { 0.0 } else { time() + i as f32 * 0.37 };
         let pose = sprites::pose(motion, t, false);
-        let facing = if !walker.is_walking() && down.is_none() { looking_around(t) } else { walker.facing };
+        let facing = if !walker.is_walking() && ended.is_none() { looking_around(t) } else { walker.facing };
         draw_character(&assets.m6.miss, vec2(r.center().x, r.y + r.h), r.h * MISS_SPRITE_SCALE, facing, pose, tint);
     }
     draw_dropped_weapons(assets, game);
     draw_zombies(assets, game, tint);
     draw_skeletons(assets, game, tint);
-    if let Some(down) = down {
-        draw_fallen_player(texture, player, &game.world, feet.x, height, tint, down.seconds);
+    if let Some(fallen) = ended.filter(|e| !e.cleared) {
+        draw_fallen_player(texture, player, &game.world, feet.x, height, tint, fallen.seconds);
     } else {
-        let blink = game.combat.health.is_invincible() && (time() * HURT_BLINKS_PER_SECOND).fract() < 0.5;
+        let blink = ended.is_none() && game.combat.health.is_invincible() && (time() * HURT_BLINKS_PER_SECOND).fract() < 0.5;
         let player_tint = Color { a: if blink { HURT_BLINK_ALPHA } else { 1.0 }, ..tint };
-        let pose = sprites::pose(player.motion, time(), player.vel.y < 0.0);
+        // 클리어하면 걷던 그대로 굳지 않고 서서 숨 쉰다
+        let motion = if ended.is_some() { Motion::Idle } else { player.motion };
+        let pose = sprites::pose(motion, time(), player.vel.y < 0.0);
         draw_character(texture, feet, height, player.facing, pose, player_tint);
         if !effects.swinging_blade() {
             draw_held_weapon(assets, game.weapons.held(), feet, player.facing, player_tint);
         }
     }
 
-    game.combat.skeletons.projectiles.iter().for_each(draw_projectile);
-    effects.draw(text, r, player.facing, &assets.m6, game.camera_left());
-    if down.is_none() {
+    game.combat.skeletons.projectiles.iter().for_each(|shot| draw_projectile(shot, view_x));
+    effects.draw(text, r, player.facing, &assets.m6, camera_x);
+    if ended.is_none() {
         for (i, walker) in game.citizens.walkers.iter().enumerate() {
-            let head = vec2(walker.rect.center().x, walker.rect.y - CITIZEN_BUBBLE_GAP);
+            let head = vec2(places::near_view(view_x, walker.rect.center().x), walker.rect.y - CITIZEN_BUBBLE_GAP);
             if !walker.is_walking() && effects.citizen_talks(i) && game.world.is_on_screen(head.x, r.center().x) {
-                draw_bubble(text, CITIZEN_HELP_TEXT, head.x, head.y, game.camera_left(), 1.0);
+                draw_bubble(text, CITIZEN_HELP_TEXT, head.x, head.y, camera_x, 1.0);
             }
         }
     }
@@ -444,20 +449,23 @@ pub fn draw_play(
     // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다.
     Letterbox::current().look_at(0.0);
     effects.draw_on_screen(text);
-    draw_hud(text, &game.clock, game.wallet.coins(), fast_forward, game.place_name());
-    draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
-    draw_level(text, game.combat.level, game.combat.experience);
     let owned = game.weapons.owned();
-    draw_weapons(&assets.m6, &owned, game.weapons.held());
-    if touch_mode && down.is_none() {
+    // 끝난 화면은 큰 글이 맨 위에 온다 (BUG-024). 쓰러질 때는 움직임이 끝난 뒤에 숨긴다
+    if !game.is_cleared() && !ended.is_some_and(EndScreen::ready) {
+        draw_hud(text, &game.clock, game.wallet.coins(), fast_forward, game.place_name());
+        draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
+        draw_level(text, game.combat.level, game.combat.experience);
+        draw_weapons(&assets.m6, &owned, game.weapons.held());
+    }
+    if touch_mode && ended.is_none() {
         text.centered("조이스틱을 위로 밀면 점프", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
-    if !touch_mode && down.is_none() {
+    if !touch_mode && ended.is_none() {
         let hint = if owned.is_empty() { "화살표: 걷기   Space: 점프   Q: 공격   Esc: 캐릭터 고르기" } else { "화살표: 걷기   Space: 점프   Q: 공격   W: 바꾸기   Esc: 고르기" };
         text.centered(hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
-    if let Some(down) = down {
-        draw_down_panel(text, down);
+    if let Some(ended) = ended {
+        draw_end_panel(text, ended, &assets.m6.miss);
     }
 }
 
@@ -489,14 +497,6 @@ mod tests {
             let top = CARD_FEET_Y - height_with_antenna(kind, CARD_SPRITE_HEIGHT * PICKED_GROW) * (1.0 + sprites::IDLE_STRETCH);
             assert!(top >= CARD_TOP, "{kind:?} 맨 위 {top}");
         }
-    }
-
-    #[test]
-    fn sprite_is_pulled_inside_map_edges() {
-        // BUG-001: 반폭 40인 그림은 발 x가 맵 양 끝에서 40 안쪽에 있어야 잘리지 않는다.
-        assert_eq!(feet_x_on_map(24.0, 40.0, 3840.0), 40.0);
-        assert_eq!(feet_x_on_map(3840.0 - 24.0, 40.0, 3840.0), 3840.0 - 40.0);
-        assert_eq!(feet_x_on_map(2000.0, 40.0, 3840.0), 2000.0);
     }
 
     #[test]

@@ -74,6 +74,21 @@
                 localStorage.setItem(BEST_DAYS_KEY, String(days));
             } catch (e) {}
         };
+        // 최고 점수 (US-069). 버틴 날 최고 기록과 따로 저장한다.
+        var BEST_SCORE_KEY = "miss-game.best-score";
+        importObject.env.best_score_load = function () {
+            try {
+                var score = parseInt(localStorage.getItem(BEST_SCORE_KEY), 10);
+                return score >= 0 && score <= 2147483647 ? score : 0;
+            } catch (e) {
+                return 0;
+            }
+        };
+        importObject.env.best_score_save = function (score) {
+            try {
+                localStorage.setItem(BEST_SCORE_KEY, String(score));
+            } catch (e) {}
+        };
         // macroquad는 window resize 때만 캔버스 버퍼를 맞춘다. 주소창·전체화면·회전으로 CSS 크기만 바뀌어도
         // 버퍼와 어긋나지 않게, 캔버스 크기가 바뀔 때마다 맞춘다 (어긋나면 그림과 터치 자리가 위아래로 벌어진다).
         var canvasEl = document.getElementById("glcanvas");

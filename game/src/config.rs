@@ -321,6 +321,19 @@ pub const WALKING_CITIZEN_SPEED: f32 = 40.0;
 pub const WALKING_CITIZEN_WALK_SECONDS: f32 = 6.0;
 pub const WALKING_CITIZEN_PAUSE_SECONDS: f32 = 2.0;
 
+/// 부모님이 정한 임시 값: 벽 안쪽에서 나오는 몬스터는 주인공에게서 이만큼은 떨어진다 (픽셀, 몸 가운데끼리).
+pub const MONSTER_SPAWN_MIN_DISTANCE: f32 = 160.0;
+
+/// D63 버틴 날이 이 값이 되는 아침에 게임을 클리어한다. 바꾸면 `GAME_CLEAR_TEXT`의 숫자도 같이 고친다.
+pub const DAYS_TO_CLEAR: u32 = 7;
+/// US-068 클리어 축하 문구
+pub const GAME_CLEAR_TEXT: &str = "축하해요! 7일을 버텼어요!";
+
+/// 점수 가중치. 주운 코인, 레벨업, 해치운 몬스터 하나마다 얻는 점수.
+pub const SCORE_PER_COIN: u32 = 1;
+pub const SCORE_PER_LEVEL_UP: u32 = 1;
+pub const SCORE_PER_MONSTER: u32 = 1;
+
 /// 임시-3, 임시-4 주인공에게서 이만큼 넘게 멀어진 몬스터와 화살·총알은 사라진다 (픽셀, 몸 가운데끼리)
 pub const FORGET_DISTANCE: f32 = 1200.0;
 

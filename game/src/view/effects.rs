@@ -4,6 +4,7 @@
 use super::assets::M6Art;
 use super::coin::CoinPops;
 use super::hud::draw_pill;
+use super::places::near_view;
 use super::screen::VIRTUAL_WIDTH;
 use super::sky::{hash, lerp};
 use super::sprites::{fit_size, flip_weapon};
@@ -102,6 +103,7 @@ impl BurstKind {
     }
 }
 
+#[derive(Clone, Copy)]
 struct Burst {
     kind: BurstKind,
     at: Vec2,
@@ -186,7 +188,12 @@ impl Effects {
             CombatEvent::SkeletonHandHit { at } => self.burst(BurstKind::Hand, at),
             CombatEvent::SkeletonDodged { at } => self.burst(BurstKind::Cheer, at),
             CombatEvent::CitizenDefeated { at } => self.burst(BurstKind::Smoke, at),
-            CombatEvent::ZombieAppeared { at } => self.zombie_call = Some((at.x, 0.0)),
+            // 벽 안쪽에서는 화면 안에 나올 수 있어서 연기와 함께 나타난다
+            CombatEvent::ZombieAppeared { at } => {
+                self.zombie_call = Some((at.x, 0.0));
+                self.burst(BurstKind::Smoke, at);
+            }
+            CombatEvent::SkeletonAppeared { at, .. } => self.burst(BurstKind::Smoke, at),
             CombatEvent::LevelUp { .. } => self.level_up_age = Some(0.0),
             CombatEvent::HealthRefilled => self.heart_sparkle_age = Some(0.0),
             _ => {}
@@ -217,7 +224,9 @@ impl Effects {
     }
 
     /// 맵 좌표로 그린다. `camera_left`는 화면 왼쪽 끝의 맵 x (말풍선을 화면 안에 두는 데 쓴다).
+    /// 효과의 자리는 맵 좌표로 저장되어 있어서, 이음매 너머면 화면에 가까운 쪽으로 옮겨 그린다 (D61).
     pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art, camera_left: f32) {
+        let view_x = camera_left + VIRTUAL_WIDTH / 2.0;
         if let Some(age) = self.swing_age {
             let t = age / SWING_SECONDS;
             match self.swing_weapon.unwrap_or(Weapon::Hands) {
@@ -226,6 +235,7 @@ impl Effects {
             }
         }
         for burst in &self.bursts {
+            let burst = &Burst { at: vec2(near_view(view_x, burst.at.x), burst.at.y), ..*burst };
             match burst.kind {
                 BurstKind::Spark => draw_spark(burst),
                 BurstKind::Hand => draw_hand(burst, player.center()),
@@ -234,11 +244,11 @@ impl Effects {
                 BurstKind::Smoke => draw_smoke(burst),
             }
         }
-        self.pops.draw(text);
+        self.pops.draw(text, view_x);
         if let Some((x, age)) = self.zombie_call {
             // 화면 밖 x라도 `draw_bubble`이 그쪽 가장자리로 당긴다
             let fade = ((1.0 - age / ZOMBIE_CALL_SECONDS) * 3.0).min(1.0);
-            draw_bubble(text, ZOMBIE_APPEAR_TEXT, x, ZOMBIE_CALL_Y, camera_left, fade);
+            draw_bubble(text, ZOMBIE_APPEAR_TEXT, near_view(view_x, x), ZOMBIE_CALL_Y, camera_left, fade);
         }
     }
 

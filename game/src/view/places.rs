@@ -1,15 +1,17 @@
 //! 긴 맵의 배경 (US-050): 해변 → 화산 → 산 → 집. 하늘과 바다는 sky.rs, 여기는 그 앞의 땅이다.
 //!
 //! - 좌표는 모두 맵 x라서 `Letterbox::look_at`을 건 뒤에 그린다. 하늘·해·달·바다는 화면에 고정이다.
+//! - 맵은 고리다 (D61). 땅 띠는 높이·색이 맵 폭마다 되풀이되어 한 번만 그리고,
+//!   나무·바위·집처럼 한 자리에 놓인 그림은 [`on_ring_cameras`]로 한 바퀴 옮긴 카메라에서도 그린다.
 //! - 끊긴 곳이 없게 땅을 장소마다 따로 그리지 않고, 맵 x로 높이·색을 구해 세로 띠로 잇는다.
 //!   색은 장소 경계 양쪽에서 부드럽게 섞이고, 먼 땅은 해변 끝에서 바다 위로 천천히 솟는다.
 //! - 그림일 뿐 규칙은 없다 (용암도 닿아도 아무 일이 없다). 밟는 구조물·숨는 곳은 logic이 정한다.
 //! - 색·자리는 그림 값이라 이 파일 위쪽 상수에 둔다. 아이가 색을 고르면 여기만 바꾸면 된다.
 
-use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
+use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{hash, lerp, mix, night, ramp, with_alpha, Canvas, GpuCanvas, SkyArt, SkyLook, Tex, HORIZON_Y};
-use crate::config::{HIDE_SPOTS, MISS_HEIGHT};
-use crate::logic::world::World;
+use crate::config::{HIDE_SPOTS, MAP_WIDTH, MISS_HEIGHT};
+use crate::logic::world::{shortest_dx, World};
 use macroquad::prelude::*;
 
 // ---- 장소 ----
@@ -20,6 +22,11 @@ const PLACE_BLEND: f32 = 110.0;
 /// 먼 땅이 바다 위로 솟기 시작하는 곳과 수평선을 다 가리는 곳
 const LAND_START: f32 = 920.0;
 const LAND_FULL: f32 = 1150.0;
+/// 집 오른쪽에서 먼 땅과 앞 언덕이 내려가기 시작하는 곳. 맵 끝에서 0이 되어 해변으로 이어진다 (D61).
+const FAR_FADE_FROM: f32 = MAP_WIDTH - 230.0;
+const NEAR_FADE_FROM: f32 = MAP_WIDTH - 160.0;
+/// 맵 끝에서 이만큼 벗어난 그림까지 한 바퀴 옮긴 카메라로 그린다. 이음매에 걸친 나무·바위의 반폭보다 크다.
+const SEAM_MARGIN: f32 = 100.0;
 /// 이 x까지 해변 그림(알갱이·조개·물결)이 있다. 끝은 [`SHORE_ROCKS`]가 가린다.
 pub const BEACH_END: f32 = 1000.0;
 /// 띠 한 칸 폭. 칸을 맵 격자에 맞춰서 걸어도 땅 모양이 떨리지 않는다.
@@ -107,6 +114,8 @@ const ROCK_LIGHT: Color = Color::new(0.56, 0.47, 0.48, 1.0);
 const VOLCANO_ROCKS: [(f32, f32); 4] = [(1090.0, 1.0), (1210.0, 0.7), (1620.0, 0.9), (1790.0, 1.1)];
 /// 해변이 끝나는 곳의 바위 더미 (x, y, 반지름). 물결·모래 그림의 끝을 가린다.
 const SHORE_ROCKS: [(f32, f32, f32); 3] = [(1016.0, 444.0, 30.0), (982.0, 450.0, 25.0), (1040.0, 452.0, 20.0)];
+/// 집과 해변이 이어지는 곳의 바위 더미. 물결·거품의 왼쪽 끝을 가린다.
+const SEAM_ROCKS: [(f32, f32, f32); 3] = [(3846.0, 444.0, 30.0), (3812.0, 450.0, 25.0), (3876.0, 452.0, 20.0)];
 
 // ---- 산: 뾰족한 세모 산에 하얀 눈 ----
 /// (꼭대기 x, 높이, 반폭). x는 `STRIP_STEP` 배수라야 꼭대기가 깎이지 않는다.
@@ -166,16 +175,45 @@ const COVER_HALF_WIDTH: f32 = 58.0;
 const PEAK_COVER_HALF_WIDTH: f32 = 34.0;
 
 // ---- 땅 위 작은 것 ----
-const SPECK_EVERY: f32 = 36.0;
+const SPECK_EVERY: f32 = 40.0;
 const PEBBLE: Color = Color::new(0.36, 0.29, 0.30, 0.8);
 const GRASS: Color = Color::new(0.30, 0.52, 0.22, 0.9);
 const FLOWERS: [Color; 3] = [Color::new(1.0, 0.95, 0.45, 1.0), Color::new(1.0, 0.62, 0.74, 1.0), WHITE];
 
+/// 맵 `x`를 0 이상 맵 폭 미만으로 감는다. 띠 높이·색은 이 값으로 구해서 맵 폭마다 되풀이된다.
+fn ring_x(x: f32) -> f32 {
+    x.rem_euclid(MAP_WIDTH)
+}
+
+/// `view_x`(화면 가운데)에서 가장 가까운 맵 `x`의 자리. 이벤트의 `at`을 그릴 때 쓴다.
+pub fn near_view(view_x: f32, x: f32) -> f32 {
+    view_x + shortest_dx(view_x, x)
+}
+
+/// 이번 화면에 맞는 카메라들: `camera_x`와, 이음매 너머가 보이면 한 바퀴 옮긴 것.
+fn ring_cameras(camera_x: f32) -> impl Iterator<Item = f32> {
+    [camera_x - MAP_WIDTH, camera_x, camera_x + MAP_WIDTH]
+        .into_iter()
+        .filter(|c| *c < MAP_WIDTH + SEAM_MARGIN && *c + VIRTUAL_WIDTH > -SEAM_MARGIN)
+}
+
+/// 맵의 한 자리에 놓인 그림을 카메라마다 그리고 `camera_x`로 돌아온다. 맵 밖 빈 곳을 복사본이 채운다.
+pub fn on_ring_cameras(camera_x: f32, mut draw: impl FnMut(f32)) {
+    let letterbox = Letterbox::current();
+    for camera in ring_cameras(camera_x) {
+        letterbox.look_at(camera);
+        draw(camera);
+    }
+    letterbox.look_at(camera_x);
+}
+
 /// `[해변, 화산, 산, 집]` 색표에서 맵 `x`의 색. 가장 가까운 경계 양쪽 [`PLACE_BLEND`]에서만 섞인다.
+/// 집과 해변은 집 쪽에서만 섞어서, 맵 끝에서 해변 색이 된다.
 fn place_color(table: &[Color; 4], x: f32) -> Color {
-    let edge = (x / PLACE_WIDTH).round().clamp(1.0, 3.0) as usize;
-    let at = edge as f32 * PLACE_WIDTH;
-    mix(table[edge - 1], table[edge], ramp(x, at - PLACE_BLEND, at + PLACE_BLEND))
+    let x = ring_x(x);
+    let edge = (x / PLACE_WIDTH).round().clamp(1.0, 4.0) as usize;
+    let at = edge as f32 * PLACE_WIDTH - if edge == 4 { PLACE_BLEND } else { 0.0 };
+    mix(table[edge - 1], table[edge % 4], ramp(x, at - PLACE_BLEND, at + PLACE_BLEND))
 }
 
 /// `center`에서 `height`, `half_width` 밖에서 0인 산 모양. `slope`가 크면 옆구리가 오목하다.
@@ -183,20 +221,23 @@ fn peak(x: f32, center: f32, half_width: f32, height: f32, slope: f32) -> f32 {
     height * (1.0 - (x - center).abs() / half_width).max(0.0).powf(slope)
 }
 
-/// 먼 땅 높이: 낮은 언덕 위로 화산과 산이 솟는다. 해변에서는 0.
+/// 먼 땅 높이: 낮은 언덕 위로 화산과 산이 솟는다. 해변과 맵 끝에서는 0.
 fn far_height(x: f32) -> f32 {
-    let hills = ramp(x, LAND_START, LAND_FULL) * (FAR_HILL_HEIGHT + (x * 0.011).sin() * 12.0 + (x * 0.027 + 1.0).sin() * 7.0);
+    let x = ring_x(x);
+    let hills = ramp(x, LAND_START, LAND_FULL) * (1.0 - ramp(x, FAR_FADE_FROM, MAP_WIDTH)) * (FAR_HILL_HEIGHT + (x * 0.011).sin() * 12.0 + (x * 0.027 + 1.0).sin() * 7.0);
     let volcano = peak(x, VOLCANO_X, VOLCANO_HALF_WIDTH, VOLCANO_HEIGHT, VOLCANO_SLOPE).min(VOLCANO_RIM);
     MOUNTAINS.iter().map(|&(c, h, w)| peak(x, c, w, h, MOUNTAIN_SLOPE)).fold(hills.max(volcano), f32::max)
 }
 
 /// 앞 언덕 높이
 fn near_height(x: f32) -> f32 {
-    ramp(x, NEAR_START.0, NEAR_START.1) * (NEAR_HILL_HEIGHT + (x * 0.017 + 2.0).sin() * 12.0 + (x * 0.041).sin() * 6.0)
+    let x = ring_x(x);
+    ramp(x, NEAR_START.0, NEAR_START.1) * (1.0 - ramp(x, NEAR_FADE_FROM, MAP_WIDTH)) * (NEAR_HILL_HEIGHT + (x * 0.017 + 2.0).sin() * 12.0 + (x * 0.041).sin() * 6.0)
 }
 
 /// 눈 아래 끝 y. 산이 눈 선보다 낮으면 `top`이라 아무것도 그리지 않는다.
 fn snow_bottom(x: f32, top: f32) -> f32 {
+    let x = ring_x(x);
     if x < SNOW_FROM_X {
         return top;
     }
@@ -206,7 +247,7 @@ fn snow_bottom(x: f32, top: f32) -> f32 {
 
 /// 바다가 화면에 보이는지. 먼 땅이 수평선을 다 가리면 안 그려도 된다.
 pub fn sea_visible(camera_x: f32) -> bool {
-    camera_x < LAND_FULL
+    camera_x < LAND_FULL || camera_x + VIRTUAL_WIDTH > FAR_FADE_FROM
 }
 
 /// 화면 폭만큼 세로 띠를 잇는다. 윗선·아랫선과 그 색을 맵 x로 받는다.
@@ -239,15 +280,17 @@ pub fn draw_ground_band(look: &SkyLook, ground_y: f32, camera_x: f32) {
     draw_strip(camera_x, |_| ground_y, |_| lip, color(&GROUND_TOP), color(&GROUND_MID));
     draw_strip(camera_x, |_| lip, |_| VIRTUAL_HEIGHT, color(&GROUND_MID), color(&GROUND_DEEP));
 
-    let first = (camera_x / SPECK_EVERY).floor() as u32;
-    for cell in first..=first + (VIRTUAL_WIDTH / SPECK_EVERY) as u32 + 1 {
-        let n = cell * 4;
+    let first = (camera_x / SPECK_EVERY).floor() as i32;
+    for cell in first..=first + (VIRTUAL_WIDTH / SPECK_EVERY) as i32 + 1 {
+        // 번호를 맵 폭마다 되풀이해서 이음매를 건너도 같은 자리에 같은 점이 있다
+        let n = cell.rem_euclid((MAP_WIDTH / SPECK_EVERY) as i32) as u32 * 4;
         let x = (cell as f32 + hash(n)) * SPECK_EVERY;
-        if x < PLACE_WIDTH + PLACE_BLEND {
+        let map_x = ring_x(x);
+        if map_x < PLACE_WIDTH + PLACE_BLEND {
             continue;
         }
         let y = lip + 2.0 + hash(n + 1) * (VIRTUAL_HEIGHT - lip - 8.0);
-        if x < PLACE_WIDTH * 2.0 {
+        if map_x < PLACE_WIDTH * 2.0 {
             draw_circle(x, y, 1.5 + hash(n + 2) * 3.0, night(PEBBLE, d));
         } else {
             draw_grass(x, y, hash(n + 2), d);
@@ -284,29 +327,31 @@ pub fn draw_land(art: &SkyArt, look: &SkyLook, ground_y: f32, camera_x: f32) {
     let near = |table: &'static [Color; 4]| move |x: f32| night(place_color(table, x), near_d);
     draw_strip(camera_x, |x| ground_y - near_height(x), bottom, near(&NEAR_TOP), near(&NEAR_BOTTOM));
     let base_y = |x: f32| ground_y - near_height(x) * 0.45;
-    for (x, s) in VOLCANO_ROCKS {
-        if on_screen(camera_x, x - 50.0, x + 50.0) {
-            draw_rock(vec2(x, base_y(x)), 26.0 * s, near_d);
+    on_ring_cameras(camera_x, |camera| {
+        for (x, s) in VOLCANO_ROCKS {
+            if on_screen(camera, x - 50.0, x + 50.0) {
+                draw_rock(vec2(x, base_y(x)), 26.0 * s, near_d);
+            }
         }
-    }
-    for (x, s) in PINES {
-        if on_screen(camera_x, x - 60.0, x + 60.0) {
-            draw_pine(vec2(x, base_y(x)), s, near_d);
+        for (x, s) in PINES {
+            if on_screen(camera, x - 60.0, x + 60.0) {
+                draw_pine(vec2(x, base_y(x)), s, near_d);
+            }
         }
-    }
-    for (x, s) in ROUND_TREES {
-        if on_screen(camera_x, x - 70.0, x + 70.0) {
-            draw_round_tree(vec2(x, base_y(x)), s, near_d);
+        for (x, s) in ROUND_TREES {
+            if on_screen(camera, x - 70.0, x + 70.0) {
+                draw_round_tree(vec2(x, base_y(x)), s, near_d);
+            }
         }
-    }
-    if on_screen(camera_x, FENCE_FROM_TO.0, FENCE_FROM_TO.1) {
-        draw_fence(ground_y, near_d);
-    }
-    if on_screen(camera_x, 950.0, 1070.0) {
-        for (x, y, r) in SHORE_ROCKS {
-            draw_rock(vec2(x, y), r, d * GROUND_NIGHT_AMOUNT);
+        if on_screen(camera, FENCE_FROM_TO.0, FENCE_FROM_TO.1) {
+            draw_fence(ground_y, near_d);
         }
-    }
+        for (x, y, r) in SHORE_ROCKS.into_iter().chain(SEAM_ROCKS) {
+            if on_screen(camera, x - 40.0, x + 40.0) {
+                draw_rock(vec2(x, y), r, d * GROUND_NIGHT_AMOUNT);
+            }
+        }
+    });
 }
 
 /// 밟는 구조물: 구멍, 큰 나무와 발판, 바위 계단. 미스보다 먼저 그린다.
@@ -475,8 +520,6 @@ fn draw_house(ground_y: f32, d: f32) {
 mod tests {
     use super::*;
 
-    const MAP_WIDTH: f32 = PLACE_WIDTH * 4.0;
-
     #[test]
     fn colors_change_smoothly_across_places() {
         // US-050: 장소가 바뀌는 곳에서 띠 한 칸 사이 색이 튀지 않는다.
@@ -500,15 +543,58 @@ mod tests {
 
     #[test]
     fn land_hides_the_sea_where_it_is_not_drawn() {
-        // 바다를 건너뛰는 곳부터 맵 끝까지 먼 땅이 수평선 위로 나와 있어야 빈 곳이 안 보인다.
+        // 바다를 건너뛰는 화면에 보이는 곳은 모두 먼 땅이 수평선 위로 나와 있어야 빈 곳이 안 보인다.
         let ground_y = crate::config::GROUND_Y;
-        let mut x = LAND_FULL;
-        while x <= MAP_WIDTH + VIRTUAL_WIDTH {
-            assert!(ground_y - far_height(x) < HORIZON_Y, "x={x}");
-            x += STRIP_STEP;
+        let mut camera = -MAP_WIDTH / 8.0;
+        while camera < MAP_WIDTH {
+            if !sea_visible(camera) {
+                let mut x = camera;
+                while x <= camera + VIRTUAL_WIDTH {
+                    assert!(ground_y - far_height(x) < HORIZON_Y, "camera={camera} x={x}");
+                    x += STRIP_STEP;
+                }
+            }
+            camera += STRIP_STEP;
         }
         assert_eq!(far_height(LAND_START), 0.0);
         assert!(sea_visible(0.0) && !sea_visible(LAND_FULL));
+        assert!(sea_visible(-480.0) && sea_visible(3383.0), "이음매 양쪽에서 바다가 보인다");
+    }
+
+    #[test]
+    fn land_repeats_and_has_no_step_at_the_seam() {
+        // D61: 이음매에서 3,840 뛰어도 그림이 같고, 집에서 해변으로 끊기지 않는다.
+        for x in [-470.0, -8.0, 0.0, 8.0, 500.0] {
+            assert_eq!(far_height(x), far_height(x + MAP_WIDTH), "{x}");
+            assert_eq!(near_height(x), near_height(x + MAP_WIDTH), "{x}");
+            assert_eq!(place_color(&GROUND_MID, x), place_color(&GROUND_MID, x + MAP_WIDTH), "{x}");
+        }
+        let mut x = MAP_WIDTH - 400.0;
+        while x < MAP_WIDTH + 400.0 {
+            assert!((far_height(x) - far_height(x + STRIP_STEP)).abs() < 12.0, "x={x}");
+            assert!((near_height(x) - near_height(x + STRIP_STEP)).abs() < 12.0, "x={x}");
+            x += STRIP_STEP;
+        }
+        assert_eq!(far_height(0.0), 0.0);
+        assert_eq!(near_height(0.0), 0.0);
+        assert_eq!(place_color(&GROUND_MID, 0.0), GROUND_MID[0], "해변 왼쪽 끝은 해변 색이다");
+        const { assert!(MAP_WIDTH % STRIP_STEP == 0.0 && MAP_WIDTH % SPECK_EVERY == 0.0) };
+    }
+
+    #[test]
+    fn cameras_cover_what_lies_past_the_seam() {
+        let cameras = |c: f32| ring_cameras(c).collect::<Vec<_>>();
+        assert_eq!(cameras(1500.0), vec![1500.0], "맵 가운데는 하나뿐이다");
+        assert_eq!(cameras(-480.0), vec![-480.0, MAP_WIDTH - 480.0]);
+        assert_eq!(cameras(3383.0), vec![3383.0 - MAP_WIDTH, 3383.0]);
+        assert_eq!(cameras(10.0), vec![10.0, MAP_WIDTH + 10.0], "맵 끝을 조금 넘은 바위도 보인다");
+    }
+
+    #[test]
+    fn near_view_takes_the_short_way() {
+        assert_eq!(near_view(3700.0, 100.0), 3940.0);
+        assert_eq!(near_view(100.0, 3700.0), -140.0);
+        assert_eq!(near_view(1000.0, 1300.0), 1300.0);
     }
 
     #[test]

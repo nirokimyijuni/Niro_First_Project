@@ -11,7 +11,7 @@ use super::miss::Miss;
 use super::player::{Player, PlayerInput};
 use super::weapon::{Weapon, Weapons};
 use super::world::{really_overlaps, World};
-use crate::config::{PLAYER_HEIGHT, PLAYER_SPAWN_X};
+use crate::config::{DAYS_TO_CLEAR, PLAYER_HEIGHT, PLAYER_SPAWN_X, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER};
 use macroquad::math::Vec2;
 
 /// 화면(로건)이 보고 팝업·소리를 낼 일.
@@ -31,6 +31,8 @@ pub enum GameEvent {
     WeaponPicked { kind: Weapon },
     /// 폭발형 시민이 터졌다 (`CITIZEN_POP_TEXT`). `at`은 시민 몸 가운데.
     CitizenPopped { at: Vec2 },
+    /// 버틴 날이 `DAYS_TO_CLEAR`가 되어 게임을 클리어했다 (`GAME_CLEAR_TEXT`). 한 판에 한 번만 온다.
+    GameCleared,
 }
 
 pub struct Game {
@@ -44,6 +46,7 @@ pub struct Game {
     pub miss: Option<Miss>,
     pub weapons: Weapons,
     pub citizens: Citizens,
+    cleared: bool,
 }
 
 impl Game {
@@ -62,6 +65,7 @@ impl Game {
             miss: world.is_long_map().then(|| Miss::new(seed)),
             weapons: Weapons::new(seed),
             citizens: Citizens::on_world(&world, seed),
+            cleared: false,
             world,
             clock: Clock::new(),
             wallet: Wallet::new(),
@@ -70,10 +74,10 @@ impl Game {
     }
 
     /// 한 프레임 진행. 빨리감기는 main.rs `update_with_time_scale`이 같은 순서로 맡는다.
-    /// 쓰러진 뒤에는 시계·플레이어·코인·좀비 모두 멈춘다 (US-043).
+    /// 쓰러지거나 클리어한 뒤에는 시계·플레이어·코인·좀비 모두 멈춘다 (US-043, US-068).
     pub fn update(&mut self, input: &PlayerInput, dt: f32) -> Vec<GameEvent> {
         let mut events = Vec::new();
-        if self.combat.health.is_down() {
+        if self.is_over() {
             return events;
         }
 
@@ -98,7 +102,11 @@ impl Game {
 
     /// 공격 버튼을 처리하고 몬스터·미스·무기·시민 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
     /// 이번 프레임의 낮/밤을 본다. 빨리감기여도 `dt`는 진짜 시간이다 (D13: 빨라지는 건 시계·코인뿐).
+    /// 빨리감기도 이 함수를 지나서, 클리어도 여기서 본다.
     pub fn update_combat(&mut self, input: &PlayerInput, dt: f32, events: &mut Vec<GameEvent>) {
+        if self.cleared {
+            return;
+        }
         let player_rect = self.player.rect();
         if input.attack_pressed {
             let held = self.weapons.held();
@@ -120,6 +128,29 @@ impl Game {
         } else {
             self.citizens.walk(dt, &self.world);
         }
+
+        // 싸움이 끝난 뒤에 본다: 같은 순간 쓰러졌으면 쓰러짐이 먼저다.
+        if !self.combat.health.is_down() && self.clock.nights_survived() >= DAYS_TO_CLEAR {
+            self.cleared = true;
+            events.push(GameEvent::GameCleared);
+        }
+    }
+
+    /// 클리어했으면 true. 쓰러짐은 `combat.health.is_down()`이고, 둘이 함께 true인 일은 없다.
+    pub fn is_cleared(&self) -> bool {
+        self.cleared
+    }
+
+    /// 쓰러졌거나 클리어해서 판이 끝났으면 true.
+    pub fn is_over(&self) -> bool {
+        self.cleared || self.combat.health.is_down()
+    }
+
+    /// 이번 판 점수: 주운 코인 + 레벨업 횟수 + 해치운 몬스터 (D64). 가중치는 config에 있다.
+    pub fn score(&self) -> u32 {
+        self.coins.picked_total * SCORE_PER_COIN
+            + (self.combat.level - 1) * SCORE_PER_LEVEL_UP
+            + self.combat.monsters_defeated * SCORE_PER_MONSTER
     }
 
     /// 카메라 왼쪽 끝 x. 로건은 그릴 때 월드 x에서 이 값을 뺀다.

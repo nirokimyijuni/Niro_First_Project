@@ -7,7 +7,7 @@
 
 use super::combat::CombatEvent;
 use super::monster::walk_x;
-use super::world::{really_overlaps, World};
+use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     ARROW_INTERVAL_SECONDS, ARROW_SPEED, ARROW_WIDTH, BULLET_INTERVAL_SECONDS, BULLET_SPEED, BULLET_WIDTH,
     FORGET_DISTANCE, GRAVITY, PROJECTILE_BOUNCED_RANGE, PROJECTILE_FLIGHT_HEIGHT, PROJECTILE_HEIGHT, SKELETON_DODGE_JUMP_SPEED,
@@ -124,7 +124,7 @@ impl Skeleton {
         }
 
         let weapon = self.stage.weapon();
-        let distance = (player_x - self.rect().center().x).abs();
+        let distance = shortest_dx(self.rect().center().x, player_x).abs();
         let old_x = self.pos.x;
         if weapon.is_none() || distance > SKELETON_SHOOT_DISTANCE {
             self.pos.x = walk_x(self.rect(), player_x, SKELETON_WALK_SPEED * step, world);
@@ -215,7 +215,7 @@ impl Projectile {
     /// 스켈레톤 몸 앞에서 플레이어 쪽으로 나간다.
     fn fired_by(skeleton: &Skeleton, kind: ProjectileKind, player_x: f32, world: &World) -> Projectile {
         let body = skeleton.rect();
-        let (x, direction) = if player_x < body.center().x {
+        let (x, direction) = if shortest_dx(body.center().x, player_x) < 0.0 {
             (body.x - kind.width(), -1.0)
         } else {
             (body.x + body.w, 1.0)
@@ -230,7 +230,7 @@ impl Projectile {
     /// 짧은 시간 `step` 동안 날아간다. 아직 날고 있으면 true.
     fn step(&mut self, step: f32, world: &World, events: &mut Vec<CombatEvent>) -> bool {
         let moved = self.kind.speed() * step;
-        self.pos.x += self.direction * moved;
+        self.pos.x = world.wrap_x(self.pos.x + self.direction * moved);
         if self.bounced {
             self.distance_since_bounce += moved;
         }
@@ -240,19 +240,22 @@ impl Projectile {
             if self.bounced {
                 return false; // 튕기는 건 한 번뿐이다.
             }
-            self.pos.x = if self.direction > 0.0 { wall.x - body.w } else { wall.x + wall.w };
+            let wall = nearest_copy(*wall, body.center().x);
+            self.pos.x = world.wrap_x(if self.direction > 0.0 { wall.x - body.w } else { wall.x + wall.w });
             self.direction = -self.direction;
             self.bounced = true;
             events.push(CombatEvent::ProjectileBounced { at: self.rect().center() });
         }
 
-        let on_screen = body.x + body.w > 0.0 && body.x < world.width;
-        on_screen && self.distance_since_bounce < PROJECTILE_BOUNCED_RANGE
+        // 긴 맵에는 끝이 없다. 멀어지면 `forget_far_away`가 치운다 (임시-4).
+        let on_map = world.is_long_map() || (body.x + body.w > 0.0 && body.x < world.width);
+        on_map && self.distance_since_bounce < PROJECTILE_BOUNCED_RANGE
     }
 
     /// 튕겨서 `body` 쪽으로 오고 있고, 피해야 할 만큼 가까우면 true.
     fn is_about_to_hit(&self, body: Rect) -> bool {
         let me = self.rect();
+        let body = nearest_copy(body, me.center().x);
         let gap = if self.direction > 0.0 { body.x - (me.x + me.w) } else { me.x - (body.x + body.w) };
         self.bounced && (0.0..=SKELETON_DODGE_SENSE_DISTANCE).contains(&gap)
     }
@@ -277,8 +280,8 @@ impl Skeletons {
 
     /// 임시-3, 임시-4: 주인공에게서 너무 멀어진 스켈레톤과 화살·총알이 조용히 사라진다.
     pub fn forget_far_away(&mut self, player_x: f32) {
-        self.list.retain(|s| (s.rect().center().x - player_x).abs() <= FORGET_DISTANCE);
-        self.projectiles.retain(|shot| (shot.rect().center().x - player_x).abs() <= FORGET_DISTANCE);
+        self.list.retain(|s| shortest_dx(player_x, s.rect().center().x).abs() <= FORGET_DISTANCE);
+        self.projectiles.retain(|shot| shortest_dx(player_x, shot.rect().center().x).abs() <= FORGET_DISTANCE);
     }
 
     /// 밤에 짧은 시간 `step` 동안: 피하고, 움직이고, 쏘고, 날린다. 튕긴 공격에 쓰러진 수를 돌려준다.

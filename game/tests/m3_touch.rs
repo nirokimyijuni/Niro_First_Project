@@ -5,6 +5,13 @@
 //! 좌표는 모두 가상 화면(960×540).
 
 #[allow(dead_code)]
+#[path = "../src/config.rs"]
+mod config;
+#[allow(dead_code)]
+#[path = "../src/logic/mod.rs"]
+mod logic;
+
+#[allow(dead_code)]
 #[path = "../src/view"]
 mod view {
     pub mod screen {
@@ -26,6 +33,10 @@ mod view {
     pub mod touch;
 }
 
+use config::PLAYER_HEIGHT;
+use logic::character::CharacterKind;
+use logic::player::{Player, PlayerInput};
+use logic::world::World;
 use macroquad::prelude::*;
 use view::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use view::touch::*;
@@ -84,16 +95,16 @@ fn us032_push_far_or_little_gives_same_direction_flag() {
     }
 }
 
-/// US-063 (D59): 옛 "위·아래로 밀어도 아무 일 없음"을 바꿨다. 걷지 않는 것은 그대로고, 위로 밀면 한 번 뛴다.
+/// US-063 (D59), US-066 (D60): 옛 "위·아래로 밀어도 아무 일 없음"을 바꿨다. 걷지 않는 것은 그대로고, 위로 밀고 있으면 뛰려고 한다.
 #[test]
-fn us063_push_straight_up_jumps_once_and_never_walks_push_down_does_nothing() {
+fn us066_push_straight_up_keeps_jumping_and_never_walks_push_down_does_nothing() {
     let mut t = TouchControls::new();
     t.update(&[f(1, TouchPhase::Started, 240.0, 300.0)], &PLAY_BUTTONS, true);
     let o = t.update(&[f(1, TouchPhase::Moved, 240.0, 200.0)], &PLAY_BUTTONS, true);
     assert_eq!(o, TouchFrame { jump_pressed: true, ..Default::default() }, "위로 밀면 뛰기만 한다");
     for y in [100.0, 0.0, 200.0] {
         let o = t.update(&[f(1, TouchPhase::Moved, 240.0, y)], &PLAY_BUTTONS, true);
-        assert_eq!(o, TouchFrame::default(), "민 채로({y}) 또 뛰지 않고 걷지도 않는다");
+        assert_eq!(o, TouchFrame { jump_pressed: true, ..Default::default() }, "민 채로({y}) 뛰려고만 하고 걷지 않는다");
     }
     for y in [400.0, 540.0] {
         let o = t.update(&[f(1, TouchPhase::Moved, 240.0, y)], &PLAY_BUTTONS, true);
@@ -125,13 +136,13 @@ fn us063_left_thumb_walks_and_jumps_while_right_thumb_attacks_and_lifting_one_ke
         true,
     );
     assert!(o.right && o.jump_pressed && o.attack_pressed, "걷기 + 점프 + 공격 같은 프레임");
-    // 공격 손가락만 뗌 → 계속 걷기
+    // 공격 손가락만 뗌 → 계속 걷고, 위로 민 채라 계속 뛰려고 한다 (D60)
     let o = t.update(
         &[f(1, TouchPhase::Stationary, 250.0, 340.0), f(2, TouchPhase::Ended, a.x, a.y)],
         &PLAY_BUTTONS,
         true,
     );
-    assert!(o.right && !o.jump_pressed && !o.attack_pressed);
+    assert!(o.right && o.jump_pressed && !o.attack_pressed);
     // 다시 공격을 누른 채 조이스틱만 뗌 → 공격 버튼은 계속 눌림
     t.update(
         &[f(1, TouchPhase::Stationary, 250.0, 340.0), f(3, TouchPhase::Started, a.x, a.y)],
@@ -143,8 +154,11 @@ fn us063_left_thumb_walks_and_jumps_while_right_thumb_attacks_and_lifting_one_ke
         &PLAY_BUTTONS,
         true,
     );
-    assert!(!o.right && !o.left && !o.jump_pressed);
+    assert!(!o.right && !o.left);
     assert!(t.is_held(ButtonKind::Attack), "조이스틱을 떼도 공격 버튼은 눌린 채");
+    // 뗀 프레임은 휙 밀고 뗀 손가락처럼 아직 뛸 수 있고 (US-063), 그다음부터는 뛰지 않는다
+    let o = t.update(&[f(3, TouchPhase::Stationary, a.x, a.y)], &PLAY_BUTTONS, true);
+    assert!(!o.jump_pressed);
 }
 
 #[test]
@@ -194,4 +208,151 @@ fn bug005_resting_thumb_near_left_edge_does_not_walk() {
     for (x, y) in [(-50.0, 520.0), (0.0, 300.0), (30.0, 300.0), (60.0, 450.0)] {
         assert!(!walks_while_resting(x, y, 30), "({x}, {y})에 가만히 대었는데 걸음");
     }
+}
+
+// ---- US-066 (D60): 터치 판정을 진짜 Player에 넣어서 착지마다 뛰는지 본다 ----
+
+const FRAME: f32 = 1.0 / 60.0;
+const THUMB: Vec2 = Vec2::new(240.0, 300.0);
+/// 바로 위로 민 자리, 45도 오른쪽 위로 민 자리, 옆으로만 민 자리
+const UP: Vec2 = Vec2::new(240.0, 220.0);
+const UP_RIGHT: Vec2 = Vec2::new(300.0, 240.0);
+const SIDE: Vec2 = Vec2::new(320.0, 300.0);
+
+struct Thumb {
+    touch: TouchControls,
+    player: Player,
+    world: World,
+}
+
+impl Thumb {
+    fn standing_at(x: f32, world: World) -> Thumb {
+        let player = Player::new(CharacterKind::Niro, vec2(x, world.ground_y - PLAYER_HEIGHT));
+        let mut thumb = Thumb { touch: TouchControls::new(), player, world };
+        thumb.frame(&[]);
+        thumb.frame(&[f(1, TouchPhase::Started, THUMB.x, THUMB.y)]);
+        thumb
+    }
+
+    fn frame(&mut self, fingers: &[Finger]) {
+        let o = self.touch.update(fingers, &PLAY_BUTTONS, true);
+        let input = PlayerInput { left: o.left, right: o.right, jump_pressed: o.jump_pressed, ..Default::default() };
+        self.player.update(&input, FRAME, &self.world);
+    }
+
+    /// 엄지를 `at`에 두고 `frames` 프레임. 땅을 떠난 횟수와 가장 높이 간 몸 위쪽 y를 돌려준다.
+    fn hold(&mut self, at: Vec2, frames: usize) -> (u32, f32) {
+        let (mut takeoffs, mut top) = (0, f32::MAX);
+        for _ in 0..frames {
+            let was_on_ground = self.player.on_ground;
+            self.frame(&[f(1, TouchPhase::Moved, at.x, at.y)]);
+            takeoffs += u32::from(was_on_ground && !self.player.on_ground);
+            top = top.min(self.player.pos.y);
+        }
+        (takeoffs, top)
+    }
+
+    fn land(&mut self, at: Vec2) {
+        for _ in 0..240 {
+            if self.player.on_ground {
+                return;
+            }
+            self.frame(&[f(1, TouchPhase::Moved, at.x, at.y)]);
+        }
+        panic!("4초 안에 땅에 닿아야 한다");
+    }
+}
+
+/// 땅에서 한 번만 뛰었을 때 가장 높은 몸 위쪽 y.
+fn one_jump_top() -> f32 {
+    let world = World::m1();
+    let mut p = Player::new(CharacterKind::Niro, vec2(120.0, world.ground_y - PLAYER_HEIGHT));
+    p.update(&PlayerInput::default(), FRAME, &world);
+    p.update(&PlayerInput { jump_pressed: true, ..Default::default() }, FRAME, &world);
+    let mut top = p.pos.y;
+    for _ in 0..180 {
+        p.update(&PlayerInput::default(), FRAME, &world);
+        top = top.min(p.pos.y);
+    }
+    top
+}
+
+#[test]
+fn us066_holding_up_jumps_again_on_every_landing_at_the_same_height() {
+    let mut t = Thumb::standing_at(120.0, World::m1());
+    let (takeoffs, top) = t.hold(UP, 300);
+    assert!(takeoffs >= 4, "5초 동안 {takeoffs}번");
+    assert!((top - one_jump_top()).abs() < 1.0, "높이는 한 번 뛸 때와 같다: {top}");
+}
+
+#[test]
+fn us066_pushing_only_in_the_air_still_jumps_after_landing() {
+    let mut t = Thumb::standing_at(120.0, World::m1());
+    t.hold(UP, 2);
+    t.hold(THUMB, 12);
+    assert!(!t.player.on_ground, "공중이다");
+    // 공중에서 다시 민 것이 쓰이고 없어지면 안 된다
+    t.hold(UP, 3);
+    t.land(UP);
+    assert_eq!(t.hold(UP, 6).0, 1, "착지하자마자 또 뛴다");
+}
+
+#[test]
+fn us066_thumb_outside_the_zone_or_lifted_at_landing_does_not_jump() {
+    let mut t = Thumb::standing_at(120.0, World::m1());
+    t.hold(UP, 6);
+    t.land(THUMB);
+    assert_eq!(t.hold(THUMB, 60).0, 0, "구역 밖으로 내렸으면 안 뛴다");
+
+    let mut t = Thumb::standing_at(120.0, World::m1());
+    t.hold(UP, 6);
+    t.frame(&[f(1, TouchPhase::Ended, UP.x, UP.y)]);
+    for _ in 0..180 {
+        t.frame(&[]);
+    }
+    assert!(t.player.on_ground, "손을 떼면 다음 착지부터 뛰지 않는다");
+}
+
+#[test]
+fn us066_quick_flick_jumps_exactly_once() {
+    let mut t = Thumb::standing_at(120.0, World::m1());
+    t.frame(&[f(1, TouchPhase::Ended, UP.x, UP.y)]);
+    assert!(!t.player.on_ground, "뛰었다");
+    let mut takeoffs = 0;
+    for _ in 0..180 {
+        let was_on_ground = t.player.on_ground;
+        t.frame(&[]);
+        takeoffs += u32::from(was_on_ground && !t.player.on_ground);
+    }
+    assert_eq!(takeoffs, 0);
+    assert!(t.player.on_ground);
+}
+
+#[test]
+fn us066_small_push_or_sideways_never_jumps() {
+    let mut t = Thumb::standing_at(120.0, World::m1());
+    assert_eq!(t.hold(THUMB - vec2(0.0, 30.0), 60).0, 0, "살짝 민 엄지");
+    assert_eq!(t.hold(SIDE, 30).0, 0, "옆으로 민 엄지");
+}
+
+#[test]
+fn us066_holding_up_and_sideways_clears_the_boxes() {
+    let world = World::m1();
+    let last_box = world.obstacles[2];
+    let mut t = Thumb::standing_at(120.0, world);
+    t.hold(UP_RIGHT, 300);
+    assert!(t.player.pos.x > last_box.x + last_box.w, "상자 셋을 넘는다: x {}", t.player.pos.x);
+}
+
+#[test]
+fn us066_holding_up_and_sideways_climbs_the_rock_steps() {
+    let world = World::long_map(7);
+    let steps = world.rock_steps();
+    let first = steps[0];
+    let highest = steps.iter().fold(first, |top, s| if s.y < top.y { *s } else { top });
+    let mut t = Thumb::standing_at(first.x - 120.0, world);
+    // 맨 위 계단은 땅에서 한 번에 닿지 않아서, 발이 그 위로 가면 계단마다 착지해 다시 뛴 것이다.
+    let (_, top) = t.hold(UP_RIGHT, 360);
+    let feet = top + t.player.size.y;
+    assert!(feet < highest.y, "맨 위 계단(y {})보다 발이 높이 간다: {feet}", highest.y);
 }

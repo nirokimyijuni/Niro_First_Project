@@ -1,8 +1,10 @@
 //! 코인 그림(D11)과 주울 때 반짝 효과. 코인이 있는 곳·주운 개수는 logic(coins)이 정하고,
 //! 여기서는 보여 주기만 한다. 위아래로 둥실 뜨는 것도 그림만 움직인다 (줍는 네모는 그대로).
 
+use super::places::near_view;
 use super::text::TextPainter;
 use crate::logic::coins::Coins;
+use crate::logic::world::{nearest_copy, shortest_dx};
 use macroquad::prelude::*;
 
 const GOLD: Color = Color::new(1.0, 0.80, 0.16, 1.0);
@@ -47,15 +49,15 @@ pub fn draw_coin(center: Vec2, radius: f32, darkness: f32, time: f32) {
     }
 }
 
-/// 맵 위 코인 전부. 보이는(`is_visible`) 코인만 그린다.
-pub fn draw_coins(coins: &Coins, darkness: f32, time: f32) {
+/// 맵 위 코인 전부. 보이는(`is_visible`) 코인만 `view_x`(화면 가운데)에 가장 가까운 자리에 그린다.
+pub fn draw_coins(coins: &Coins, darkness: f32, time: f32, view_x: f32) {
     for (i, coin) in coins.list.iter().enumerate() {
         if !coin.is_visible() {
             continue;
         }
         let t = time + i as f32 * 0.9;
         let bob = (t * BOB_SPEED).sin() * BOB_HEIGHT;
-        let center = coin.rect.center() + vec2(0.0, bob);
+        let center = nearest_copy(coin.rect, view_x).center() + vec2(0.0, bob);
         draw_coin(center, coin.rect.w.min(coin.rect.h) / 2.0, darkness, t);
     }
 }
@@ -81,12 +83,13 @@ impl CoinPops {
             }
         }
         if left > 0 {
+            let distance = |at: &Vec2| vec2(shortest_dx(player_center.x, at.x), at.y - player_center.y).length();
             let nearest = coins
                 .list
                 .iter()
                 .filter(|c| !c.is_visible())
                 .map(|c| c.rect.center())
-                .min_by(|a, b| a.distance(player_center).total_cmp(&b.distance(player_center)));
+                .min_by(|a, b| distance(a).total_cmp(&distance(b)));
             if let Some(pos) = nearest {
                 for _ in 0..left {
                     self.list.push((pos, 0.0));
@@ -103,14 +106,15 @@ impl CoinPops {
         self.list.retain(|(_, age)| *age < POP_SECONDS);
     }
 
-    pub fn draw(&self, text: &TextPainter) {
+    pub fn draw(&self, text: &TextPainter, view_x: f32) {
         for (pos, age) in &self.list {
+            let pos = vec2(near_view(view_x, pos.x), pos.y);
             let t = (age / POP_SECONDS).clamp(0.0, 1.0);
             let fade = 1.0 - t;
             // 동그랗게 퍼지는 반짝이 8개
             for i in 0..8 {
                 let a = i as f32 / 8.0 * std::f32::consts::TAU;
-                let p = *pos + vec2(a.cos(), a.sin()) * (8.0 + 30.0 * t);
+                let p = pos + vec2(a.cos(), a.sin()) * (8.0 + 30.0 * t);
                 draw_circle(p.x, p.y, 3.5 * fade + 1.0, Color { a: fade, ..GOLD_INNER });
             }
             text.centered("+1", pos.x, pos.y - 14.0 - POP_RISE * t, 30.0, Color { a: fade, ..POP_TEXT });

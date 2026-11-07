@@ -6,7 +6,7 @@
 use super::monster::{pick_left_side, spawn_x_on_side, SeededRandom, Zombie, Zombies};
 use super::player::Facing;
 use super::skeleton::{ProjectileKind, Skeleton, SkeletonStage, Skeletons};
-use super::world::{really_overlaps, World};
+use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
     MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
@@ -121,8 +121,9 @@ fn is_in_front(player_rect: Rect, facing: Facing, target: Rect) -> bool {
     }
 }
 
-/// 공격 범위 안이고 바라보는 쪽에 있으면 맞는다.
+/// 공격 범위 안이고 바라보는 쪽에 있으면 맞는다. 이음매 너머도 닿는다.
 pub fn is_reached(player_rect: Rect, facing: Facing, range: f32, target: Rect) -> bool {
+    let target = nearest_copy(target, player_rect.center().x);
     attack_box_with_range(player_rect, facing, range).overlaps(&target) && is_in_front(player_rect, facing, target)
 }
 
@@ -135,6 +136,8 @@ pub struct Combat {
     pub level: u32,
     /// 지금 레벨에서 모은 경험치. `EXPERIENCE_PER_LEVEL`이 되면 레벨이 오르고 0으로 돌아간다.
     pub experience: u32,
+    /// 이번 판에 해치운 몬스터 수 (D64). 경험치를 준 몬스터만 센다.
+    pub monsters_defeated: u32,
     /// 나올 차례에 스켈레톤이 나올 확률. 테스트는 0으로 두어 좀비만 있는 밤을 만든다.
     pub skeleton_chance: f32,
     seconds_to_next_spawn: f32,
@@ -152,6 +155,7 @@ impl Combat {
             skeletons: Skeletons::new(),
             level: 1,
             experience: 0,
+            monsters_defeated: 0,
             skeleton_chance: SKELETON_SPAWN_CHANCE,
             seconds_to_next_spawn: 0.0,
             random: SeededRandom::new(seed),
@@ -197,7 +201,7 @@ impl Combat {
 
     /// 임시-3: 뒤에 남은 몬스터가 마릿수를 채우지 않게 조용히 치운다. 경험치는 없다.
     fn forget_far_monsters(&mut self, player_x: f32) {
-        self.zombies.list.retain(|z| (z.rect().center().x - player_x).abs() <= FORGET_DISTANCE);
+        self.zombies.list.retain(|z| shortest_dx(player_x, z.rect().center().x).abs() <= FORGET_DISTANCE);
         self.skeletons.forget_far_away(player_x);
     }
 
@@ -246,7 +250,7 @@ impl Combat {
     /// 경험치는 없다 (임시-9).
     pub fn citizen_blast(&mut self, at: Vec2, player_rect: Rect) -> Vec<CombatEvent> {
         let mut events = Vec::new();
-        let is_near = |body: Rect| body.center().distance(at) <= CITIZEN_BLAST_RANGE;
+        let is_near = |body: Rect| nearest_copy(body, at.x).center().distance(at) <= CITIZEN_BLAST_RANGE;
         if is_near(player_rect) {
             self.hurt_player(CITIZEN_BLAST_DAMAGE, &mut events);
         }
@@ -283,6 +287,7 @@ impl Combat {
         if self.health.is_down() {
             return;
         }
+        self.monsters_defeated += defeated;
         for _ in 0..defeated {
             self.experience += EXPERIENCE_PER_DEFEAT;
             if self.experience >= EXPERIENCE_PER_LEVEL {
@@ -313,8 +318,7 @@ impl Combat {
                 break;
             }
             let from_left = first_from_left == (turn % 2 == 0);
-            let x = self.spawn_one_monster(from_left, player_rect, world, &taken, events);
-            taken.push(x);
+            taken.extend(self.spawn_one_monster(from_left, player_rect, world, &taken, events));
         }
     }
 
@@ -322,7 +326,7 @@ impl Combat {
         self.zombies.list.len() + self.skeletons.list.len() >= MONSTER_MAX_ON_SCREEN
     }
 
-    /// 좀비나 스켈레톤을 하나 뽑아 내보내고 나온 x를 돌려준다.
+    /// 좀비나 스켈레톤을 하나 뽑아 내보내고 나온 x를 돌려준다. 나올 자리가 없으면 이번 차례는 건너뛴다.
     fn spawn_one_monster(
         &mut self,
         from_left: bool,
@@ -330,21 +334,21 @@ impl Combat {
         world: &World,
         taken: &[f32],
         events: &mut Vec<CombatEvent>,
-    ) -> f32 {
+    ) -> Option<f32> {
         if self.zombies.list.len() >= ZOMBIE_MAX_ON_SCREEN || self.random.next_unit() < self.skeleton_chance {
             let stage = SkeletonStage::for_level(self.level);
-            let x = spawn_x_on_side(from_left, player_rect, SKELETON_WIDTH, world, taken);
+            let x = spawn_x_on_side(from_left, player_rect, SKELETON_WIDTH, world, taken)?;
             let skeleton = Skeleton::new(x, world.ground_y, stage);
             events.push(CombatEvent::SkeletonAppeared { at: skeleton.rect().center(), stage });
             self.skeletons.list.push(skeleton);
-            x
+            Some(x)
         } else {
-            let x = spawn_x_on_side(from_left, player_rect, ZOMBIE_WIDTH, world, taken);
+            let x = spawn_x_on_side(from_left, player_rect, ZOMBIE_WIDTH, world, taken)?;
             let will_float = self.random.next_unit() < ZOMBIE_FLOAT_CHANCE;
             let zombie = Zombie::new(x, world.ground_y, will_float);
             events.push(CombatEvent::ZombieAppeared { at: zombie.rect().center() });
             self.zombies.list.push(zombie);
-            x
+            Some(x)
         }
     }
 

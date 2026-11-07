@@ -4,7 +4,7 @@
 //! 왼쪽 위가 (0, 0)이고 아래로 갈수록 y가 커진다. 그래서 발 위치는 `pos.y + size.y`.
 
 use super::character::CharacterKind;
-use super::world::{really_overlaps, World};
+use super::world::{nearest_copy, really_overlaps, World};
 use crate::config::{
     GRAVITY, MAX_FALL_SPEED, PHYSICS_STEP_SECONDS, PLAYER_EDGE_SLIDE_SPEED, PLAYER_HEIGHT,
     PLAYER_JUMP_SPEED, PLAYER_WALK_SPEED, PLAYER_WIDTH,
@@ -16,7 +16,7 @@ use macroquad::math::{Rect, Vec2};
 pub struct PlayerInput {
     pub left: bool,
     pub right: bool,
-    /// 이번 프레임에 "새로" 눌렀을 때만 true. 꾹 누르고 있는 동안은 false.
+    /// 키보드는 "새로" 눌렀을 때만 true다. 터치는 조이스틱을 위로 밀고 있는 동안 계속 true다.
     pub jump_pressed: bool,
     /// 이번 프레임에 "새로" 눌렀을 때만 true. 꾹 눌러도 공격은 한 번 (US-040).
     pub attack_pressed: bool,
@@ -120,11 +120,12 @@ impl Player {
 
         // --- 가로 ---
         self.pos.x += self.vel.x * step;
-        // 월드 양 끝
-        self.pos.x = self.pos.x.clamp(0.0, world.width - self.size.x);
-        // 상자 옆면
+        // 월드 양 끝: 긴 맵은 이어지고, M1 연습 맵은 막힌다.
+        self.pos.x = world.keep_on_map(self.pos.x, self.size.x);
+        // 상자 옆면. 몸이 이음매에 걸쳐 있어도 맞게 몸 가까운 쪽의 상자를 본다.
         for wall in &world.obstacles {
             if really_overlaps(self.rect(), *wall) {
+                let wall = nearest_copy(*wall, self.rect().center().x);
                 if self.vel.x > 0.0 {
                     self.pos.x = wall.x - self.size.x; // 상자 왼쪽 면에 막힘
                 } else if self.vel.x < 0.0 {
@@ -145,6 +146,7 @@ impl Player {
         // 상자 윗면(올라섬) / 아랫면(머리 박음)
         for block in &world.obstacles {
             if really_overlaps(self.rect(), *block) {
+                let block = nearest_copy(*block, self.rect().center().x);
                 if self.vel.y > 0.0 {
                     self.pos.y = block.y - self.size.y;
                     self.vel.y = 0.0;
@@ -152,8 +154,11 @@ impl Player {
                     // 높이가 같게 붙은 상자는 이어진 바닥이라 옆 상자 위여도 선다.
                     // shortcut: 틈이 캐릭터보다 좁으면 못 빠져나간다, 지금은 World::with_random_boxes가 그런 틈을 안 만든다.
                     let center_x = self.pos.x + self.size.x / 2.0;
-                    let is_over_a_top =
-                        world.obstacles.iter().any(|b| b.y == block.y && b.x <= center_x && center_x <= b.x + b.w);
+                    let is_over_a_top = world
+                        .obstacles
+                        .iter()
+                        .map(|b| nearest_copy(*b, center_x))
+                        .any(|b| b.y == block.y && b.x <= center_x && center_x <= b.x + b.w);
                     if is_over_a_top {
                         self.on_ground = true;
                     } else if center_x < block.x {
@@ -174,6 +179,7 @@ impl Player {
             self.vel.y = 0.0;
             self.on_ground = true;
         }
+        self.pos.x = world.wrap_x(self.pos.x);
     }
 }
 

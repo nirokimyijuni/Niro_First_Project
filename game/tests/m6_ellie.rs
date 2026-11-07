@@ -14,7 +14,7 @@ use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent};
 use logic::monster::Zombie;
 use logic::player::PlayerInput;
-use logic::world::World;
+use logic::world::{shortest_dx, World};
 use macroquad::math::{Rect, Vec2};
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -59,11 +59,11 @@ fn a_running_jump_can_clear_a_bomb_citizen() {
     assert!((0..200).any(|gap| !jump_from(gap as f32)));
 }
 
-/// 끝까지 달린다. 막히면 뛰고, `gap` 앞에 시민이 있으면 넘는다 (0이면 안 넘는다).
+/// 맵 폭만큼 달린다. 막히면 뛰고, `gap` 앞에 시민이 있으면 넘는다 (0이면 안 넘는다).
 /// 돌려주는 값: (도착했는지, 초, 펑 수).
 fn travel(g: &mut Game, to_right: bool, gap: f32, limit_seconds: f32) -> (bool, f32, u32) {
     let mut pops = 0;
-    let target = if to_right { MAP_WIDTH - PLAYER_WIDTH } else { 0.0 };
+    let mut walked = 0.0;
     for frame in 0..(limit_seconds / FRAME) as usize {
         let (px, pw) = (g.player.pos.x, g.player.size.x);
         // 상자 위에서는 더 일찍 뛴다: 그냥 걸어 내려오면 상자 옆 시민 위에 떨어진다.
@@ -78,13 +78,15 @@ fn travel(g: &mut Game, to_right: bool, gap: f32, limit_seconds: f32) -> (bool, 
         let before = g.player.pos.x;
         let events = g.update(&PlayerInput { jump_pressed: near_citizen && g.player.on_ground, ..walk }, FRAME);
         pops += events.iter().filter(|e| matches!(e, GameEvent::CitizenPopped { .. })).count() as u32;
-        if g.player.pos.x == before && g.player.pos.x != target {
+        if g.player.pos.x == before {
             g.update(&PlayerInput { jump_pressed: true, ..walk }, FRAME);
         }
         if g.combat.health.is_down() {
             return (false, frame as f32 * FRAME, pops);
         }
-        if g.player.pos.x == target {
+        let moved = shortest_dx(before, g.player.pos.x);
+        walked += if to_right { moved } else { -moved };
+        if walked >= MAP_WIDTH - PLAYER_WIDTH {
             return (true, frame as f32 * FRAME, pops);
         }
     }
@@ -400,9 +402,10 @@ fn measure_d44_night() {
     }
 }
 
-/// D44: 나올 자리(맵 왼쪽 끝)에 서 있으면 2마리 모두 반대쪽에서 나온다.
+/// D61: 옛 맵 왼쪽 끝(이음매)에 서 있어도 맵 끝 자리에서 나오지 않고, 양쪽 자리가 있으면 1마리씩 나온다.
+/// 옛 D44 "반대쪽" 규칙은 M1 맵에만 있다.
 #[test]
-fn d44_standing_on_the_spawn_spot_gives_two_monsters_from_the_other_side() {
+fn d61_standing_on_the_seam_gives_one_monster_on_each_open_side() {
     for seed in 0..200 {
         let mut g = game(seed);
         g.clock.update(DAY_SECONDS);
@@ -416,8 +419,16 @@ fn d44_standing_on_the_spawn_spot_gives_two_monsters_from_the_other_side() {
             })
             .collect();
         assert!(appeared.len() <= MONSTERS_PER_SPAWN);
-        assert!(appeared.iter().all(|x| *x > PLAYER_WIDTH), "시드 {seed}: {appeared:?}");
-        assert_eq!(appeared.len(), MONSTERS_PER_SPAWN, "시드 {seed}: {appeared:?}");
+        let (body, center) = (g.player.rect(), g.player.rect().center().x);
+        let open = |left: bool| {
+            let spot = logic::monster::spawn_x_on_side(left, body, ZOMBIE_WIDTH, &g.world, &[]);
+            spot.is_some_and(|x| (shortest_dx(center, x) < 0.0) == left)
+        };
+        if open(true) && open(false) {
+            assert_eq!(appeared.len(), MONSTERS_PER_SPAWN, "시드 {seed}: {appeared:?}");
+            assert!(shortest_dx(center, appeared[0]) * shortest_dx(center, appeared[1]) < 0.0, "시드 {seed}: {appeared:?}");
+        }
+        assert!(appeared.iter().all(|x| shortest_dx(center, *x).abs() >= MONSTER_SPAWN_MIN_DISTANCE), "시드 {seed}: {appeared:?}");
     }
 }
 
@@ -525,4 +536,38 @@ fn measure_cheer_on_screen() {
         counts.sort();
         println!("x={x}: 화면 안 만세 중앙값 {}, 90% {}, 최대 {}, 1초에 가장 많이 {busiest_second}", counts[100], counts[180], counts[199]);
     }
+}
+
+/// D62: 맵 자리마다 몬스터가 나올 수 있는지, 화면 안에서 얼마나 가까이 나오는지 잰다.
+#[test]
+#[ignore]
+fn measure_d62_spawn_spots() {
+    use logic::monster::spawn_x_on_side;
+    use logic::world::shortest_dx;
+    let (mut spots, mut none, mut on_screen, mut one_side) = (0u32, 0u32, 0u32, 0u32);
+    let mut nearest = f32::MAX;
+    for seed in 0..100 {
+        let w = World::long_map(seed);
+        let mut x = 0.0;
+        while x < MAP_WIDTH {
+            let body = macroquad::math::Rect::new(x, w.ground_y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+            x += 40.0;
+            if w.monster_walls().any(|wall| logic::world::really_overlaps(wall, body)) {
+                continue;
+            }
+            spots += 1;
+            let found: Vec<f32> = [true, false].iter().filter_map(|left| spawn_x_on_side(*left, body, ZOMBIE_WIDTH, &w, &[])).collect();
+            if found.is_empty() {
+                none += 1;
+                continue;
+            }
+            one_side += (found.len() == 2 && found[0] == found[1]) as u32;
+            for f in found {
+                let d = shortest_dx(body.center().x, f + ZOMBIE_WIDTH / 2.0).abs();
+                nearest = nearest.min(d);
+                on_screen += (d < SCREEN_WIDTH / 2.0) as u32;
+            }
+        }
+    }
+    println!("땅 자리 {spots}: 아무도 못 나옴 {none}, 한쪽만 {one_side}, 화면 안에서 나온 경우 {on_screen}, 가장 가까이 {nearest:.0}");
 }
