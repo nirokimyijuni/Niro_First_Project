@@ -34,6 +34,11 @@ jobs:
         with:
           workspaces: game
 
+      - name: 열린 S1·S2 버그 확인 (있으면 배포하지 않음)
+        run: |
+          open_bugs=$(grep -lE '^- 심각도: *S[12]' qa/bugs/*.md | xargs -r -d '\n' grep -LE '^- 상태: *(닫힘|보류)' || true)
+          if [ -n "$open_bugs" ]; then echo "$open_bugs"; exit 1; fi
+
       - name: 테스트 (실패하면 배포하지 않음)
         working-directory: game
         timeout-minutes: 15
@@ -41,6 +46,14 @@ jobs:
 
       - name: 웹 빌드 (dist/)
         run: bash deploy/build.sh
+
+      # 15MiB는 시작값이다. 첫 다운로드가 커지면 낮춘다.
+      - name: 페이지와 크기 확인
+        run: |
+          test -f dist/index.html
+          size=$(cat dist/*.wasm | gzip -c | wc -c)
+          echo "wasm gzip: $size bytes"
+          test "$size" -le 15728640
 
       - name: dist 업로드
         uses: actions/upload-pages-artifact@v5
@@ -57,3 +70,12 @@ jobs:
       - name: GitHub Pages에 배포
         id: deployment
         uses: actions/deploy-pages@v5
+
+  # 실패하거나 취소돼도 결과를 남긴다. always()는 이 작은 작업에만 쓴다.
+  record:
+    needs: [build, deploy]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 배포 시도 결과 기록
+        run: echo "build=${{ needs.build.result }} deploy=${{ needs.deploy.result }} commit=${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
