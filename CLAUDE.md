@@ -34,6 +34,11 @@
 - 시험 코드에 "될 때까지 반복"을 쓰지 않는다. `while`·`loop`에는 횟수 제한을 넣어, 넘으면 실패로 끝나게 한다.
 - `cargo test`는 `timeout 300 cargo test`처럼 시간 제한을 걸고 돌린다. 시간을 넘기면 기다리지 말고 그 시험을 끄고, 멈췄다고 바로 보고한다.
 
+## 빌드 폴더
+- 빌드 결과물은 기본 위치인 `game/target`에 둔다. `CARGO_TARGET_DIR`을 임시 폴더(스크래치)나 C 드라이브로 지정하지 않는다. C 드라이브가 꽉 찬다.
+- 동시에 빌드해야 하면 `CARGO_TARGET_DIR=target-<이름>`으로 `game/target-<이름>`을 쓴다 (`.gitignore`에 이미 있다).
+- 다 쓴 `game/target-<이름>`은 작업이 끝나면 지운다.
+
 ## 기술 기본값
 - 엔진: `macroquad` (Wasm 빌드가 가장 단순함). 빌드 타깃 `wasm32-unknown-unknown`.
 - 배포: GitHub Pages (정적 파일 `index.html` + `.wasm`).
