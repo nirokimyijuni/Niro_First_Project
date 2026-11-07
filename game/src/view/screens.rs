@@ -369,7 +369,7 @@ fn draw_held_weapon(assets: &Assets, weapon: Weapon, feet: Vec2, facing: Facing,
     draw_texture_ex(texture, c.x - size.x / 2.0, c.y - size.y / 2.0, tint, DrawTextureParams { dest_size: Some(size), flip_x: flip_weapon(weapon, facing), ..Default::default() });
 }
 
-/// `touch_mode`면 키보드 안내 글자는 숨긴다 (터치 조이스틱·버튼은 main이 위에 그린다).
+/// `touch_mode`면 키보드 안내 대신 조이스틱 안내를 보여 준다 (터치 조이스틱·버튼은 main이 위에 그린다).
 /// `down`이 있으면 쓰러진 화면이다.
 pub fn draw_play(
     assets: &Assets,
@@ -449,6 +449,9 @@ pub fn draw_play(
     draw_level(text, game.combat.level, game.combat.experience);
     let owned = game.weapons.owned();
     draw_weapons(&assets.m6, &owned, game.weapons.held());
+    if touch_mode && down.is_none() {
+        text.centered("조이스틱을 위로 밀면 점프", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+    }
     if !touch_mode && down.is_none() {
         let hint = if owned.is_empty() { "화살표: 걷기   Space: 점프   Q: 공격   Esc: 캐릭터 고르기" } else { "화살표: 걷기   Space: 점프   Q: 공격   W: 바꾸기   Esc: 고르기" };
         text.centered(hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);

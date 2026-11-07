@@ -105,12 +105,12 @@ mod tests {
     }
 
     #[test]
-    fn jump_button_works_at_dpi_3() {
+    fn attack_button_works_at_dpi_3() {
         let lb = iphone();
-        let jump = PLAY_BUTTONS[0].center;
-        let p = touch_to_virtual(physical_at(&lb, jump, 3.0), 3.0, &lb);
-        assert!(p.distance(jump) < 0.01);
-        assert_eq!(button_at(&PLAY_BUTTONS, p), Some(ButtonKind::Jump));
+        let attack = PLAY_BUTTONS[0].center;
+        let p = touch_to_virtual(physical_at(&lb, attack, 3.0), 3.0, &lb);
+        assert!(p.distance(attack) < 0.01);
+        assert_eq!(button_at(&PLAY_BUTTONS, p), Some(ButtonKind::Attack));
     }
 
     #[test]

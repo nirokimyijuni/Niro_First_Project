@@ -1,4 +1,4 @@
-//! 폰 터치 조작 (D16, D25): 왼쪽 떠다니는 조이스틱 + 오른쪽 절반 아무 곳이나 점프 + 공격 버튼 + 왼쪽 위 "고르기" 버튼.
+//! 폰 터치 조작 (D16, D59): 왼쪽 떠다니는 조이스틱(좌우 걷기, 위로 밀어 점프) + 오른쪽 공격·바꾸기 버튼 + 왼쪽 위 "고르기" 버튼.
 //! 위쪽은 판정(손가락 추적·데드존·버튼 영역)만 하는 작은 함수들이라 단위 테스트를 한다.
 //! 아래쪽 `draw_*`는 판정 결과를 보여 주기만 한다. 좌표는 모두 가상 화면(960×540) 기준.
 //! 게임 규칙은 없다: 결과는 키보드와 같은 `PlayerInput` 모양(왼쪽/오른쪽/점프·공격 새로 누름)이다.
@@ -15,8 +15,15 @@ pub const JOYSTICK_RADIUS: f32 = 85.0;
 const KNOB_RADIUS: f32 = 40.0;
 /// 받침 반지름의 이 비율보다 덜 밀면 멈춤 (데드존)
 pub const JOYSTICK_DEADZONE: f32 = 0.25;
-/// 이 x보다 왼쪽에 손가락을 대면 조이스틱, 오른쪽이면 점프 (D25)
+/// 이 x보다 왼쪽에 손가락을 대면 조이스틱. 오른쪽은 버튼 자리만 눌린다 (D59)
 pub const JOYSTICK_AREA_RIGHT: f32 = VIRTUAL_WIDTH / 2.0;
+/// US-063 점프: 바로 위에서 좌우로 이 각도 안이고, 받침 반지름의 이 비율 이상 밀면 뛴다. 해 보고 조절한다.
+const JUMP_HALF_ANGLE_DEGREES: f32 = 60.0;
+const JUMP_REACH: f32 = 0.5;
+/// 다시 뛰는 구역: 뛴 뒤에는 손잡이가 이 구역(좌우 70도 안, 반지름의 0.35 이상) 밖으로 나가야 또 뛴다.
+/// 점프 구역(60도, 0.5)보다 넓어서, 점프 구역 끝에서 엄지가 떨려도 연달아 뛰지 않는다.
+const JUMP_REARM_HALF_ANGLE_DEGREES: f32 = 70.0;
+const JUMP_REARM_REACH: f32 = 0.35;
 
 /// 오른쪽 버튼 반지름 (지름 136)
 const BUTTON_RADIUS: f32 = 68.0;
@@ -24,8 +31,6 @@ const BUTTON_RADIUS: f32 = 68.0;
 const BUTTON_EDGE_GAP: f32 = 22.0;
 /// 바꾸기 버튼 반지름. 자주 안 누르니 조금 작게 해서 뒤가 덜 가린다.
 const SWITCH_BUTTON_RADIUS: f32 = 56.0;
-/// 점프 그림과 공격 버튼 사이. 빗나간 손가락이 공격 대신 점프가 되도록 판정 여유(SLOP)보다 넓게.
-const BUTTON_GAP: f32 = 44.0;
 /// 손가락이 버튼 그림보다 조금 밖을 눌러도 눌린 것으로 친다 (아이 손가락은 빗나가기 쉽다)
 const BUTTON_TOUCH_SLOP: f32 = 12.0;
 
@@ -38,6 +43,13 @@ const BASE_LINE: Color = Color::new(1.0, 1.0, 1.0, 0.55);
 const KNOB_FILL: Color = Color::new(1.0, 1.0, 1.0, 0.60);
 const KNOB_LINE: Color = Color::new(0.13, 0.16, 0.36, 0.55);
 const ARROW_HINT: Color = Color::new(1.0, 1.0, 1.0, 0.55);
+/// 조이스틱 위쪽 점프 구역: 평소에는 옅은 노랑, 뛰었으면 조금 진하게
+const JUMP_ZONE: Color = Color::new(1.0, 0.88, 0.35, 0.22);
+const JUMP_ZONE_USED: Color = Color::new(1.0, 0.88, 0.35, 0.5);
+const JUMP_ARROW: Color = Color::new(1.0, 0.92, 0.5, 0.9);
+/// 엄지를 대기 전 왼쪽 아래에 보이는 옅은 조이스틱: 자리, 진하기 (1 = 엄지를 댄 조이스틱)
+const JOYSTICK_HINT_CENTER: Vec2 = Vec2::new(150.0, 400.0);
+const JOYSTICK_HINT_FADE: f32 = 0.45;
 /// 뒤의 스켈레톤·상자·코인이 보이게 안쪽은 아주 옅게 (BUG-014). 버튼 자리는 흰 테두리로 알아본다.
 const BUTTON_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.14);
 const BUTTON_FILL_HELD: Color = Color::new(1.0, 0.70, 0.10, 0.60);
@@ -49,7 +61,6 @@ const LINE_WIDTH: f32 = 5.0;
 /// 오른쪽 버튼 종류. M7에 캐기를 여기와 `PLAY_BUTTONS`에 더하면 된다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
-    Jump,
     Attack,
     /// 무기 바꾸기 (US-053). 무기가 있을 때만 보인다.
     Switch,
@@ -58,7 +69,6 @@ pub enum ButtonKind {
 impl ButtonKind {
     fn label(self) -> &'static str {
         match self {
-            ButtonKind::Jump => "점프",
             ButtonKind::Attack => "공격",
             ButtonKind::Switch => "바꾸기",
         }
@@ -72,31 +82,19 @@ pub struct TouchButton {
     pub radius: f32,
 }
 
-const JUMP_CENTER: Vec2 = Vec2::new(
+const ATTACK_CENTER: Vec2 = Vec2::new(
     VIRTUAL_WIDTH - BUTTON_EDGE_GAP - BUTTON_RADIUS,
     VIRTUAL_HEIGHT - BUTTON_EDGE_GAP - BUTTON_RADIUS,
 );
 
-/// 플레이 화면 오른쪽 버튼 목록. 점프(오른쪽 아래 구석, 안내용 그림. 판정은 오른쪽 절반 전체)와 그 왼쪽의 공격.
-/// 버튼이 늘면 왼쪽·위로 하나씩 놓는다. 버튼 자리가 오른쪽 절반 점프보다 먼저 판정된다.
-pub const PLAY_BUTTONS: [TouchButton; 2] = [
-    TouchButton { kind: ButtonKind::Jump, center: JUMP_CENTER, radius: BUTTON_RADIUS },
-    TouchButton {
-        kind: ButtonKind::Attack,
-        center: Vec2::new(JUMP_CENTER.x - BUTTON_RADIUS * 2.0 - BUTTON_GAP, JUMP_CENTER.y),
-        radius: BUTTON_RADIUS,
-    },
-];
+/// 플레이 화면 오른쪽 버튼 목록. 공격은 오른손 엄지가 닿는 오른쪽 아래 구석이다.
+/// 버튼이 늘면 왼쪽·위로 하나씩 놓는다 (M7 캐기).
+pub const PLAY_BUTTONS: [TouchButton; 1] = [TouchButton { kind: ButtonKind::Attack, center: ATTACK_CENTER, radius: BUTTON_RADIUS }];
 
-/// 무기가 있을 때의 버튼들. 바꾸기는 공격과 점프 사이 위쪽: 왼쪽에 놓으면 조이스틱 쪽으로 넘어간다.
-const PLAY_BUTTONS_WITH_SWITCH: [TouchButton; 3] = [
+/// 무기가 있을 때의 버튼들. 바꾸기는 공격 왼쪽 위: 엄지를 조금 들면 닿고, 땅의 몬스터를 덜 가린다.
+const PLAY_BUTTONS_WITH_SWITCH: [TouchButton; 2] = [
     PLAY_BUTTONS[0],
-    PLAY_BUTTONS[1],
-    TouchButton {
-        kind: ButtonKind::Switch,
-        center: Vec2::new((PLAY_BUTTONS[0].center.x + PLAY_BUTTONS[1].center.x) / 2.0, JUMP_CENTER.y - 154.0),
-        radius: SWITCH_BUTTON_RADIUS,
-    },
+    TouchButton { kind: ButtonKind::Switch, center: Vec2::new(ATTACK_CENTER.x - 90.0, ATTACK_CENTER.y - 154.0), radius: SWITCH_BUTTON_RADIUS },
 ];
 
 /// 지금 쓸 버튼 목록. 무기가 하나도 없으면 바꾸기 버튼을 숨긴다 (US-053).
@@ -116,11 +114,6 @@ pub fn button_at(buttons: &[TouchButton], point: Vec2) -> Option<ButtonKind> {
         .map(|b| b.kind)
 }
 
-/// 버튼 자리가 아닌 오른쪽 절반은 어디든 점프 (D25).
-fn right_half_button(point: Vec2) -> Option<ButtonKind> {
-    (point.x >= JOYSTICK_AREA_RIGHT).then_some(ButtonKind::Jump)
-}
-
 /// 받침 가운데: 손가락을 댄 자리를 받침이 화면(가상 960×540) 안에 다 보이게 당긴다.
 /// 받침은 그림일 뿐이고, 걷기 판정은 처음 댄 자리(`Joystick::start`)에서 잰다 (REVIEW-003 3번, BUG-005).
 pub fn joystick_base(finger: Vec2) -> Vec2 {
@@ -133,7 +126,12 @@ pub fn knob_offset(start: Vec2, finger: Vec2, radius: f32) -> Vec2 {
     (finger - start).clamp_length_max(radius)
 }
 
-/// 손잡이 가로 위치 → (왼쪽, 오른쪽). 세로는 쓰지 않는다. 데드존 안이면 둘 다 false.
+/// 손잡이가 바로 위에서 좌우 `half_angle_degrees` 안이고, 반지름의 `reach` 이상 밀렸는지.
+fn pushed_up(knob: Vec2, radius: f32, reach: f32, half_angle_degrees: f32) -> bool {
+    knob.length() >= radius * reach && -knob.y >= knob.length() * half_angle_degrees.to_radians().cos()
+}
+
+/// 손잡이 가로 위치 → (왼쪽, 오른쪽). 세로는 점프만 본다. 데드존 안이면 둘 다 false.
 pub fn joystick_direction(knob_x: f32, radius: f32, deadzone: f32) -> (bool, bool) {
     let dead = radius * deadzone;
     (knob_x < -dead, knob_x > dead)
@@ -181,6 +179,8 @@ pub struct Joystick {
     pub start: Vec2,
     /// 중립에서 손가락까지 민 만큼 (반지름 안). 그림은 받침 가운데에서 이만큼 옮겨 그린다
     pub knob: Vec2,
+    /// 위로 밀어서 이미 뛰었다. 다시 뛰는 구역(`JUMP_REARM_*`) 밖으로 나가야 또 뛸 수 있다 (US-063)
+    pub jumped: bool,
 }
 
 /// 이번 프레임 터치 결과. 키보드 입력과 같은 규칙: 점프·공격·돌아가기는 "새로 누른" 프레임에만 true.
@@ -242,22 +242,28 @@ impl TouchControls {
             if !self.known.contains(&f.id) {
                 if show_back && BACK_BUTTON.contains(f.pos) {
                     out.back_pressed = true;
-                } else if let Some(kind) = button_at(buttons, f.pos).or(right_half_button(f.pos)) {
+                } else if let Some(kind) = button_at(buttons, f.pos) {
                     match kind {
-                        ButtonKind::Jump => out.jump_pressed = true,
                         ButtonKind::Attack => out.attack_pressed = true,
                         ButtonKind::Switch => out.switch_pressed = true,
                     }
                     if !f.lifted() {
                         self.held.push((f.id, kind));
                     }
-                } else if self.joystick.is_none() && !f.lifted() {
-                    self.joystick = Some(Joystick { finger: f.id, base: joystick_base(f.pos), start: f.pos, knob: Vec2::ZERO });
+                } else if f.pos.x < JOYSTICK_AREA_RIGHT && self.joystick.is_none() && !f.lifted() {
+                    self.joystick = Some(Joystick { finger: f.id, base: joystick_base(f.pos), start: f.pos, knob: Vec2::ZERO, jumped: false });
                 }
             }
             if let Some(j) = self.joystick.as_mut() {
                 if j.finger == f.id {
                     j.knob = knob_offset(j.start, f.pos, JOYSTICK_RADIUS);
+                    // 여기서 본다: 휙 밀고 바로 뗀 손가락도 한 번은 뛴다
+                    if !j.jumped && pushed_up(j.knob, JOYSTICK_RADIUS, JUMP_REACH, JUMP_HALF_ANGLE_DEGREES) {
+                        j.jumped = true;
+                        out.jump_pressed = true;
+                    } else if j.jumped && !pushed_up(j.knob, JOYSTICK_RADIUS, JUMP_REARM_REACH, JUMP_REARM_HALF_ANGLE_DEGREES) {
+                        j.jumped = false;
+                    }
                 }
             }
         }
@@ -297,17 +303,37 @@ pub fn draw_star(c: Vec2, r: f32, turn: f32, color: Color) {
     }
 }
 
-fn draw_joystick(j: &Joystick) {
+/// 받침 위쪽 부채꼴: 여기로 밀면 뛴다는 표시. 판정과 같은 각도·거리로 그린다.
+fn draw_jump_zone(center: Vec2, color: Color) {
+    const STEPS: usize = 12;
+    let (inner, outer) = (JOYSTICK_RADIUS * JUMP_REACH, JOYSTICK_RADIUS);
+    let half = JUMP_HALF_ANGLE_DEGREES.to_radians();
+    let dir = |i: usize| {
+        let a = -half + 2.0 * half * i as f32 / STEPS as f32;
+        vec2(a.sin(), -a.cos())
+    };
+    for i in 0..STEPS {
+        let (a, b) = (dir(i), dir(i + 1));
+        draw_triangle(center + a * inner, center + a * outer, center + b * outer, color);
+        draw_triangle(center + a * inner, center + b * outer, center + b * inner, color);
+    }
+}
+
+/// `fade`는 진하기: 1이면 엄지를 댄 조이스틱, 그보다 작으면 대기 전 안내 그림.
+fn draw_joystick(j: &Joystick, fade: f32) {
     let b = j.base;
-    draw_circle(b.x, b.y, JOYSTICK_RADIUS, BASE_FILL);
-    draw_circle_lines(b.x, b.y, JOYSTICK_RADIUS, LINE_WIDTH, BASE_LINE);
-    // 좌우로 미는 것이라는 표시
+    let faded = |c: Color| Color { a: c.a * fade, ..c };
+    draw_circle(b.x, b.y, JOYSTICK_RADIUS, faded(BASE_FILL));
+    draw_jump_zone(b, faded(if j.jumped { JUMP_ZONE_USED } else { JUMP_ZONE }));
+    draw_circle_lines(b.x, b.y, JOYSTICK_RADIUS, LINE_WIDTH, faded(BASE_LINE));
+    // 좌우로 걷고 위로 뛴다는 표시
     let r = JOYSTICK_RADIUS - 10.0;
-    draw_arrow_head(b + vec2(-r, 0.0), vec2(-1.0, 0.0), 18.0, ARROW_HINT);
-    draw_arrow_head(b + vec2(r, 0.0), vec2(1.0, 0.0), 18.0, ARROW_HINT);
+    draw_arrow_head(b + vec2(-r, 0.0), vec2(-1.0, 0.0), 18.0, faded(ARROW_HINT));
+    draw_arrow_head(b + vec2(r, 0.0), vec2(1.0, 0.0), 18.0, faded(ARROW_HINT));
+    draw_arrow_head(b + vec2(0.0, -r), vec2(0.0, -1.0), 24.0, faded(JUMP_ARROW));
     let k = b + j.knob;
-    draw_circle(k.x, k.y, KNOB_RADIUS, KNOB_FILL);
-    draw_circle_lines(k.x, k.y, KNOB_RADIUS, 3.0, KNOB_LINE);
+    draw_circle(k.x, k.y, KNOB_RADIUS, faded(KNOB_FILL));
+    draw_circle_lines(k.x, k.y, KNOB_RADIUS, 3.0, faded(KNOB_LINE));
 }
 
 fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
@@ -317,7 +343,6 @@ fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
     draw_circle(c.x, c.y, r, if held { BUTTON_FILL_HELD } else { BUTTON_FILL });
     draw_circle_lines(c.x, c.y, r, LINE_WIDTH, BUTTON_LINE);
     match b.kind {
-        ButtonKind::Jump => draw_arrow_head(c + vec2(0.0, -r * 0.62), vec2(0.0, -1.0), r * 0.42, BUTTON_ICON),
         ButtonKind::Attack => draw_star(c + vec2(0.0, -r * 0.3), r * 0.42, 0.0, BUTTON_ICON),
         ButtonKind::Switch => {
             for side in [-1.0, 1.0] {
@@ -338,8 +363,12 @@ fn draw_back_button(text: &TextPainter) {
 
 /// 플레이 화면 위에 조이스틱·버튼·"고르기" 버튼 (터치 모드일 때만 부른다).
 pub fn draw_touch_controls(text: &TextPainter, controls: &TouchControls, buttons: &[TouchButton]) {
-    if let Some(j) = &controls.joystick {
-        draw_joystick(j);
+    match &controls.joystick {
+        Some(j) => draw_joystick(j, 1.0),
+        None => {
+            let hint = Joystick { finger: 0, base: JOYSTICK_HINT_CENTER, start: JOYSTICK_HINT_CENTER, knob: Vec2::ZERO, jumped: false };
+            draw_joystick(&hint, JOYSTICK_HINT_FADE);
+        }
     }
     for b in buttons {
         draw_button(text, b, controls.is_held(b.kind));
@@ -393,8 +422,6 @@ mod tests {
         Finger { id, phase, pos: vec2(x, y) }
     }
 
-    const JUMP: Vec2 = PLAY_BUTTONS[0].center;
-
     #[test]
     fn buttons_are_big_and_on_screen() {
         for b in PLAY_BUTTONS {
@@ -411,10 +438,10 @@ mod tests {
     fn switch_button_only_with_a_weapon_and_does_not_jump() {
         assert!(play_buttons(false).iter().all(|b| b.kind != ButtonKind::Switch));
         let buttons = play_buttons(true);
-        let switch = buttons[2];
+        let switch = buttons[1];
         assert_eq!(switch.kind, ButtonKind::Switch);
         assert!(switch.center.x - switch.radius >= JOYSTICK_AREA_RIGHT, "조이스틱 쪽으로 넘어가지 않는다");
-        for other in &buttons[..2] {
+        for other in &buttons[..1] {
             assert!(switch.center.distance(other.center) > switch.radius + other.radius + BUTTON_TOUCH_SLOP * 2.0);
         }
         let mut t = TouchControls::new();
@@ -422,33 +449,41 @@ mod tests {
         assert!(o.switch_pressed && !o.jump_pressed && !o.attack_pressed);
         let o = t.update(&[finger(1, TouchPhase::Stationary, switch.center.x, switch.center.y)], buttons, true);
         assert!(!o.switch_pressed, "꾹 눌러도 한 번");
-        // 무기가 없으면 같은 자리는 오른쪽 절반 점프다
+        // 무기가 없으면 같은 자리를 눌러도 아무 일이 없다 (D59)
         let mut t = TouchControls::new();
-        assert!(t.update(&[finger(1, TouchPhase::Started, switch.center.x, switch.center.y)], play_buttons(false), true).jump_pressed);
+        let o = t.update(&[finger(1, TouchPhase::Started, switch.center.x, switch.center.y)], play_buttons(false), true);
+        assert_eq!(o, TouchFrame::default());
+        assert!(t.joystick.is_none());
+    }
+
+    #[test]
+    fn joystick_hint_is_on_the_left_and_fully_on_screen() {
+        const { assert!(JOYSTICK_HINT_CENTER.x + JOYSTICK_RADIUS < JOYSTICK_AREA_RIGHT) };
+        assert_eq!(joystick_base(JOYSTICK_HINT_CENTER), JOYSTICK_HINT_CENTER);
     }
 
     #[test]
     fn button_hit_test() {
-        assert_eq!(button_at(&PLAY_BUTTONS, JUMP), Some(ButtonKind::Jump));
-        assert_eq!(button_at(&PLAY_BUTTONS, JUMP + vec2(0.0, -PLAY_BUTTONS[0].radius)), Some(ButtonKind::Jump));
-        assert_eq!(button_at(&PLAY_BUTTONS, JUMP + vec2(-PLAY_BUTTONS[0].radius - 30.0, 0.0)), None);
+        assert_eq!(button_at(&PLAY_BUTTONS, ATTACK), Some(ButtonKind::Attack));
+        assert_eq!(button_at(&PLAY_BUTTONS, ATTACK + vec2(0.0, -PLAY_BUTTONS[0].radius)), Some(ButtonKind::Attack));
+        assert_eq!(button_at(&PLAY_BUTTONS, ATTACK + vec2(-PLAY_BUTTONS[0].radius - 30.0, 0.0)), None);
         assert_eq!(button_at(&PLAY_BUTTONS, vec2(100.0, 400.0)), None);
     }
 
-    const ATTACK: Vec2 = PLAY_BUTTONS[1].center;
+    const ATTACK: Vec2 = PLAY_BUTTONS[0].center;
 
     #[test]
     fn attack_button_attacks_once_and_does_not_jump() {
         let mut t = TouchControls::new();
         let f = t.update(&[finger(1, TouchPhase::Started, ATTACK.x, ATTACK.y)], &PLAY_BUTTONS, true);
-        assert!(f.attack_pressed && !f.jump_pressed, "US-040: 공격 버튼 자리는 점프보다 먼저");
+        assert!(f.attack_pressed && !f.jump_pressed, "공격 버튼은 공격만 한다");
         assert!(t.is_held(ButtonKind::Attack));
         let f = t.update(&[finger(1, TouchPhase::Stationary, ATTACK.x, ATTACK.y)], &PLAY_BUTTONS, true);
         assert!(!f.attack_pressed, "꾹 눌러도 공격은 한 번");
-        // 버튼과 버튼 사이는 오른쪽 절반의 나머지 곳이라 점프다
-        let between = (ATTACK + JUMP) / 2.0;
-        let f = t.update(&[finger(2, TouchPhase::Started, between.x, between.y)], &PLAY_BUTTONS, true);
-        assert!(f.jump_pressed && !f.attack_pressed);
+        // 버튼 밖 오른쪽은 아무 일이 없다 (D59)
+        let beside = ATTACK + vec2(-PLAY_BUTTONS[0].radius - 30.0, 0.0);
+        let f = t.update(&[finger(2, TouchPhase::Started, beside.x, beside.y)], &PLAY_BUTTONS, true);
+        assert!(!f.jump_pressed && !f.attack_pressed);
     }
 
     #[test]
@@ -521,14 +556,16 @@ mod tests {
     }
 
     #[test]
-    fn right_half_touch_jumps_instead_of_joystick() {
-        let mut t = TouchControls::new();
-        let f = t.update(&[finger(1, TouchPhase::Started, 600.0, 100.0)], &PLAY_BUTTONS, true);
-        assert!(f.jump_pressed, "버튼 그림 밖이어도 오른쪽 절반이면 점프 (D25)");
-        assert!(t.joystick.is_none());
-        assert!(t.is_held(ButtonKind::Jump));
-        let f = t.update(&[finger(1, TouchPhase::Stationary, 600.0, 100.0)], &PLAY_BUTTONS, true);
-        assert!(!f.jump_pressed, "꾹 눌러도 한 번");
+    fn right_half_touch_outside_buttons_does_nothing() {
+        // US-063: 오른쪽 위, 가운데 가까이, 버튼 밖 빈 곳 모두 점프도 조이스틱도 아니다.
+        for (x, y) in [(600.0, 100.0), (JOYSTICK_AREA_RIGHT, 270.0), (940.0, 200.0), (560.0, 500.0)] {
+            for buttons in [play_buttons(false), play_buttons(true)] {
+                let mut t = TouchControls::new();
+                assert_eq!(t.update(&[finger(1, TouchPhase::Started, x, y)], buttons, true), TouchFrame::default(), "({x}, {y})");
+                assert!(t.joystick.is_none());
+                assert_eq!(t.update(&[finger(1, TouchPhase::Stationary, x, y)], buttons, true), TouchFrame::default());
+            }
+        }
     }
 
     #[test]
@@ -545,44 +582,119 @@ mod tests {
         assert_eq!(t.idle(&[finger(3, TouchPhase::Ended, 480.0, 250.0)]), Some(vec2(480.0, 250.0)));
     }
 
+    /// 왼쪽에 엄지를 대고 (0, 0)에서 `offset`만큼 민 조이스틱. 돌려주는 값: 민 프레임의 결과.
+    fn push(t: &mut TouchControls, offset: Vec2) -> TouchFrame {
+        t.update(&[finger(1, TouchPhase::Moved, STICK.x + offset.x, STICK.y + offset.y)], &PLAY_BUTTONS, true)
+    }
+
+    const STICK: Vec2 = Vec2::new(240.0, 300.0);
+
+    fn thumb_down() -> TouchControls {
+        let mut t = TouchControls::new();
+        assert_eq!(t.update(&[finger(1, TouchPhase::Started, STICK.x, STICK.y)], &PLAY_BUTTONS, true), TouchFrame::default());
+        t
+    }
+
+    /// 바로 위에서 `degrees`만큼 오른쪽으로 기운 방향으로 반지름의 `share`만큼.
+    fn tilted(degrees: f32, share: f32) -> Vec2 {
+        let a = degrees.to_radians();
+        vec2(a.sin(), -a.cos()) * JOYSTICK_RADIUS * share
+    }
+
     #[test]
     fn jump_fires_once_while_held() {
-        let mut t = TouchControls::new();
-        let f = t.update(&[finger(7, TouchPhase::Started, JUMP.x, JUMP.y)], &PLAY_BUTTONS, true);
-        assert!(f.jump_pressed);
-        assert!(t.is_held(ButtonKind::Jump));
+        let mut t = thumb_down();
+        let f = push(&mut t, tilted(0.0, 0.8));
+        assert!(f.jump_pressed && !f.left && !f.right, "바로 위는 뛰기만 한다");
         for _ in 0..30 {
-            let f = t.update(&[finger(7, TouchPhase::Stationary, JUMP.x, JUMP.y)], &PLAY_BUTTONS, true);
-            assert!(!f.jump_pressed, "꾹 눌러도 다시 점프하지 않는다");
+            assert!(!push(&mut t, tilted(0.0, 0.8)).jump_pressed, "민 채로는 다시 뛰지 않는다");
         }
-        t.update(&[finger(7, TouchPhase::Ended, JUMP.x, JUMP.y)], &PLAY_BUTTONS, true);
-        assert!(!t.is_held(ButtonKind::Jump));
-        let f = t.update(&[finger(8, TouchPhase::Started, JUMP.x, JUMP.y)], &PLAY_BUTTONS, true);
-        assert!(f.jump_pressed, "떼고 다시 누르면 또 점프");
+        assert!(!push(&mut t, Vec2::ZERO).jump_pressed, "내려오는 프레임은 뛰지 않는다");
+        assert!(push(&mut t, tilted(0.0, 0.8)).jump_pressed, "내렸다가 다시 밀면 또 뛴다");
+        t.update(&[finger(1, TouchPhase::Ended, STICK.x, STICK.y)], &PLAY_BUTTONS, true);
+        assert!(t.joystick.is_none());
+        let mut t = thumb_down();
+        assert!(push(&mut t, tilted(0.0, 0.8)).jump_pressed, "뗐다가 다시 대고 밀면 또 뛴다");
     }
 
     #[test]
-    fn quick_tap_within_one_frame_still_jumps() {
+    fn jump_zone_is_sixty_degrees_and_half_the_radius() {
+        for side in [1.0, -1.0] {
+            assert!(push(&mut thumb_down(), tilted(59.0 * side, 0.9)).jump_pressed, "60도 안");
+            assert!(!push(&mut thumb_down(), tilted(61.0 * side, 0.9)).jump_pressed, "60도 밖은 걷기만");
+        }
+        assert!(push(&mut thumb_down(), tilted(0.0, 0.51)).jump_pressed);
+        assert!(!push(&mut thumb_down(), tilted(0.0, 0.49)).jump_pressed, "절반보다 조금 밀면 안 뛴다");
+        for degrees in [90.0, 120.0, 180.0, 240.0, 270.0] {
+            assert!(!push(&mut thumb_down(), tilted(degrees, 1.0)).jump_pressed, "{degrees}도");
+        }
+    }
+
+    #[test]
+    fn pushing_up_and_sideways_jumps_while_walking() {
+        let f = push(&mut thumb_down(), tilted(45.0, 0.9));
+        assert!(f.jump_pressed && f.right && !f.left);
+        let f = push(&mut thumb_down(), tilted(-45.0, 0.9));
+        assert!(f.jump_pressed && f.left && !f.right);
+        // 뛴 뒤에도 민 쪽으로 계속 걷는다
+        let mut t = thumb_down();
+        push(&mut t, tilted(45.0, 0.9));
+        let f = push(&mut t, tilted(45.0, 0.9));
+        assert!(f.right && !f.jump_pressed);
+    }
+
+    #[test]
+    fn thumb_shaking_at_the_edge_of_the_zone_does_not_jump_again() {
+        let mut t = thumb_down();
+        assert!(push(&mut t, tilted(0.0, 0.55)).jump_pressed);
+        for i in 0..40 {
+            let share = if i % 2 == 0 { 0.46 } else { 0.54 };
+            let degrees = if i % 4 < 2 { 58.0 } else { 62.0 };
+            assert!(!push(&mut t, tilted(degrees, share)).jump_pressed, "{i}");
+        }
+        // 가만히 대고 살짝 떨리기만 하면 처음부터 안 뛴다
+        let mut t = thumb_down();
+        for i in 0..40 {
+            assert!(!push(&mut t, vec2((i % 3) as f32 * 4.0, -((i % 5) as f32) * 6.0)).jump_pressed);
+        }
+    }
+
+    #[test]
+    fn quick_flick_up_still_jumps_once() {
+        let mut t = thumb_down();
+        let f = t.update(&[finger(1, TouchPhase::Ended, STICK.x, STICK.y - 70.0)], &PLAY_BUTTONS, true);
+        assert!(f.jump_pressed, "민 프레임에 뗐어도 뛴다");
+        assert!(t.joystick.is_none());
+    }
+
+    #[test]
+    fn quick_tap_within_one_frame_still_attacks() {
         let mut t = TouchControls::new();
-        let f = t.update(&[finger(3, TouchPhase::Ended, JUMP.x, JUMP.y)], &PLAY_BUTTONS, true);
-        assert!(f.jump_pressed);
-        assert!(!t.is_held(ButtonKind::Jump));
+        let f = t.update(&[finger(3, TouchPhase::Ended, ATTACK.x, ATTACK.y)], &PLAY_BUTTONS, true);
+        assert!(f.attack_pressed);
+        assert!(!t.is_held(ButtonKind::Attack));
     }
 
     #[test]
-    fn joystick_and_jump_together_do_not_mix() {
+    fn joystick_and_attack_together_do_not_mix() {
         let mut t = TouchControls::new();
         t.update(&[finger(1, TouchPhase::Started, 200.0, 400.0)], &PLAY_BUTTONS, true);
         t.update(&[finger(1, TouchPhase::Moved, 270.0, 400.0)], &PLAY_BUTTONS, true);
-        // 걷는 중에 다른 손가락으로 점프
+        // 걸으며 위로 밀고, 같은 프레임에 다른 손가락으로 공격
         let f = t.update(
-            &[finger(1, TouchPhase::Stationary, 270.0, 400.0), finger(2, TouchPhase::Started, JUMP.x, JUMP.y)],
+            &[finger(1, TouchPhase::Moved, 260.0, 340.0), finger(2, TouchPhase::Started, ATTACK.x, ATTACK.y)],
             &PLAY_BUTTONS,
             true,
         );
-        assert!(f.right && f.jump_pressed);
-        assert_eq!(t.joystick.unwrap().finger, 1, "점프 손가락이 조이스틱을 뺏지 않는다");
-        // 점프 손가락이 왼쪽으로 미끄러져 와도 조이스틱은 1번 손가락 그대로
+        assert!(f.right && f.jump_pressed && f.attack_pressed, "걷기 + 점프 + 공격이 한 프레임에 된다");
+        assert_eq!(t.joystick.unwrap().finger, 1, "공격 손가락이 조이스틱을 뺏지 않는다");
+        let f = t.update(
+            &[finger(1, TouchPhase::Moved, 270.0, 400.0), finger(2, TouchPhase::Stationary, ATTACK.x, ATTACK.y)],
+            &PLAY_BUTTONS,
+            true,
+        );
+        assert!(f.right && !f.jump_pressed && !f.attack_pressed);
+        // 공격 손가락이 왼쪽으로 미끄러져 와도 조이스틱은 1번 손가락 그대로
         let f = t.update(
             &[finger(1, TouchPhase::Stationary, 270.0, 400.0), finger(2, TouchPhase::Moved, 100.0, 400.0)],
             &PLAY_BUTTONS,
@@ -617,11 +729,11 @@ mod tests {
 
     #[test]
     fn finger_held_from_menu_is_ignored_in_play() {
-        // 메뉴에서 점프 버튼 자리를 누른 채 플레이가 시작돼도 점프하지 않는다.
+        // 메뉴에서 공격 버튼 자리를 누른 채 플레이가 시작돼도 공격하지 않고, 왼쪽 손가락은 걷거나 뛰지 않는다.
         let mut t = TouchControls::new();
-        t.idle(&[finger(5, TouchPhase::Started, JUMP.x, JUMP.y), finger(6, TouchPhase::Started, 200.0, 300.0)]);
+        t.idle(&[finger(5, TouchPhase::Started, ATTACK.x, ATTACK.y), finger(6, TouchPhase::Started, 200.0, 300.0)]);
         let f = t.update(
-            &[finger(5, TouchPhase::Stationary, JUMP.x, JUMP.y), finger(6, TouchPhase::Moved, 300.0, 300.0)],
+            &[finger(5, TouchPhase::Stationary, ATTACK.x, ATTACK.y), finger(6, TouchPhase::Moved, 200.0, 200.0)],
             &PLAY_BUTTONS,
             true,
         );
@@ -652,14 +764,14 @@ mod tests {
 
     #[test]
     fn reused_finger_id_started_again_is_a_new_finger() {
-        // 조이스틱 엄지(id 1)를 떼고 같은 프레임 안에 점프를 누르면 id 1이 Started로만 보인다.
+        // 조이스틱 엄지(id 1)를 떼고 같은 프레임 안에 공격을 누르면 id 1이 Started로만 보인다.
         let mut t = TouchControls::new();
         t.update(&[finger(1, TouchPhase::Started, 200.0, 400.0)], &PLAY_BUTTONS, true);
         assert!(t.joystick.is_some());
-        let f = t.update(&[finger(1, TouchPhase::Started, JUMP.x, JUMP.y)], &PLAY_BUTTONS, true);
-        assert!(f.jump_pressed, "점프가 된다");
+        let f = t.update(&[finger(1, TouchPhase::Started, ATTACK.x, ATTACK.y)], &PLAY_BUTTONS, true);
+        assert!(f.attack_pressed, "공격이 된다");
         assert!(!f.left && !f.right, "조이스틱으로 걷지 않는다");
         assert!(t.joystick.is_none());
-        assert!(t.is_held(ButtonKind::Jump));
+        assert!(t.is_held(ButtonKind::Attack));
     }
 }

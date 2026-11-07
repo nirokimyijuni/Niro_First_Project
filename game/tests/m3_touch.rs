@@ -34,7 +34,7 @@ fn f(id: u64, phase: TouchPhase, x: f32, y: f32) -> Finger {
     Finger { id, phase, pos: vec2(x, y) }
 }
 
-fn jump_center() -> Vec2 {
+fn attack_center() -> Vec2 {
     PLAY_BUTTONS[0].center
 }
 
@@ -84,64 +84,73 @@ fn us032_push_far_or_little_gives_same_direction_flag() {
     }
 }
 
+/// US-063 (D59): 옛 "위·아래로 밀어도 아무 일 없음"을 바꿨다. 걷지 않는 것은 그대로고, 위로 밀면 한 번 뛴다.
 #[test]
-fn us032_push_up_or_down_never_walks_or_jumps() {
+fn us063_push_straight_up_jumps_once_and_never_walks_push_down_does_nothing() {
     let mut t = TouchControls::new();
     t.update(&[f(1, TouchPhase::Started, 240.0, 300.0)], &PLAY_BUTTONS, true);
-    for y in [0.0, 100.0, 200.0, 400.0, 540.0] {
+    let o = t.update(&[f(1, TouchPhase::Moved, 240.0, 200.0)], &PLAY_BUTTONS, true);
+    assert_eq!(o, TouchFrame { jump_pressed: true, ..Default::default() }, "위로 밀면 뛰기만 한다");
+    for y in [100.0, 0.0, 200.0] {
         let o = t.update(&[f(1, TouchPhase::Moved, 240.0, y)], &PLAY_BUTTONS, true);
-        assert_eq!(o, TouchFrame::default(), "위·아래({y}) 밀기");
+        assert_eq!(o, TouchFrame::default(), "민 채로({y}) 또 뛰지 않고 걷지도 않는다");
+    }
+    for y in [400.0, 540.0] {
+        let o = t.update(&[f(1, TouchPhase::Moved, 240.0, y)], &PLAY_BUTTONS, true);
+        assert_eq!(o, TouchFrame::default(), "아래({y}) 밀기");
     }
 }
 
 #[test]
-fn us032_joystick_keeps_working_in_right_half_even_over_jump_button() {
+fn us032_joystick_keeps_working_in_right_half_even_over_attack_button() {
     let mut t = TouchControls::new();
     t.update(&[f(1, TouchPhase::Started, 300.0, 400.0)], &PLAY_BUTTONS, true);
-    let j = jump_center();
-    let o = t.update(&[f(1, TouchPhase::Moved, j.x, j.y)], &PLAY_BUTTONS, true);
-    assert!(o.right && !o.jump_pressed, "조이스틱 손가락이 점프 버튼 위로 가도 점프가 아님");
-    let o = t.update(&[f(1, TouchPhase::Ended, j.x, j.y)], &PLAY_BUTTONS, true);
+    let a = attack_center();
+    let o = t.update(&[f(1, TouchPhase::Moved, a.x, a.y)], &PLAY_BUTTONS, true);
+    assert!(o.right && !o.attack_pressed, "조이스틱 손가락이 공격 버튼 위로 가도 공격이 아님");
+    let o = t.update(&[f(1, TouchPhase::Ended, a.x, a.y)], &PLAY_BUTTONS, true);
     assert!(!o.right && t.joystick.is_none(), "떼면 멈추고 조이스틱이 사라짐");
 }
 
 #[test]
-fn us033_two_fingers_walk_and_jump_and_lifting_one_keeps_other() {
+fn us063_left_thumb_walks_and_jumps_while_right_thumb_attacks_and_lifting_one_keeps_other() {
     let mut t = TouchControls::new();
-    let j = jump_center();
+    let a = attack_center();
     t.update(&[f(1, TouchPhase::Started, 200.0, 400.0)], &PLAY_BUTTONS, true);
     t.update(&[f(1, TouchPhase::Moved, 300.0, 400.0)], &PLAY_BUTTONS, true);
+    // 걸으며 위로 밀고 같은 프레임에 공격
     let o = t.update(
-        &[f(1, TouchPhase::Stationary, 300.0, 400.0), f(2, TouchPhase::Started, j.x, j.y)],
+        &[f(1, TouchPhase::Moved, 250.0, 340.0), f(2, TouchPhase::Started, a.x, a.y)],
         &PLAY_BUTTONS,
         true,
     );
-    assert!(o.right && o.jump_pressed, "걷기 + 점프 같은 프레임");
-    // 점프 손가락만 뗌 → 계속 걷기
+    assert!(o.right && o.jump_pressed && o.attack_pressed, "걷기 + 점프 + 공격 같은 프레임");
+    // 공격 손가락만 뗌 → 계속 걷기
     let o = t.update(
-        &[f(1, TouchPhase::Stationary, 300.0, 400.0), f(2, TouchPhase::Ended, j.x, j.y)],
+        &[f(1, TouchPhase::Stationary, 250.0, 340.0), f(2, TouchPhase::Ended, a.x, a.y)],
         &PLAY_BUTTONS,
         true,
     );
-    assert!(o.right && !o.jump_pressed);
-    // 다시 점프를 누른 채 조이스틱만 뗌 → 점프 버튼은 계속 눌림
+    assert!(o.right && !o.jump_pressed && !o.attack_pressed);
+    // 다시 공격을 누른 채 조이스틱만 뗌 → 공격 버튼은 계속 눌림
     t.update(
-        &[f(1, TouchPhase::Stationary, 300.0, 400.0), f(3, TouchPhase::Started, j.x, j.y)],
+        &[f(1, TouchPhase::Stationary, 250.0, 340.0), f(3, TouchPhase::Started, a.x, a.y)],
         &PLAY_BUTTONS,
         true,
     );
     let o = t.update(
-        &[f(1, TouchPhase::Ended, 300.0, 400.0), f(3, TouchPhase::Stationary, j.x, j.y)],
+        &[f(1, TouchPhase::Ended, 250.0, 340.0), f(3, TouchPhase::Stationary, a.x, a.y)],
         &PLAY_BUTTONS,
         true,
     );
     assert!(!o.right && !o.left && !o.jump_pressed);
-    assert!(t.is_held(ButtonKind::Jump), "조이스틱을 떼도 점프 버튼은 눌린 채");
+    assert!(t.is_held(ButtonKind::Attack), "조이스틱을 떼도 공격 버튼은 눌린 채");
 }
 
 #[test]
-fn us033_jump_button_is_big_and_away_from_edges() {
+fn us063_attack_button_is_big_and_away_from_edges() {
     let b = PLAY_BUTTONS[0];
+    assert_eq!(b.kind, ButtonKind::Attack);
     assert!(b.radius * 2.0 >= 110.0, "엄지로 누르기 쉬운 크기");
     assert!(b.center.x + b.radius <= VIRTUAL_WIDTH - 10.0);
     assert!(b.center.y + b.radius <= VIRTUAL_HEIGHT - 10.0);
@@ -161,16 +170,16 @@ fn us034_back_button_only_on_first_press_not_when_joystick_passes() {
     assert!(o.back_pressed && t.joystick.is_none(), "처음 누른 곳이 버튼이면 돌아가기, 조이스틱은 안 생김");
 }
 
-/// D25: 오른쪽 절반은 어디든 새 손가락이면 점프. 왼쪽 절반과 "고르기" 버튼은 그대로.
+/// D59 (D25를 바꿈): 오른쪽 절반은 버튼 자리 말고는 아무 일이 없다. 왼쪽 절반과 "고르기" 버튼은 그대로.
 #[test]
-fn d25_anywhere_on_right_half_jumps_once() {
-    for (x, y) in [(VIRTUAL_WIDTH / 2.0, 270.0), (600.0, 60.0), (700.0, 300.0), (950.0, 530.0)] {
+fn d59_right_half_outside_buttons_does_nothing() {
+    for (x, y) in [(VIRTUAL_WIDTH / 2.0, 270.0), (600.0, 60.0), (700.0, 300.0), (950.0, 250.0)] {
         let mut t = TouchControls::new();
         let o = t.update(&[f(1, TouchPhase::Started, x, y)], &PLAY_BUTTONS, true);
-        assert!(o.jump_pressed && t.joystick.is_none(), "({x}, {y})");
+        assert!(o == TouchFrame::default() && t.joystick.is_none(), "({x}, {y})");
         for _ in 0..10 {
             let o = t.update(&[f(1, TouchPhase::Stationary, x, y)], &PLAY_BUTTONS, true);
-            assert!(!o.jump_pressed, "꾹 눌러도 다시 점프하지 않는다");
+            assert_eq!(o, TouchFrame::default());
         }
     }
     let mut t = TouchControls::new();
