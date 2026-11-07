@@ -55,14 +55,16 @@ impl DownScreen {
     }
 }
 
-/// 가로 `center_x ± half_width` 자리에서 `from_y` 아래로 떨어지면 닿는 곳 (상자 위 또는 땅).
+/// 가로 `center_x ± half_width` 자리에서 `from_y` 아래로 떨어지면 닿는 곳 (상자 위, 땅, 구멍 바닥).
+/// `surface_y_under`를 쓰지 않는 까닭: 그쪽은 발보다 위의 나뭇가지도 세어서 가지 밑에서 쓰러지면 몸이 위로 뜬다.
 fn landing_y(world: &World, center_x: f32, half_width: f32, from_y: f32) -> f32 {
+    let body = Rect::new(center_x - half_width, from_y, half_width * 2.0, 0.0);
     world
         .obstacles
         .iter()
         .filter(|b| b.x < center_x + half_width && center_x - half_width < b.x + b.w && b.y >= from_y)
         .map(|b| b.y)
-        .fold(world.ground_y, f32::min)
+        .fold(world.floor_y_under(body), f32::min)
 }
 
 struct HeadFlight {
@@ -200,6 +202,13 @@ mod tests {
         assert_eq!(landing_y(&world, 350.0, 24.0, 380.0), 380.0, "상자 위에 서 있었다");
         assert_eq!(landing_y(&world, 100.0, 24.0, 300.0), 440.0, "상자 없는 곳은 땅");
         assert_eq!(landing_y(&world, 350.0, 24.0, 440.0), 440.0, "상자보다 아래면 땅");
+        let long = World::long_map(7);
+        let hole = long.hole().unwrap();
+        let floor = hole.y + hole.h;
+        assert_eq!(landing_y(&long, hole.center().x, 24.0, floor), floor, "구멍 안에서는 구멍 바닥");
+        let branch = long.tree_branches()[1];
+        assert_eq!(landing_y(&long, branch.center().x, 24.0, long.ground_y), long.ground_y, "가지 밑에서 쓰러져도 땅에 있다");
+        assert_eq!(landing_y(&long, branch.center().x, 24.0, branch.y - 40.0), branch.y, "가지 위로 떨어지면 가지 위");
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub const JOYSTICK_AREA_RIGHT: f32 = VIRTUAL_WIDTH / 2.0;
 const BUTTON_RADIUS: f32 = 68.0;
 /// 화면 오른쪽·아래 끝에서 버튼까지 떨어진 거리
 const BUTTON_EDGE_GAP: f32 = 22.0;
+/// 바꾸기 버튼 반지름. 자주 안 누르니 조금 작게 해서 뒤가 덜 가린다.
+const SWITCH_BUTTON_RADIUS: f32 = 56.0;
 /// 점프 그림과 공격 버튼 사이. 빗나간 손가락이 공격 대신 점프가 되도록 판정 여유(SLOP)보다 넓게.
 const BUTTON_GAP: f32 = 44.0;
 /// 손가락이 버튼 그림보다 조금 밖을 눌러도 눌린 것으로 친다 (아이 손가락은 빗나가기 쉽다)
@@ -36,10 +38,11 @@ const BASE_LINE: Color = Color::new(1.0, 1.0, 1.0, 0.55);
 const KNOB_FILL: Color = Color::new(1.0, 1.0, 1.0, 0.60);
 const KNOB_LINE: Color = Color::new(0.13, 0.16, 0.36, 0.55);
 const ARROW_HINT: Color = Color::new(1.0, 1.0, 1.0, 0.55);
-const BUTTON_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.42);
+/// 뒤의 스켈레톤·상자·코인이 보이게 안쪽은 아주 옅게 (BUG-014). 버튼 자리는 흰 테두리로 알아본다.
+const BUTTON_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.14);
 const BUTTON_FILL_HELD: Color = Color::new(1.0, 0.70, 0.10, 0.60);
-const BUTTON_LINE: Color = Color::new(1.0, 1.0, 1.0, 0.75);
-const BUTTON_ICON: Color = Color::new(1.0, 1.0, 1.0, 0.95);
+const BUTTON_LINE: Color = Color::new(1.0, 1.0, 1.0, 0.60);
+const BUTTON_ICON: Color = Color::new(1.0, 1.0, 1.0, 0.75);
 const BACK_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.55);
 const LINE_WIDTH: f32 = 5.0;
 
@@ -48,6 +51,8 @@ const LINE_WIDTH: f32 = 5.0;
 pub enum ButtonKind {
     Jump,
     Attack,
+    /// 무기 바꾸기 (US-053). 무기가 있을 때만 보인다.
+    Switch,
 }
 
 impl ButtonKind {
@@ -55,6 +60,7 @@ impl ButtonKind {
         match self {
             ButtonKind::Jump => "점프",
             ButtonKind::Attack => "공격",
+            ButtonKind::Switch => "바꾸기",
         }
     }
 }
@@ -81,6 +87,26 @@ pub const PLAY_BUTTONS: [TouchButton; 2] = [
         radius: BUTTON_RADIUS,
     },
 ];
+
+/// 무기가 있을 때의 버튼들. 바꾸기는 공격과 점프 사이 위쪽: 왼쪽에 놓으면 조이스틱 쪽으로 넘어간다.
+const PLAY_BUTTONS_WITH_SWITCH: [TouchButton; 3] = [
+    PLAY_BUTTONS[0],
+    PLAY_BUTTONS[1],
+    TouchButton {
+        kind: ButtonKind::Switch,
+        center: Vec2::new((PLAY_BUTTONS[0].center.x + PLAY_BUTTONS[1].center.x) / 2.0, JUMP_CENTER.y - 154.0),
+        radius: SWITCH_BUTTON_RADIUS,
+    },
+];
+
+/// 지금 쓸 버튼 목록. 무기가 하나도 없으면 바꾸기 버튼을 숨긴다 (US-053).
+pub fn play_buttons(has_weapon: bool) -> &'static [TouchButton] {
+    if has_weapon {
+        &PLAY_BUTTONS_WITH_SWITCH
+    } else {
+        &PLAY_BUTTONS
+    }
+}
 
 /// 누른 곳(가상 좌표)이 어느 버튼인지. 겹치면 앞쪽 버튼.
 pub fn button_at(buttons: &[TouchButton], point: Vec2) -> Option<ButtonKind> {
@@ -164,6 +190,7 @@ pub struct TouchFrame {
     pub right: bool,
     pub jump_pressed: bool,
     pub attack_pressed: bool,
+    pub switch_pressed: bool,
     pub back_pressed: bool,
 }
 
@@ -219,6 +246,7 @@ impl TouchControls {
                     match kind {
                         ButtonKind::Jump => out.jump_pressed = true,
                         ButtonKind::Attack => out.attack_pressed = true,
+                        ButtonKind::Switch => out.switch_pressed = true,
                     }
                     if !f.lifted() {
                         self.held.push((f.id, kind));
@@ -291,6 +319,11 @@ fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
     match b.kind {
         ButtonKind::Jump => draw_arrow_head(c + vec2(0.0, -r * 0.62), vec2(0.0, -1.0), r * 0.42, BUTTON_ICON),
         ButtonKind::Attack => draw_star(c + vec2(0.0, -r * 0.3), r * 0.42, 0.0, BUTTON_ICON),
+        ButtonKind::Switch => {
+            for side in [-1.0, 1.0] {
+                draw_arrow_head(c + vec2(side * r * 0.5, -r * 0.3), vec2(side, 0.0), r * 0.36, BUTTON_ICON);
+            }
+        }
     }
     text.centered(b.kind.label(), c.x, c.y + r * 0.42, 32.0, BUTTON_ICON);
 }
@@ -372,6 +405,26 @@ mod tests {
         const { assert!(JOYSTICK_RADIUS * 2.0 >= 110.0) };
         // 고르기 버튼은 정보판(y 10~66) 아래
         const { assert!(BACK_BUTTON.y >= 66.0) };
+    }
+
+    #[test]
+    fn switch_button_only_with_a_weapon_and_does_not_jump() {
+        assert!(play_buttons(false).iter().all(|b| b.kind != ButtonKind::Switch));
+        let buttons = play_buttons(true);
+        let switch = buttons[2];
+        assert_eq!(switch.kind, ButtonKind::Switch);
+        assert!(switch.center.x - switch.radius >= JOYSTICK_AREA_RIGHT, "조이스틱 쪽으로 넘어가지 않는다");
+        for other in &buttons[..2] {
+            assert!(switch.center.distance(other.center) > switch.radius + other.radius + BUTTON_TOUCH_SLOP * 2.0);
+        }
+        let mut t = TouchControls::new();
+        let o = t.update(&[finger(1, TouchPhase::Started, switch.center.x, switch.center.y)], buttons, true);
+        assert!(o.switch_pressed && !o.jump_pressed && !o.attack_pressed);
+        let o = t.update(&[finger(1, TouchPhase::Stationary, switch.center.x, switch.center.y)], buttons, true);
+        assert!(!o.switch_pressed, "꾹 눌러도 한 번");
+        // 무기가 없으면 같은 자리는 오른쪽 절반 점프다
+        let mut t = TouchControls::new();
+        assert!(t.update(&[finger(1, TouchPhase::Started, switch.center.x, switch.center.y)], play_buttons(false), true).jump_pressed);
     }
 
     #[test]

@@ -40,6 +40,11 @@ impl Letterbox {
     /// 띠를 칠하고, 이후 그리기를 가상 화면 좌표로 하게 카메라를 건다.
     pub fn begin(&self) {
         clear_background(LETTERBOX_COLOR);
+        self.look_at(0.0);
+    }
+
+    /// 화면 왼쪽 끝이 맵의 `camera_x`에 오게 한다. 0이면 가상 화면 좌표 그대로 (정보판·터치 버튼).
+    pub fn look_at(&self, camera_x: f32) {
         let dpi = screen_dpi_scale();
         // viewport는 실제(물리) 픽셀, 아래쪽 기준. 위아래 띠가 같으므로 offset.y를 그대로 쓴다.
         let viewport = (
@@ -49,7 +54,7 @@ impl Letterbox {
             (VIRTUAL_HEIGHT * self.scale * dpi).round() as i32,
         );
         set_camera(&Camera2D {
-            target: vec2(VIRTUAL_WIDTH / 2.0, VIRTUAL_HEIGHT / 2.0),
+            target: vec2(camera_x + VIRTUAL_WIDTH / 2.0, VIRTUAL_HEIGHT / 2.0),
             // y가 아래로 커지게 (화면 좌표와 같은 방향)
             zoom: vec2(2.0 / VIRTUAL_WIDTH, 2.0 / VIRTUAL_HEIGHT),
             viewport: Some(viewport),

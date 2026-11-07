@@ -10,7 +10,7 @@ use super::monster::walk_x;
 use super::world::{really_overlaps, World};
 use crate::config::{
     ARROW_INTERVAL_SECONDS, ARROW_SPEED, ARROW_WIDTH, BULLET_INTERVAL_SECONDS, BULLET_SPEED, BULLET_WIDTH,
-    GRAVITY, PROJECTILE_BOUNCED_RANGE, PROJECTILE_FLIGHT_HEIGHT, PROJECTILE_HEIGHT, SKELETON_DODGE_JUMP_SPEED,
+    FORGET_DISTANCE, GRAVITY, PROJECTILE_BOUNCED_RANGE, PROJECTILE_FLIGHT_HEIGHT, PROJECTILE_HEIGHT, SKELETON_DODGE_JUMP_SPEED,
     SKELETON_DODGE_SENSE_DISTANCE, SKELETON_FULL_ATTACK, SKELETON_FULL_MIN_LEVEL, SKELETON_HALF_ATTACK,
     SKELETON_HALF_MIN_LEVEL, SKELETON_HEIGHT, SKELETON_HIT_FLASH_SECONDS, SKELETON_HP, SKELETON_NORMAL_ATTACK,
     SKELETON_SHOOT_DISTANCE, SKELETON_WALK_SPEED, SKELETON_WIDTH,
@@ -104,9 +104,9 @@ impl Skeleton {
         self.hit_flash_seconds_left > 0.0
     }
 
-    /// 공격을 한 번 맞고, 화면에 알릴 일을 돌려준다.
-    pub fn take_hit(&mut self) -> CombatEvent {
-        self.hp = self.hp.saturating_sub(1);
+    /// 공격을 맞아 체력이 `attack`만큼 줄고, 화면에 알릴 일을 돌려준다.
+    pub fn take_hit(&mut self, attack: u32) -> CombatEvent {
+        self.hp = self.hp.saturating_sub(attack);
         self.hit_flash_seconds_left = SKELETON_HIT_FLASH_SECONDS;
         let at = self.rect().center();
         if self.hp == 0 {
@@ -133,7 +133,10 @@ impl Skeleton {
 
         if let Some(kind) = weapon {
             self.seconds_to_next_shot -= step;
-            if self.seconds_to_next_shot <= 0.0 {
+            // 임시-4: 화면 밖에서는 쏘지 않고, 들어오는 대로 쏜다.
+            if self.seconds_to_next_shot <= 0.0 && !world.is_on_screen(self.rect().center().x, player_x) {
+                self.seconds_to_next_shot = 0.0;
+            } else if self.seconds_to_next_shot <= 0.0 {
                 self.seconds_to_next_shot += kind.interval();
                 let shot = Projectile::fired_by(self, kind, player_x, world);
                 events.push(CombatEvent::ProjectileFired { at: shot.rect().center(), kind });
@@ -209,14 +212,17 @@ impl Projectile {
         Projectile { pos: Vec2::new(x, y), kind, attack, direction, bounced: false, distance_since_bounce: 0.0 }
     }
 
-    /// 스켈레톤 몸 앞에서 플레이어 쪽으로 나간다.
+    /// 스켈레톤 몸 앞에서 플레이어 쪽으로 나간다. 몸이 거의 겹치면 플레이어 자리에서 나간다:
+    /// 몸 앞은 플레이어보다 멀어서 맞지 않고, 맵 끝에서는 나가자마자 사라진다 (엘리 관찰: 왼쪽 끝).
     fn fired_by(skeleton: &Skeleton, kind: ProjectileKind, player_x: f32, world: &World) -> Projectile {
         let body = skeleton.rect();
-        let (x, direction) = if player_x < body.center().x {
+        let (front_x, direction) = if player_x < body.center().x {
             (body.x - kind.width(), -1.0)
         } else {
             (body.x + body.w, 1.0)
         };
+        let is_touching = (player_x - body.center().x).abs() < body.w / 2.0;
+        let x = if is_touching { player_x - kind.width() / 2.0 } else { front_x };
         Projectile::new(x, direction, kind, skeleton.stage.attack(), world)
     }
 
@@ -272,6 +278,12 @@ impl Skeletons {
         self.projectiles.clear();
     }
 
+    /// 임시-3, 임시-4: 주인공에게서 너무 멀어진 스켈레톤과 화살·총알이 조용히 사라진다.
+    pub fn forget_far_away(&mut self, player_x: f32) {
+        self.list.retain(|s| (s.rect().center().x - player_x).abs() <= FORGET_DISTANCE);
+        self.projectiles.retain(|shot| (shot.rect().center().x - player_x).abs() <= FORGET_DISTANCE);
+    }
+
     /// 밤에 짧은 시간 `step` 동안: 피하고, 움직이고, 쏘고, 날린다. 튕긴 공격에 쓰러진 수를 돌려준다.
     pub fn step(&mut self, step: f32, player_rect: Rect, world: &World, events: &mut Vec<CombatEvent>) -> u32 {
         self.dodge_bounced_attacks(events);
@@ -319,7 +331,7 @@ impl Skeletons {
             let Some(index) = touched.filter(|_| shot.bounced) else {
                 return true;
             };
-            events.push(skeletons[index].take_hit());
+            events.push(skeletons[index].take_hit(1));
             if skeletons[index].hp == 0 {
                 skeletons.remove(index);
                 defeated += 1;
@@ -358,8 +370,8 @@ mod tests {
     #[test]
     fn third_hit_reports_defeat() {
         let mut s = Skeleton::new(0.0, 440.0, SkeletonStage::Normal);
-        assert!(matches!(s.take_hit(), CombatEvent::SkeletonHit { hp_left: 2, .. }));
-        assert!(matches!(s.take_hit(), CombatEvent::SkeletonHit { hp_left: 1, .. }));
-        assert!(matches!(s.take_hit(), CombatEvent::SkeletonDefeated { .. }));
+        assert!(matches!(s.take_hit(1), CombatEvent::SkeletonHit { hp_left: 2, .. }));
+        assert!(matches!(s.take_hit(1), CombatEvent::SkeletonHit { hp_left: 1, .. }));
+        assert!(matches!(s.take_hit(1), CombatEvent::SkeletonDefeated { .. }));
     }
 }

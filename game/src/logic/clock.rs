@@ -169,9 +169,9 @@ mod tests {
     }
 
     #[test]
-    fn night_starts_after_600_seconds() {
+    fn night_starts_when_the_day_ends() {
         let mut c = Clock::new();
-        assert!(c.update(599.0).is_empty());
+        assert!(c.update(DAY_SECONDS - 1.0).is_empty());
         assert_eq!(c.phase(), Phase::Day);
         assert_eq!(c.update(1.0), vec![ClockEvent::NightStarted]);
         assert!(c.is_night());
@@ -180,11 +180,11 @@ mod tests {
     }
 
     #[test]
-    fn second_day_after_1200_seconds() {
+    fn second_day_after_a_day_and_a_night() {
         let mut c = Clock::new();
         let mut events = Vec::new();
-        // 한 프레임씩 20분.
-        for _ in 0..(1200 * 60) {
+        // 한 프레임씩 낮과 밤 한 번.
+        for _ in 0..((DAY_SECONDS + NIGHT_SECONDS) as usize * 60) {
             events.extend(c.update(1.0 / 60.0));
         }
         // f32 오차로 살짝 모자랄 수 있어서 1초 더 흘린다 (다음 일은 한참 뒤라 괜찮다).
@@ -198,8 +198,8 @@ mod tests {
     #[test]
     fn huge_dt_gives_every_event_in_order() {
         let mut c = Clock::new();
-        // 3000초 = 낮(600) 밤(600) 낮(600) 밤(600) 낮(600) → 3일째 밤 시작
-        let events = c.update(3000.0);
+        // 낮 밤 낮 밤 낮 → 3일째 밤 시작
+        let events = c.update(DAY_SECONDS * 3.0 + NIGHT_SECONDS * 2.0);
         assert_eq!(
             events,
             vec![
@@ -304,25 +304,25 @@ mod tests {
     }
 
     #[test]
-    fn noon_after_300_seconds() {
+    fn noon_halfway_through_the_day() {
         let mut c = Clock::new();
-        c.update(300.0);
+        c.update(DAY_SECONDS / 2.0);
         assert_eq!(c.hour_minute(), (12, 0));
     }
 
     #[test]
-    fn one_real_second_is_1_2_game_minutes() {
+    fn one_real_second_of_day_is_2_4_game_minutes() {
         let mut c = Clock::new();
-        c.update(5.0); // 6분
-        assert_eq!(c.hour_minute(), (6, 6));
-        c.update(1.0); // 7.2분 → 내림 7분
-        assert_eq!(c.hour_minute(), (6, 7));
+        c.update(5.0); // 12분
+        assert_eq!(c.hour_minute(), (6, 12));
+        c.update(1.0); // 14.4분 → 내림 14분
+        assert_eq!(c.hour_minute(), (6, 14));
     }
 
     #[test]
     fn evening_six_right_when_night_starts() {
         let mut c = Clock::new();
-        c.update(599.9);
+        c.update(DAY_SECONDS - 0.1);
         assert_eq!(c.phase(), Phase::Day);
         assert_eq!(c.hour_minute(), (17, 59), "낮의 끝은 17:59");
         c.update(0.1);
@@ -331,9 +331,9 @@ mod tests {
     }
 
     #[test]
-    fn midnight_at_900_seconds_and_three_at_1050() {
+    fn midnight_halfway_through_the_night_and_three_150_seconds_later() {
         let mut c = Clock::new();
-        c.update(900.0);
+        c.update(DAY_SECONDS + NIGHT_SECONDS / 2.0);
         assert_eq!(c.hour_minute(), (0, 0), "자정");
         assert_eq!(c.day_number(), 1, "자정에는 날이 안 바뀐다");
         c.update(150.0);
@@ -342,9 +342,9 @@ mod tests {
     }
 
     #[test]
-    fn six_again_and_day_two_after_1200_seconds() {
+    fn six_again_and_day_two_after_a_day_and_a_night() {
         let mut c = Clock::new();
-        c.update(1200.0);
+        c.update(DAY_SECONDS + NIGHT_SECONDS);
         assert_eq!(c.phase(), Phase::Day);
         assert_eq!(c.hour_minute(), (6, 0));
         assert_eq!(c.day_number(), 2);
@@ -375,10 +375,10 @@ mod tests {
     #[test]
     fn big_dt_keeps_time_of_day_right() {
         let mut c = Clock::new();
-        c.update(3000.0); // 3일째 밤 시작
+        c.update(DAY_SECONDS * 3.0 + NIGHT_SECONDS * 2.0); // 3일째 밤 시작
         assert_eq!(c.hour_minute(), (18, 0));
         assert_eq!(c.day_number(), 3);
-        c.update(1200.0 * 10.0 + 300.0); // 10일 더 + 300초 → 자정
+        c.update((DAY_SECONDS + NIGHT_SECONDS) * 10.0 + NIGHT_SECONDS / 2.0); // 10일 더 + 밤 절반 → 자정
         assert_eq!(c.hour_minute(), (0, 0));
         assert_eq!(c.day_number(), 13);
     }

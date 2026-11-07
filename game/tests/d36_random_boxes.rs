@@ -141,8 +141,8 @@ fn no_body_wide_pit_between_taller_boxes() {
 fn new_game_has_one_coin_per_box_and_different_games_have_different_boxes() {
     for seed in 0..100 {
         let g = Game::new(CharacterKind::Niro, seed);
-        assert_eq!(g.coins.list.len(), g.world.obstacles.len(), "seed {seed}");
-        assert!(g.coins.list.iter().zip(&g.world.obstacles).all(|(c, b)| {
+        assert_eq!(g.coins.list.len(), g.world.boxes().len(), "seed {seed}");
+        assert!(g.coins.list.iter().zip(&g.world.boxes()).all(|(c, b)| {
             c.rect.center().x == b.center().x && c.rect.y + c.rect.h < b.y
         }));
     }

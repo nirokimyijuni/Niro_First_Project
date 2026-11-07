@@ -175,7 +175,7 @@ pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 /// 번호 → 0 이상 1 미만의 늘 같은 "무작위" 수 (별 자리·반짝임 순서용)
-fn hash(n: u32) -> f32 {
+pub fn hash(n: u32) -> f32 {
     let mut x = n.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
     x ^= x >> 16;
     x = x.wrapping_mul(0x7FEB_352D);
@@ -607,7 +607,7 @@ impl SkyLook {
         SkyLook { d, dusk: dusk_glow(d), dusk_x: sun.map_or(no_sun_x, |s| s.pos.x), time, sun, moon }
     }
 
-    fn sky_at(&self, y: f32) -> Color {
+    pub fn sky_at(&self, y: f32) -> Color {
         sky_color((y / HORIZON_Y).clamp(0.0, 1.0), self.d, self.dusk)
     }
 }

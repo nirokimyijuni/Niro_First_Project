@@ -49,6 +49,11 @@ pub fn player_input() -> PlayerInput {
     }
 }
 
+/// 무기 바꾸기(임시-8): Z를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
+pub fn switch_weapon_pressed() -> bool {
+    is_key_pressed(KeyCode::Z)
+}
+
 /// 메뉴 화면(타이틀·캐릭터 고르기)에서 쓰는 입력. 모두 "이번 프레임에 새로 누름" 기준.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MenuInput {

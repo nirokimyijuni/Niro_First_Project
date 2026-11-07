@@ -6,6 +6,7 @@ pub mod effects;
 pub mod gameover;
 pub mod hud;
 pub mod input;
+pub mod places;
 pub mod screen;
 pub mod screens;
 pub mod sky;

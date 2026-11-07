@@ -4,8 +4,8 @@
 // 아직 logic/에서 쓰지 않는 상수가 있어서 경고를 끈다. 쓰기 시작하면 지워도 된다.
 #![allow(dead_code)]
 
-/// D1 낮 길이 (초) — 10분
-pub const DAY_SECONDS: f32 = 10.0 * 60.0;
+/// 낮 길이 (초) — 5분. 부모님 피드백의 임시 값 (D1은 10분). 시계는 낮 12시간에 맞춰 밤보다 2배 빨리 간다.
+pub const DAY_SECONDS: f32 = 5.0 * 60.0;
 /// D1 밤 길이 (초) — 10분
 pub const NIGHT_SECONDS: f32 = 10.0 * 60.0;
 
@@ -34,7 +34,7 @@ pub const CRAFT_GRID_HEIGHT: usize = 3;
 // ---- M1 이동 ----
 // 좌표: 화면 픽셀 단위, 왼쪽 위가 (0, 0), 아래로 갈수록 y가 커진다.
 
-/// M1 월드(땅) 가로 길이 — 화면 폭(960)과 같게.
+/// M1 연습 맵 가로 길이 — 화면 폭(960)과 같게. 게임의 긴 맵은 `MAP_WIDTH`.
 pub const WORLD_WIDTH: f32 = 960.0;
 /// M1 땅 윗면의 y 위치. 캐릭터 발이 여기 닿으면 땅 위에 서 있다.
 pub const GROUND_Y: f32 = 440.0;
@@ -134,9 +134,11 @@ pub const ZOMBIE_HEIGHT: f32 = 64.0;
 /// US-039 좀비가 걷는 속도 (초당 픽셀). 플레이어보다 느려야 한다. 수산나가 정한 처음 값.
 pub const ZOMBIE_WALK_SPEED: f32 = 80.0;
 /// US-039 다음 몬스터가 나올 때까지 (초). 스켈레톤도 같이 쓴다. 화면이 꽉 차 있는 동안은 세지 않는다.
-pub const ZOMBIE_SPAWN_SECONDS: f32 = 20.0;
+pub const ZOMBIE_SPAWN_SECONDS: f32 = 6.0;
+/// 부모님 피드백의 임시 값: 한 차례에 나오는 몬스터 수. 첫 마리 쪽은 랜덤이고, 다음은 번갈아 반대쪽이다.
+pub const MONSTERS_PER_SPAWN: usize = 2;
 /// US-039 화면에 함께 있을 수 있는 좀비 수
-pub const ZOMBIE_MAX_ON_SCREEN: usize = 3;
+pub const ZOMBIE_MAX_ON_SCREEN: usize = 5;
 /// 몬스터가 왼쪽 끝에서 나올 확률. 나머지는 오른쪽 끝 (D36: 플레이어 위치와 상관없다).
 /// 플레이어가 그 끝 자리에 서 있을 때만 겹치지 않게 반대쪽 끝에서 나온다.
 pub const ZOMBIE_SPAWN_LEFT_CHANCE: f32 = 0.5;
@@ -164,7 +166,7 @@ pub const EXPERIENCE_PER_DEFEAT: u32 = 1;
 pub const EXPERIENCE_PER_LEVEL: u32 = 5;
 
 /// M5 좀비와 스켈레톤을 합쳐 화면에 함께 있을 수 있는 수. 좀비만은 `ZOMBIE_MAX_ON_SCREEN`까지.
-pub const MONSTER_MAX_ON_SCREEN: usize = 4;
+pub const MONSTER_MAX_ON_SCREEN: usize = 8;
 /// M5 나올 차례에 좀비 대신 스켈레톤이 나올 확률. 나오는 시간은 `ZOMBIE_SPAWN_SECONDS`를 같이 쓴다.
 pub const SKELETON_SPAWN_CHANCE: f32 = 0.5;
 
@@ -209,13 +211,114 @@ pub const PROJECTILE_FLIGHT_HEIGHT: f32 = 56.0;
 /// US-049 튕긴 공격이 사라질 때까지 날아가는 거리 (픽셀)
 pub const PROJECTILE_BOUNCED_RANGE: f32 = 400.0;
 
+// ---- M6 미스를 찾아라 (stories/backlog.md M6 맨 위 표. 임시-N은 아이·부모가 언제든 바꿀 수 있다) ----
+
+/// M6 보이는 화면의 폭. 카메라와 몬스터 나오는 자리를 이 값으로 계산한다.
+pub const SCREEN_WIDTH: f32 = 960.0;
+/// D22 장소 이름. 왼쪽부터 화면 하나씩이다. 아이가 순서를 바꾸면 여기와 아래 x 값들을 같이 옮긴다.
+pub const PLACE_NAMES: [&str; 4] = ["해변", "화산", "산", "집"];
+/// US-050 긴 맵 가로 길이 (해변 → 화산 → 산 → 집). M1 연습 맵은 `WORLD_WIDTH`를 그대로 쓴다.
+pub const MAP_WIDTH: f32 = SCREEN_WIDTH * PLACE_NAMES.len() as f32;
+
+/// 임시-5 숨는 곳·시민·구조물 양옆으로 이만큼 안에는 상자를 놓지 않는다 (픽셀).
+pub const NO_BOX_MARGIN: f32 = 64.0;
+
+/// US-051 화산의 구멍: 왼쪽 x, 폭, 깊이. 깊이는 점프 최고 높이(약 97)보다 낮아야 나올 수 있다.
+pub const HOLE_LEFT: f32 = 1620.0;
+pub const HOLE_WIDTH: f32 = 160.0;
+pub const HOLE_DEPTH: f32 = 64.0;
+
+/// US-051 한 칸 높이. 점프 최고 높이(약 97)보다 낮아야 다음 칸에 오를 수 있다.
+pub const CLIMB_STEP: f32 = 64.0;
+/// US-051 나무 발판 (왼쪽 x, 땅에서 윗면까지 높이, 폭, 두께). 맨 아래는 땅까지 닿는 그루터기다.
+/// 칸 사이를 벌린 까닭: 오른쪽에서 온 캐릭터가 그루터기 옆에서 머리를 박지 않고 뛰어넘게 하려고.
+pub const TREE_BRANCHES: [(f32, f32, f32, f32); 3] = [
+    (1920.0, CLIMB_STEP, 64.0, CLIMB_STEP),
+    (2036.0, CLIMB_STEP * 2.0, 64.0, 16.0),
+    (2152.0, CLIMB_STEP * 3.0, 64.0, 16.0),
+];
+/// US-051 바위 계단 (왼쪽 x, 땅에서 윗면까지 높이, 폭, 두께). 땅까지 닿는 산 모양이다.
+/// 양쪽이 계단이어야 오른쪽에서 왼쪽으로도 넘어갈 수 있다 (US-050 왕복).
+pub const ROCK_STEPS: [(f32, f32, f32, f32); 5] = [
+    (2440.0, CLIMB_STEP, 64.0, CLIMB_STEP),
+    (2504.0, CLIMB_STEP * 2.0, 64.0, CLIMB_STEP * 2.0),
+    (2568.0, CLIMB_STEP * 3.0, 64.0, CLIMB_STEP * 3.0),
+    (2632.0, CLIMB_STEP * 2.0, 64.0, CLIMB_STEP * 2.0),
+    (2696.0, CLIMB_STEP, 64.0, CLIMB_STEP),
+];
+
+/// US-051 숨는 곳 (이름, 미스 몸 가운데 x, 땅에서 발까지 높이). 구멍 바닥은 땅보다 낮아서 음수다.
+/// 줄을 더하면 그대로 새 숨는 곳이 된다 (갈 수 있는 자리여야 한다).
+pub const HIDE_SPOTS: [(&str, f32, f32); 6] = [
+    ("큰 돌 뒤", 700.0, 0.0),
+    ("화산 뒤", 1300.0, 0.0),
+    ("지하", 1700.0, -HOLE_DEPTH),
+    ("나무 꼭대기", 2200.0, CLIMB_STEP * 3.0),
+    ("산꼭대기", 2600.0, CLIMB_STEP * 3.0),
+    ("집 뒤", 3700.0, 0.0),
+];
+/// US-051 미스 크기 (가로, 세로). 수산나가 정한 처음 값.
+pub const MISS_WIDTH: f32 = 40.0;
+pub const MISS_HEIGHT: f32 = 56.0;
+/// US-051 찾았을 때 미스 대사. 아이가 정했다.
+pub const MISS_FOUND_TEXT: &str = "아이템을 줄게!";
+
+/// US-053 무기별 공격력. 아이가 정한 순서: 총 > 도끼 > 칼.
+pub const HANDS_ATTACK: u32 = 1;
+pub const SWORD_ATTACK: u32 = 2;
+pub const AXE_ATTACK: u32 = 3;
+pub const GUN_ATTACK: u32 = 4;
+/// US-053 칼·도끼가 닿는 거리 (픽셀). 맨손과 같다.
+pub const SWORD_RANGE: f32 = PLAYER_ATTACK_RANGE;
+pub const AXE_RANGE: f32 = PLAYER_ATTACK_RANGE;
+/// 임시-8 총이 닿는 거리 (픽셀)
+pub const GUN_RANGE: f32 = 300.0;
+/// US-052 무기 줍는 문구
+pub const SWORD_PICKED_TEXT: &str = "칼을 주웠어요!";
+pub const AXE_PICKED_TEXT: &str = "도끼를 주웠어요!";
+pub const GUN_PICKED_TEXT: &str = "총을 주웠어요!";
+/// US-052 땅에 놓인 무기 한 변 (픽셀). 수산나가 정한 처음 값.
+pub const WEAPON_SIZE: f32 = 32.0;
+/// US-052 무기가 미스 자리 왼쪽·오른쪽으로 떨어지는 거리 (픽셀)
+pub const WEAPON_DROP_SPREAD: f32 = 120.0;
+/// US-052 떨어지는 속도 (초당 픽셀). 실제 시간이다 (빨리감기로 빨라지지 않는다).
+pub const WEAPON_FALL_SPEED: f32 = 300.0;
+
+/// 임시-9 시민 자리 (몸 가운데 x). 장소마다 1명.
+pub const CITIZEN_XS: [f32; 4] = [480.0, 1500.0, 2400.0, 3200.0];
+/// BUG-019 폭발 시민 몸 가운데에서 양옆으로 이만큼 안에는 상자를 놓지 않는다 (픽셀).
+/// 상자에서 내려와 달리다가 시민을 뛰어넘을 자리다. 달려 뛰면 약 163픽셀을 날아간다.
+pub const CITIZEN_RUN_UP_ROOM: f32 = 160.0;
+/// US-054 시민 크기 (가로, 세로). 미스와 같다.
+pub const CITIZEN_WIDTH: f32 = MISS_WIDTH;
+pub const CITIZEN_HEIGHT: f32 = MISS_HEIGHT;
+/// 임시-9 펑이 닿는 거리 (픽셀, 몸 가운데끼리)
+pub const CITIZEN_BLAST_RANGE: f32 = 120.0;
+/// US-054 펑에 줄어드는 플레이어 체력
+pub const CITIZEN_BLAST_DAMAGE: u32 = 2;
+/// US-054 터진 시민이 다시 나타날 때까지 (초). 실제 시간이다.
+pub const CITIZEN_RESPAWN_SECONDS: f32 = 30.0;
+/// US-054 터질 때 문구
+pub const CITIZEN_POP_TEXT: &str = "펑!";
+
+/// 임시 일반 시민: 장소마다 1명, 모두 `PLACE_NAMES` 수만큼. 크기는 미스와 같고, 걷는 속도는 초당 픽셀이다.
+pub const WALKING_CITIZEN_WIDTH: f32 = MISS_WIDTH;
+pub const WALKING_CITIZEN_HEIGHT: f32 = MISS_HEIGHT;
+pub const WALKING_CITIZEN_SPEED: f32 = 40.0;
+/// BUG-016 임시 값 (부모님 답을 기다린다): 이만큼 걷고, 이만큼 멈춘다 (초). 실제 시간이다.
+pub const WALKING_CITIZEN_WALK_SECONDS: f32 = 6.0;
+pub const WALKING_CITIZEN_PAUSE_SECONDS: f32 = 2.0;
+
+/// 임시-3, 임시-4 주인공에게서 이만큼 넘게 멀어진 몬스터와 화살·총알은 사라진다 (픽셀, 몸 가운데끼리)
+pub const FORGET_DISTANCE: f32 = 1200.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn decided_values_match_plan() {
-        assert_eq!(DAY_SECONDS, 600.0);
+        assert_eq!(DAY_SECONDS, 300.0);
         assert_eq!(NIGHT_SECONDS, 600.0);
         assert_eq!(PLAYER_START_HP, 7);
         assert_eq!(PLAYER_HP_PER_LEVEL, 5);
@@ -234,8 +337,11 @@ mod tests {
         assert_eq!((CRAFT_GRID_WIDTH, CRAFT_GRID_HEIGHT), (4, 3));
         assert_eq!((DAY_START_HOUR, NIGHT_START_HOUR), (6, 18));
         assert_eq!((DAY_GAME_MINUTES, NIGHT_GAME_MINUTES), (720, 720));
-        // D14: 실제 1초 = 게임 1.2분
-        assert_eq!(DAY_GAME_MINUTES as f32 / DAY_SECONDS, 1.2);
+        assert_eq!(MAP_WIDTH, 3840.0);
+        assert_eq!((HANDS_ATTACK, SWORD_ATTACK, AXE_ATTACK, GUN_ATTACK), (1, 2, 3, 4));
+        assert_eq!((CITIZEN_BLAST_DAMAGE, CITIZEN_RESPAWN_SECONDS), (2, 30.0));
+        // 낮은 실제 1초 = 게임 2.4분, 밤은 D14대로 1.2분
+        assert_eq!(DAY_GAME_MINUTES as f32 / DAY_SECONDS, 2.4);
         assert_eq!(NIGHT_GAME_MINUTES as f32 / NIGHT_SECONDS, 1.2);
     }
 }

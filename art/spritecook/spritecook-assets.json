@@ -45,7 +45,8 @@
   },
   "miss-citizen-bomb": {
     "based_on": "miss",
-    "sha12": "a65e405c0087"
+    "sha12": "9face750d1d4",
+    "note": "2026-11-07 Pillow로 손수 고침: 기존 안테나를 복사해 V자 2개로 그림 (안테나 2개 시민이 폭발), SpriteCook 생성 아님"
   },
   "weapon-gun": {
     "based_on": "local-pillow",

@@ -42,6 +42,11 @@ fn player_at(x: f32) -> Rect {
 }
 
 /// `seconds`초를 프레임씩 흘린다.
+/// 맨손 공격 한 번.
+fn hands_attack(c: &mut Combat, player: Rect, facing: Facing) -> Vec<CombatEvent> {
+    c.attack_with(player, facing, HANDS_ATTACK, PLAYER_ATTACK_RANGE)
+}
+
 fn run(c: &mut Combat, seconds: f32, is_night: bool, player: Rect, world: &World) -> Vec<CombatEvent> {
     let mut events = Vec::new();
     for _ in 0..(seconds / FRAME).round() as usize {
@@ -78,11 +83,13 @@ fn first_zombie_appears_at_screen_edge_as_night_starts() {
     let w = flat_world();
     let mut c = zombie_combat(SEED);
     let events = c.update(FRAME, true, player_at(480.0), &w);
-    assert_eq!(c.zombies.list.len(), 1);
-    assert_eq!(count(&events, |e| matches!(e, CombatEvent::ZombieAppeared { .. })), 1);
-    let z = c.zombies.list[0].rect();
-    assert!(z.x < 5.0 || z.x + z.w > w.width - 5.0, "화면 끝에서 나온다: x={}", z.x);
-    assert_eq!(z.y + z.h, GROUND_Y, "발이 땅에 있다");
+    assert_eq!(c.zombies.list.len(), MONSTERS_PER_SPAWN);
+    assert_eq!(count(&events, |e| matches!(e, CombatEvent::ZombieAppeared { .. })), MONSTERS_PER_SPAWN);
+    for zombie in &c.zombies.list {
+        let z = zombie.rect();
+        assert!(z.x < 5.0 || z.x + z.w > w.width - 5.0, "화면 끝에서 나온다: x={}", z.x);
+        assert_eq!(z.y + z.h, GROUND_Y, "발이 땅에 있다");
+    }
 }
 
 /// 플레이어(x=480)의 양옆을 벽으로 막은 맵. 좀비가 플레이어에게 닿지 못한다.
@@ -94,18 +101,18 @@ fn walled_world() -> World {
 }
 
 #[test]
-fn one_zombie_every_20_seconds() {
+fn zombies_come_two_at_a_time_every_spawn_turn() {
     let w = walled_world();
     let player = player_at(480.0);
     let appeared = |events: &[CombatEvent]| count(events, |e| matches!(e, CombatEvent::ZombieAppeared { .. }));
     let mut c = zombie_combat(SEED);
-    assert_eq!(appeared(&run(&mut c, 1.0, true, player, &w)), 1);
-    assert_eq!(appeared(&run(&mut c, 18.0, true, player, &w)), 0);
-    assert_eq!(appeared(&run(&mut c, 2.0, true, player, &w)), 1);
+    assert_eq!(appeared(&run(&mut c, 1.0, true, player, &w)), MONSTERS_PER_SPAWN);
+    assert_eq!(appeared(&run(&mut c, ZOMBIE_SPAWN_SECONDS - 2.0, true, player, &w)), 0);
+    assert_eq!(appeared(&run(&mut c, 2.0, true, player, &w)), MONSTERS_PER_SPAWN);
 }
 
 #[test]
-fn never_more_than_3_zombies() {
+fn never_more_than_the_zombie_limit() {
     let w = walled_world();
     let player = player_at(480.0);
     let mut c = zombie_combat(SEED);
@@ -118,23 +125,26 @@ fn never_more_than_3_zombies() {
 }
 
 #[test]
-fn after_a_full_screen_next_zombie_comes_20_seconds_after_one_is_gone() {
+fn after_a_full_screen_next_zombie_comes_one_turn_after_one_is_gone() {
     let w = walled_world();
     let player = player_at(480.0);
     let mut c = night_with_one_zombie(0.0, false);
-    c.zombies.list.push(Zombie::new(0.0, GROUND_Y, false));
-    c.zombies.list.push(Zombie::new(0.0, GROUND_Y, false));
+    for _ in 1..ZOMBIE_MAX_ON_SCREEN {
+        c.zombies.list.push(Zombie::new(0.0, GROUND_Y, false));
+    }
     // M5: 화면이 꽉 차는 수는 좀비와 스켈레톤을 합쳐서 센다.
-    c.skeletons.list.push(Skeleton::new(0.0, GROUND_Y, SkeletonStage::Half));
+    for _ in ZOMBIE_MAX_ON_SCREEN..MONSTER_MAX_ON_SCREEN {
+        c.skeletons.list.push(Skeleton::new(0.0, GROUND_Y, SkeletonStage::Half));
+    }
     run(&mut c, 30.0, true, player, &w);
-    assert_eq!(c.zombies.list.len(), 3, "꽉 차 있으면 시간을 세지 않는다");
+    assert_eq!(c.zombies.list.len(), ZOMBIE_MAX_ON_SCREEN, "꽉 차 있으면 시간을 세지 않는다");
     assert!(!c.skeletons.list[0].is_flashing(), "아무도 안 때린 스켈레톤은 번쩍이지 않는다");
 
     c.zombies.list.pop();
     run(&mut c, ZOMBIE_SPAWN_SECONDS - 1.0, true, player, &w);
-    assert_eq!(c.zombies.list.len(), 2);
+    assert_eq!(c.zombies.list.len(), ZOMBIE_MAX_ON_SCREEN - 1);
     run(&mut c, 2.0, true, player, &w);
-    assert_eq!(c.zombies.list.len(), 3);
+    assert_eq!(c.zombies.list.len(), ZOMBIE_MAX_ON_SCREEN, "빈자리 하나만큼만 나온다");
 }
 
 #[test]
@@ -235,7 +245,7 @@ fn morning_removes_zombies_and_next_night_starts_with_a_new_one() {
     run(&mut c, 30.0, false, player, &w);
     assert!(c.zombies.list.is_empty());
     c.update(FRAME, true, player, &w);
-    assert_eq!(c.zombies.list.len(), 1);
+    assert_eq!(c.zombies.list.len(), MONSTERS_PER_SPAWN);
 }
 
 // ---- US-040 공격 ----
@@ -251,14 +261,14 @@ fn three_hits_defeat_a_zombie() {
     let player = player_at(300.0);
     let mut c = night_with_one_zombie(x_in_reach_on_right(player), false);
 
-    let events = c.player_attack(player, Facing::Right);
+    let events = hands_attack(&mut c, player, Facing::Right);
     assert!(matches!(events[..], [CombatEvent::ZombieHit { hp_left: 2, .. }]));
     assert!(c.zombies.list[0].is_flashing(), "맞으면 반짝인다");
 
-    let events = c.player_attack(player, Facing::Right);
+    let events = hands_attack(&mut c, player, Facing::Right);
     assert!(matches!(events[..], [CombatEvent::ZombieHit { hp_left: 1, .. }]));
 
-    let events = c.player_attack(player, Facing::Right);
+    let events = hands_attack(&mut c, player, Facing::Right);
     assert!(matches!(events[..], [CombatEvent::ZombieDefeated { .. }]));
     assert!(c.zombies.list.is_empty());
 }
@@ -267,7 +277,7 @@ fn three_hits_defeat_a_zombie() {
 fn flash_ends_soon() {
     let player = player_at(300.0);
     let mut c = night_with_one_zombie(x_in_reach_on_right(player), false);
-    c.player_attack(player, Facing::Right);
+    hands_attack(&mut c, player, Facing::Right);
     run(&mut c, ZOMBIE_HIT_FLASH_SECONDS + 0.05, true, player, &flat_world());
     assert!(!c.zombies.list[0].is_flashing());
 }
@@ -276,7 +286,7 @@ fn flash_ends_soon() {
 fn far_zombie_is_not_hit() {
     let player = player_at(300.0);
     let mut c = night_with_one_zombie(player.x + player.w + PLAYER_ATTACK_RANGE + 1.0, false);
-    assert!(c.player_attack(player, Facing::Right).is_empty());
+    assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
     assert_eq!(c.zombies.list[0].hp, ZOMBIE_HP);
 }
 
@@ -284,12 +294,12 @@ fn far_zombie_is_not_hit() {
 fn zombie_behind_the_player_is_not_hit() {
     let player = player_at(300.0);
     let mut c = night_with_one_zombie(x_in_reach_on_right(player), false);
-    assert!(c.player_attack(player, Facing::Left).is_empty());
+    assert!(hands_attack(&mut c, player, Facing::Left).is_empty());
 
     // 몸이 겹쳐 있어도 등 뒤는 맞지 않는다.
     c.zombies.list[0].pos.x = player.x + 10.0;
-    assert!(c.player_attack(player, Facing::Left).is_empty());
-    assert_eq!(c.player_attack(player, Facing::Right).len(), 1);
+    assert!(hands_attack(&mut c, player, Facing::Left).is_empty());
+    assert_eq!(hands_attack(&mut c, player, Facing::Right).len(), 1);
 }
 
 #[test]
@@ -307,7 +317,7 @@ fn one_attack_hits_every_zombie_in_reach() {
     let x = x_in_reach_on_right(player);
     let mut c = night_with_one_zombie(x, false);
     c.zombies.list.push(Zombie::new(x, GROUND_Y, false));
-    assert_eq!(c.player_attack(player, Facing::Right).len(), 2);
+    assert_eq!(hands_attack(&mut c, player, Facing::Right).len(), 2);
 }
 
 #[test]
@@ -374,7 +384,7 @@ fn after_going_down_nothing_moves() {
     assert_eq!(c.zombies.list[0].pos.x, x_before);
     assert!(run(&mut c, 1.0, false, far, &w).is_empty(), "아침이 와도 다시 일어나지 않는다");
     assert_eq!(c.health.hp(), 0);
-    assert!(c.player_attack(player, Facing::Right).is_empty());
+    assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
 }
 
 #[test]
@@ -385,7 +395,7 @@ fn zombie_attack_stays_2_at_higher_levels_d32() {
     c.level_up();
     c.level_up();
     let events = c.update(FRAME, true, player, &w);
-    assert!(events.contains(&CombatEvent::PlayerHurt { amount: ZOMBIE_ATTACK, hp_left: 5 }));
+    assert!(events.contains(&CombatEvent::PlayerHurt { amount: ZOMBIE_ATTACK, hp_left: 15 }));
 }
 
 #[test]
@@ -424,7 +434,8 @@ fn floating_zombie_rises_then_pops_without_hurting_anyone() {
     run(&mut c, 0.2, true, far, &w);
     assert_eq!(c.zombies.list[0].state, ZombieState::Floating);
 
-    // 떠오른 좀비 바로 아래로 플레이어가 와도 맞지 않는다.
+    // 떠오른 좀비 바로 아래로 플레이어가 와도 맞지 않는다. 그동안 나온 좀비는 치운다.
+    c.zombies.list.truncate(1);
     c.zombies.list[0].pos.x = player.x;
     let ground_top = GROUND_Y - ZOMBIE_HEIGHT;
     let events = run(&mut c, 1.0, true, player, &w);

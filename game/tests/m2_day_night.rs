@@ -50,16 +50,16 @@ fn m1_game(kind: CharacterKind) -> Game {
 }
 
 #[test]
-fn us009_starts_day_10_00_and_ticks_one_second_per_second() {
+fn us009_starts_with_the_whole_day_left_and_ticks_one_second_per_second() {
     let mut c = Clock::new();
     assert_eq!(c.phase(), Phase::Day);
-    assert_eq!(shown_seconds(&c), 600, "10:00");
-    // 프레임 단위로 1분 흘리면 09:00
+    assert_eq!(shown_seconds(&c), 300, "5:00");
+    // 프레임 단위로 1분 흘리면 4:00
     for _ in 0..60 * 60 {
         c.update(FRAME);
     }
     let s = shown_seconds(&c);
-    assert!(s == 540 || s == 541, "1분 뒤 09:00 근처여야 함: {s}");
+    assert!(s == 240 || s == 241, "1분 뒤 4:00 근처여야 함: {s}");
 }
 
 #[test]
@@ -329,7 +329,7 @@ fn us015_new_game_after_night_and_coins_is_fresh() {
     let mut g = m1_game(CharacterKind::Niro);
     touch_coin(&mut g, 0);
     g.update(&NONE, 0.0);
-    g.update(&NONE, DAY_SECONDS * 3.0 + 10.0); // 2일째 밤
+    g.update(&NONE, DAY_SECONDS * 2.0 + NIGHT_SECONDS + 10.0); // 2일째 밤
     assert!(g.clock.is_night());
     assert_eq!(g.clock.day_number(), 2);
     assert!(g.wallet.coins() >= 1);
@@ -337,7 +337,7 @@ fn us015_new_game_after_night_and_coins_is_fresh() {
     // Esc → 다시 고르기 → 새 게임은 Game::new (main.rs start_play)
     let g = m1_game(CharacterKind::Logan);
     assert_eq!(g.clock.phase(), Phase::Day);
-    assert_eq!(shown_seconds(&g.clock), 600);
+    assert_eq!(shown_seconds(&g.clock), 300);
     assert_eq!((g.clock.day_number(), g.clock.nights_survived()), (1, 0));
     assert_eq!(g.wallet.coins(), 0);
     assert_eq!(g.clock.sky_darkness(), 0.0);

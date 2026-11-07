@@ -132,6 +132,12 @@ impl Player {
                 }
             }
         }
+        // 구멍 옆벽: 발이 땅보다 낮은 동안은 구멍 안에서만 움직인다.
+        if let Some(hole) = world.hole() {
+            if self.pos.y + self.size.y > world.ground_y {
+                self.pos.x = self.pos.x.clamp(hole.x, hole.x + hole.w - self.size.x);
+            }
+        }
 
         // --- 세로 ---
         self.pos.y += self.vel.y * step;
@@ -161,9 +167,10 @@ impl Player {
                 }
             }
         }
-        // 땅
-        if self.pos.y + self.size.y >= world.ground_y {
-            self.pos.y = world.ground_y - self.size.y;
+        // 땅 (구멍 위면 구멍 바닥)
+        let floor_y = world.floor_y_under(self.rect());
+        if self.pos.y + self.size.y >= floor_y {
+            self.pos.y = floor_y - self.size.y;
             self.vel.y = 0.0;
             self.on_ground = true;
         }

@@ -1,5 +1,5 @@
 //! 화면 그리기: 타이틀, 캐릭터 고르기, 플레이. 좌표는 모두 가상 화면(960×540) 기준.
-//! 배경은 해변: 하늘·바다 빛(sky.rs) → 하얀 물결 → 모래. 바다는 그림일 뿐 규칙은 없다.
+//! 배경: 화면에 고정된 하늘·바다 빛(sky.rs) → 맵을 따라 움직이는 땅(places.rs)과 해변 물결. 바다는 그림일 뿐 규칙은 없다.
 //! 플레이 중에는 logic 시계의 `sky_darkness`(0 한낮 ~ 1 한밤)로 낮 그림과 밤 그림을 부드럽게 섞는다
 //! (D9, D10): 노을 때 하늘 아래가 주황·분홍, 밤에는 남색 하늘에 별. 해·달은 시계를 따라 호를 그린다 (D31).
 
@@ -7,27 +7,23 @@ use super::assets::{height_with_antenna, Assets};
 use super::coin::draw_coins;
 use super::effects::Effects;
 use super::gameover::{draw_down_panel, draw_fallen_player, DownScreen};
-use super::hud::{draw_health, draw_hud, draw_level};
-use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
+use super::hud::{draw_health, draw_hud, draw_level, draw_weapons};
+use super::places;
+use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
-use super::sprites::{self, draw_character, draw_projectile, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
+use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
 use crate::logic::monster::ZombieState;
 use crate::logic::player::{Facing, Motion};
 use crate::logic::skeleton::SkeletonState;
+use crate::logic::weapon::Weapon;
 use macroquad::prelude::*;
 
 // ---- 색 ----
 /// 타이틀 구석 버전 글자 (모래 위에 작고 흐리게)
 const VERSION_COLOR: Color = Color::new(0.35, 0.25, 0.15, 0.7);
-/// 모래: 아이 그림의 흰 얼굴이 묻히지 않게 너무 하얗지 않은 따뜻한 베이지
-const SAND: Color = Color::new(0.90, 0.76, 0.52, 1.0);
-/// 화면 아래쪽 모래는 조금 더 진하게 (그라데이션)
-const SAND_DEEP: Color = Color::new(0.84, 0.68, 0.45, 1.0);
-/// 물에 젖은 모래 (물결 바로 아래)
-const SAND_WET: Color = Color::new(0.74, 0.59, 0.40, 1.0);
 /// 모래 알갱이: 어두운 알갱이와 밝은 알갱이 (반투명)
 const SAND_DOT: Color = Color::new(0.62, 0.47, 0.28, 0.45);
 const SAND_SPARK: Color = Color::new(1.0, 0.95, 0.82, 0.55);
@@ -81,6 +77,17 @@ const PLAY_HINT_Y: f32 = 526.0;
 /// 맞은 뒤 안 맞는 동안 캐릭터가 초당 깜빡이는 번, 깜빡일 때 투명도
 const HURT_BLINKS_PER_SECOND: f32 = 8.0;
 const HURT_BLINK_ALPHA: f32 = 0.35;
+/// 미스·시민 그림 높이를 몸 네모의 몇 배로 할지. 안테나가 그림 안에 있어서 조금 크게.
+const MISS_SPRITE_SCALE: f32 = 1.3;
+/// 손에 든 무기: 크기, 발 가운데에서 앞으로, 발에서 위로
+const HELD_WEAPON_SIZE: f32 = 40.0;
+const HELD_WEAPON_FORWARD: f32 = 34.0;
+const HELD_WEAPON_UP: f32 = 44.0;
+/// 땅에 놓인 무기 뒤의 빛 (밤에도 보이게)
+const WEAPON_GLOW: Color = Color::new(1.0, 1.0, 0.85, 0.35);
+const WEAPON_GLOW_RADIUS: f32 = 24.0;
+/// 멈춘 일반 시민이 고개를 돌리는 간격 (초). 멈추는 2초 동안 두어 번 두리번거린다.
+const CITIZEN_LOOK_SECONDS: f32 = 0.6;
 
 /// 캐릭터 고르기 화면에서 `index`번째 카드 네모.
 pub fn select_card_rect(index: usize) -> Rect {
@@ -104,14 +111,14 @@ fn draw_foam(ground_y: f32, d: f32) {
     let surge = (time() * 0.9).sin() * 5.0; // 밀려왔다(아래) 빠졌다(위)
     let mut x = -20.0;
     let mut i = 0;
-    while x < VIRTUAL_WIDTH + 20.0 {
+    while x < places::BEACH_END {
         let wobble = (x * 0.03 + time() * 1.6).sin() * 3.0;
         let y = ground_y - 6.0 + surge + wobble;
         draw_circle(x, y, 9.0 + (i % 3) as f32 * 2.0, foam);
         x += 16.0;
         i += 1;
     }
-    draw_rectangle(0.0, ground_y - 6.0 + surge, VIRTUAL_WIDTH, 6.0, foam);
+    draw_rectangle(0.0, ground_y - 6.0 + surge, places::BEACH_END, 6.0, foam);
 }
 
 /// 아래가 평평한 반원 (부채꼴 조개 몸통). 모래 위에 덧칠하지 않고 반원만 그린다.
@@ -134,23 +141,12 @@ fn draw_shell(c: Vec2, s: f32, d: f32) {
     }
 }
 
-/// 바다(sky.rs) → 모래 그라데이션 → 알갱이·조개 → 물결 거품.
-fn draw_ground(art: &SkyArt, look: &SkyLook, ground_y: f32) {
+/// 해변 위 그림: 알갱이·조개 → 물결 거품. 맵 좌표로 그린다.
+fn draw_beach(art: &SkyArt, look: &SkyLook, ground_y: f32) {
     let d = look.d;
     let mut canvas = GpuCanvas { art };
-    sky::draw_sea(&mut canvas, look, ground_y);
     // 모래는 조금 덜 어둡게: 캐릭터가 서 있는 바닥이 너무 깜깜하지 않게
     let sd = d * SAND_NIGHT_AMOUNT;
-    // 젖은 모래 → 마른 모래 → 아래쪽은 조금 진하게 (띠 없이 부드럽게)
-    canvas.vgradient(
-        0.0,
-        VIRTUAL_WIDTH,
-        &[
-            (ground_y, night(SAND_WET, sd)),
-            (ground_y + WET_SAND_THICKNESS, night(SAND, sd)),
-            (VIRTUAL_HEIGHT, night(SAND_DEEP, sd)),
-        ],
-    );
     // 모래 알갱이: 크기·밝기가 제각각인 작은 점 (늘 같은 자리)
     for i in 0..SAND_DOT_COUNT {
         let x = hash01(i * 3) * VIRTUAL_WIDTH;
@@ -166,7 +162,7 @@ fn draw_ground(art: &SkyArt, look: &SkyLook, ground_y: f32) {
     // 거품 아래로 얇게 번지는 물
     let surge = (time() * 0.9).sin() * 5.0;
     let wash = night(WASH, d * FOAM_NIGHT_AMOUNT);
-    canvas.vgradient(0.0, VIRTUAL_WIDTH, &[(ground_y - 2.0 + surge, wash), (ground_y + 14.0 + surge, Color { a: 0.0, ..wash })]);
+    canvas.vgradient(0.0, places::BEACH_END, &[(ground_y - 2.0 + surge, wash), (ground_y + 14.0 + surge, Color { a: 0.0, ..wash })]);
     draw_foam(ground_y, d);
 }
 
@@ -191,17 +187,27 @@ fn draw_wood_box(r: Rect, d: f32) {
     draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, night(WOOD_EDGE, amount));
 }
 
-/// 하늘 + 바다 + 모래. 타이틀·고르기·플레이가 모두 같은 하늘을 쓴다.
-fn draw_background(assets: &Assets, look: &SkyLook, ground_y: f32) {
-    sky::draw_sky(&mut GpuCanvas { art: &assets.sky }, look);
-    draw_ground(&assets.sky, look, ground_y);
+/// 화면에 고정된 하늘·바다 → 카메라를 걸고 맵의 땅. 타이틀·고르기·플레이가 모두 같은 하늘을 쓴다.
+/// 끝나면 카메라가 `camera_x`에 걸려 있다.
+fn draw_background(assets: &Assets, look: &SkyLook, ground_y: f32, camera_x: f32) {
+    let mut canvas = GpuCanvas { art: &assets.sky };
+    sky::draw_sky(&mut canvas, look);
+    if places::sea_visible(camera_x) {
+        sky::draw_sea(&mut canvas, look, ground_y);
+    }
+    Letterbox::current().look_at(camera_x);
+    places::draw_ground_band(look, ground_y, camera_x);
+    if camera_x < places::BEACH_END {
+        draw_beach(&assets.sky, look, ground_y);
+    }
+    places::draw_land(&assets.sky, look, ground_y, camera_x);
 }
 
 // ---- 타이틀 ----
 
 /// 타이틀. `version`이 있으면(웹 배포판) 오른쪽 아래 구석에 작게 보여 준다 (US-031).
 pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32, version: Option<&str>) {
-    draw_background(assets, &SkyLook::menu(time()), ground_y);
+    draw_background(assets, &SkyLook::menu(time()), ground_y, 0.0);
     for (i, kind) in CharacterKind::ALL.into_iter().enumerate() {
         let pose = sprites::pose(Motion::Idle, time() + i as f32 * 0.37, false);
         draw_character(assets.character(kind), vec2(CARD_CENTERS_X[i], ground_y + 4.0), height_with_antenna(kind, 150.0), Facing::Right, pose, WHITE);
@@ -224,7 +230,7 @@ pub fn draw_title(assets: &Assets, text: &TextPainter, ground_y: f32, version: O
 // ---- 캐릭터 고르기 ----
 
 pub fn draw_select(assets: &Assets, text: &TextPainter, ground_y: f32, picked: usize) {
-    draw_background(assets, &SkyLook::menu(time()), ground_y);
+    draw_background(assets, &SkyLook::menu(time()), ground_y, 0.0);
     text.centered("캐릭터를 골라요", VIRTUAL_WIDTH / 2.0, SELECT_TITLE_Y, 56.0, TEXT_COLOR);
 
     for (i, kind) in CharacterKind::ALL.into_iter().enumerate() {
@@ -258,10 +264,10 @@ pub fn draw_select(assets: &Assets, text: &TextPainter, ground_y: f32, picked: u
 
 // ---- 플레이 ----
 
-/// 그림을 그릴 발 x: 충돌 네모 가운데지만, 그림(옆으로 뻗은 팔 포함)이 화면 밖으로
-/// 나가지 않게 화면 안으로 당긴다 (BUG-001). 규칙(충돌 네모)은 그대로다.
-fn feet_x_on_screen(center_x: f32, half_width: f32) -> f32 {
-    center_x.clamp(half_width, (VIRTUAL_WIDTH - half_width).max(half_width))
+/// 그림을 그릴 발 x: 충돌 네모 가운데지만, 그림(옆으로 뻗은 팔 포함)이 맵 밖으로
+/// 나가지 않게 맵 안으로 당긴다 (BUG-001). 규칙(충돌 네모)은 그대로다.
+fn feet_x_on_map(center_x: f32, half_width: f32, map_width: f32) -> f32 {
+    center_x.clamp(half_width, (map_width - half_width).max(half_width))
 }
 
 /// 좀비 카스테라: 플레이어 쪽을 보고, 걸을 때 통통, 떠오르면 살랑살랑, 맞으면 번쩍.
@@ -278,7 +284,7 @@ fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
             ZombieState::Floating => sprites::float_pose(t),
         };
         let facing = if player_x < r.center().x { Facing::Left } else { Facing::Right };
-        let feet = vec2(feet_x_on_screen(r.center().x, half), r.y + r.h);
+        let feet = vec2(feet_x_on_map(r.center().x, half, game.world.width), r.y + r.h);
         draw_character(&assets.zombie, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, tint);
         if zombie.is_flashing() {
             draw_character(&assets.zombie_flash, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, ZOMBIE_FLASH);
@@ -307,12 +313,51 @@ fn draw_skeletons(assets: &Assets, game: &Game, tint: Color) {
         };
         // `draw_character`는 Left일 때 뒤집으니, 왼쪽을 보는 그림은 반대로 준다.
         let facing = if player_on_left != sprites::skeleton_art_faces_left(skeleton.stage) { Facing::Left } else { Facing::Right };
-        let feet = vec2(feet_x_on_screen(r.center().x, max_half_width(picture, height)), r.y + r.h);
+        let feet = vec2(feet_x_on_map(r.center().x, max_half_width(picture, height), game.world.width), r.y + r.h);
         draw_character(picture, feet, height, facing, pose, tint);
         if skeleton.is_flashing() {
             draw_character(flash, feet, height, facing, pose, ZOMBIE_FLASH);
         }
     }
+}
+
+/// 멈춘 일반 시민이 `t`초에 보는 쪽: 왼쪽·오른쪽을 번갈아 본다.
+fn looking_around(t: f32) -> Facing {
+    if (t / CITIZEN_LOOK_SECONDS) as u32 % 2 == 0 {
+        Facing::Left
+    } else {
+        Facing::Right
+    }
+}
+
+/// 미스·시민: 네모 아래 끝을 발로 두고 숨쉬기만 한다.
+fn draw_miss_like(texture: &Texture2D, r: Rect, t: f32, tint: Color) {
+    let feet = vec2(r.center().x, r.y + r.h);
+    draw_character(texture, feet, r.h * MISS_SPRITE_SCALE, Facing::Right, sprites::pose(Motion::Idle, t, false), tint);
+}
+
+/// 하늘에서 떨어지는 무기와 놓인 무기. 놓이면 뒤에 빛이 깜빡여서 밤에도 찾기 쉽다.
+fn draw_dropped_weapons(assets: &Assets, game: &Game) {
+    for w in &game.weapons.dropped {
+        let c = w.rect.center();
+        if !w.is_falling() {
+            let glow = Color { a: WEAPON_GLOW.a * (0.7 + 0.3 * (time() * 4.0).sin()), ..WEAPON_GLOW };
+            draw_circle(c.x, c.y, WEAPON_GLOW_RADIUS, glow);
+        }
+        if let Some(texture) = assets.m6.weapon(w.kind) {
+            let size = fit_size(texture, w.rect.w.max(w.rect.h));
+            draw_texture_ex(texture, c.x - size.x / 2.0, c.y - size.y / 2.0, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+        }
+    }
+}
+
+/// 손에 든 무기. 맨손이면 아무것도 없고, 왼쪽을 보면 함께 뒤집힌다.
+fn draw_held_weapon(assets: &Assets, weapon: Weapon, feet: Vec2, facing: Facing, tint: Color) {
+    let Some(texture) = assets.m6.weapon(weapon) else { return };
+    let side = if facing == Facing::Right { 1.0 } else { -1.0 };
+    let size = fit_size(texture, HELD_WEAPON_SIZE);
+    let c = feet + vec2(side * HELD_WEAPON_FORWARD, -HELD_WEAPON_UP);
+    draw_texture_ex(texture, c.x - size.x / 2.0, c.y - size.y / 2.0, tint, DrawTextureParams { dest_size: Some(size), flip_x: flip_weapon(weapon, facing), ..Default::default() });
 }
 
 /// `touch_mode`면 키보드 안내 글자는 숨긴다 (터치 조이스틱·버튼은 main이 위에 그린다).
@@ -327,9 +372,16 @@ pub fn draw_play(
     touch_mode: bool,
 ) {
     let d = game.clock.sky_darkness();
-    draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y);
-    for b in &game.world.obstacles {
-        draw_wood_box(*b, d);
+    // 여기부터 맵 좌표: 아래 `look_at(0.0)`까지는 카메라를 따라 움직인다.
+    draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y, game.camera_left());
+    places::draw_structures(&game.world, d);
+    // 미스 → 가리는 앞그림 → 상자. 상자가 먼저면 집 앞 상자가 집에 묻힌다.
+    if let Some(miss) = game.miss.as_ref().filter(|m| m.is_hiding()) {
+        draw_miss_like(&assets.m6.miss, miss.rect(&game.world), time(), WHITE);
+    }
+    places::draw_covers(&game.world, d);
+    for b in game.world.boxes() {
+        draw_wood_box(b, d);
     }
     draw_coins(&game.coins, d, time());
 
@@ -338,8 +390,23 @@ pub fn draw_play(
     let r = player.rect();
     let height = height_with_antenna(player.kind, PLAY_SPRITE_HEIGHT);
     let half = max_half_width(texture, height);
-    let feet = vec2(feet_x_on_screen(r.x + r.w / 2.0, half), r.y + r.h);
+    let feet = vec2(feet_x_on_map(r.x + r.w / 2.0, half, game.world.width), r.y + r.h);
     let tint = mix(WHITE, CHARACTER_NIGHT_TINT, d);
+    for (i, citizen) in game.citizens.list.iter().enumerate() {
+        if citizen.is_standing() {
+            draw_miss_like(&assets.m6.miss_citizen_bomb, citizen.rect, time() + i as f32 * 0.37, tint);
+        }
+    }
+    for (i, walker) in game.citizens.walkers.iter().enumerate() {
+        let r = walker.rect;
+        let motion = if walker.is_walking() { Motion::Walk } else { Motion::Idle };
+        // 쓰러진 화면에서는 시간을 멈춰서 숨쉬기 흔들림도 멈춘다
+        let t = if down.is_some() { 0.0 } else { time() + i as f32 * 0.37 };
+        let pose = sprites::pose(motion, t, false);
+        let facing = if !walker.is_walking() && down.is_none() { looking_around(t) } else { walker.facing };
+        draw_character(&assets.m6.miss, vec2(r.center().x, r.y + r.h), r.h * MISS_SPRITE_SCALE, facing, pose, tint);
+    }
+    draw_dropped_weapons(assets, game);
     draw_zombies(assets, game, tint);
     draw_skeletons(assets, game, tint);
     if let Some(down) = down {
@@ -349,15 +416,25 @@ pub fn draw_play(
         let player_tint = Color { a: if blink { HURT_BLINK_ALPHA } else { 1.0 }, ..tint };
         let pose = sprites::pose(player.motion, time(), player.vel.y < 0.0);
         draw_character(texture, feet, height, player.facing, pose, player_tint);
+        if !effects.swinging_blade() {
+            draw_held_weapon(assets, game.weapons.held(), feet, player.facing, player_tint);
+        }
     }
 
     game.combat.skeletons.projectiles.iter().for_each(draw_projectile);
-    effects.draw(text, r, player.facing);
-    draw_hud(text, &game.clock, game.wallet.coins(), fast_forward);
+    effects.draw(text, r, player.facing, &assets.m6);
+
+    // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다.
+    Letterbox::current().look_at(0.0);
+    effects.draw_on_screen(text);
+    draw_hud(text, &game.clock, game.wallet.coins(), fast_forward, game.place_name());
     draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
     draw_level(text, game.combat.level, game.combat.experience);
+    let owned = game.weapons.owned();
+    draw_weapons(&assets.m6, &owned, game.weapons.held());
     if !touch_mode && down.is_none() {
-        text.centered("화살표: 걷기   Space: 점프   X: 공격   Esc: 캐릭터 고르기", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+        let hint = if owned.is_empty() { "화살표: 걷기   Space: 점프   X: 공격   Esc: 캐릭터 고르기" } else { "화살표: 걷기   Space: 점프   X: 공격   Z: 바꾸기   Esc: 고르기" };
+        text.centered(hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
     if let Some(down) = down {
         draw_down_panel(text, down);
@@ -395,11 +472,18 @@ mod tests {
     }
 
     #[test]
-    fn sprite_is_pulled_inside_screen_edges() {
-        // BUG-001: 반폭 40인 그림은 발 x가 40 ~ 920 안에 있어야 잘리지 않는다.
-        assert_eq!(feet_x_on_screen(24.0, 40.0), 40.0);
-        assert_eq!(feet_x_on_screen(VIRTUAL_WIDTH - 24.0, 40.0), VIRTUAL_WIDTH - 40.0);
-        assert_eq!(feet_x_on_screen(300.0, 40.0), 300.0);
+    fn sprite_is_pulled_inside_map_edges() {
+        // BUG-001: 반폭 40인 그림은 발 x가 맵 양 끝에서 40 안쪽에 있어야 잘리지 않는다.
+        assert_eq!(feet_x_on_map(24.0, 40.0, 3840.0), 40.0);
+        assert_eq!(feet_x_on_map(3840.0 - 24.0, 40.0, 3840.0), 3840.0 - 40.0);
+        assert_eq!(feet_x_on_map(2000.0, 40.0, 3840.0), 2000.0);
+    }
+
+    #[test]
+    fn stopped_citizen_looks_both_ways() {
+        assert_eq!(looking_around(0.0), Facing::Left);
+        assert_eq!(looking_around(CITIZEN_LOOK_SECONDS), Facing::Right);
+        assert_eq!(looking_around(CITIZEN_LOOK_SECONDS * 2.0), Facing::Left);
     }
 
     #[test]

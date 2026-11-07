@@ -3,6 +3,7 @@
 
 use crate::logic::player::{Facing, Motion};
 use crate::logic::skeleton::{Projectile, ProjectileKind, SkeletonStage};
+use crate::logic::weapon::Weapon;
 use macroquad::prelude::*;
 use std::f32::consts::TAU;
 
@@ -128,6 +129,17 @@ pub fn draw_projectile(shot: &Projectile) {
 pub fn max_half_width(texture: &Texture2D, height: f32) -> f32 {
     let width = height * texture.width() / texture.height();
     width / 2.0 * (1.0 + IDLE_STRETCH) + height * WALK_TILT.sin()
+}
+
+/// 비율을 지키면서 긴 쪽이 `size`가 되는 크기 (무기 그림은 가로세로가 제각각이다).
+pub fn fit_size(texture: &Texture2D, size: f32) -> Vec2 {
+    let (w, h) = (texture.width(), texture.height());
+    vec2(w, h) * size / w.max(h)
+}
+
+/// 무기를 든 쪽으로 머리·총구가 가게 뒤집을지. 도끼 그림만 왼쪽을 본다.
+pub fn flip_weapon(kind: Weapon, facing: Facing) -> bool {
+    (facing == Facing::Left) != (kind == Weapon::Axe)
 }
 
 /// `feet`: 발 가운데 위치. `height`: 기본 그림 높이 (원화 비율대로 가로가 정해진다).

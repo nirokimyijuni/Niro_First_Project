@@ -15,8 +15,8 @@ use macroquad::prelude::*;
 use view::assets::Assets;
 use view::effects::Effects;
 use view::gameover::{DownScreen, RETRY_BUTTON};
-use view::input::{any_key_pressed, fast_forward_pressed, fingers, menu_input, merge_touch, player_input, MenuInput};
-use view::touch::{draw_rotate_hint, draw_touch_controls, next_touch_mode, show_rotate_hint, TouchControls, TouchFrame, PLAY_BUTTONS};
+use view::input::{any_key_pressed, fast_forward_pressed, fingers, menu_input, merge_touch, player_input, switch_weapon_pressed, MenuInput};
+use view::touch::{draw_rotate_hint, draw_touch_controls, next_touch_mode, play_buttons, show_rotate_hint, TouchControls, TouchFrame};
 use view::screen::Letterbox;
 use view::screens;
 use view::text::TextPainter;
@@ -164,7 +164,8 @@ async fn main() {
                 }
                 Scene::Play { game, fast_forward, effects, down } => {
                     // 플레이 중 터치는 조이스틱·버튼으로만. 쓰러진 화면의 터치는 위 idle이 메뉴 탭으로 준다.
-                    let touched = if down.is_none() { touch.update(&fingers, &PLAY_BUTTONS, touch_mode) } else { TouchFrame::default() };
+                    let buttons = play_buttons(!game.weapons.owned().is_empty());
+                    let touched = if down.is_none() { touch.update(&fingers, buttons, touch_mode) } else { TouchFrame::default() };
                     let retry = down.as_mut().is_some_and(|screen| {
                         screen.seconds += dt;
                         screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
@@ -176,9 +177,12 @@ async fn main() {
                         if fast_forward_pressed() {
                             *fast_forward = !*fast_forward;
                         }
+                        if down.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
+                            game.switch_weapon();
+                        }
                         let input = merge_touch(player_input(), &touched);
                         if input.attack_pressed && down.is_none() {
-                            effects.start_swing();
+                            effects.start_swing(game.weapons.held());
                         }
                         let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
                         let events = if *fast_forward {
@@ -200,6 +204,9 @@ async fn main() {
                                 }
                                 GameEvent::Combat(combat) => effects.on_combat(combat),
                                 GameEvent::NightStarted | GameEvent::DayStarted { .. } => {}
+                                GameEvent::MissFound { at } => effects.on_miss_found(at),
+                                GameEvent::WeaponPicked { kind } => effects.show_message(kind.picked_text()),
+                                GameEvent::CitizenPopped { at } => effects.on_citizen_popped(at),
                             }
                         }
                         effects.update(dt);
@@ -221,7 +228,7 @@ async fn main() {
             Scene::Play { game, fast_forward, effects, down } => {
                 screens::draw_play(&assets, &text, game, *fast_forward, effects, down.as_ref(), touch_mode);
                 if touch_mode && down.is_none() {
-                    draw_touch_controls(&text, &touch, &PLAY_BUTTONS);
+                    draw_touch_controls(&text, &touch, play_buttons(!game.weapons.owned().is_empty()));
                 }
             }
         }
@@ -361,7 +368,7 @@ mod tests {
             assert_eq!(combat_only(events), combat_only(events_fast));
         }
         assert_eq!(normal.combat.skeletons.list[0].pos, fast.combat.skeletons.list[0].pos);
-        assert_eq!(normal.combat.skeletons.projectiles.len(), 1);
+        assert_eq!(normal.combat.skeletons.projectiles.len(), 2);
         assert_eq!(normal.combat.skeletons.projectiles[0].pos, fast.combat.skeletons.projectiles[0].pos);
     }
 

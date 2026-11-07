@@ -3,11 +3,14 @@
 
 
 use super::character::CharacterKind;
+use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
 use super::combat::{Combat, CombatEvent};
+use super::miss::Miss;
 use super::player::{Player, PlayerInput};
-use super::world::World;
+use super::weapon::{Weapon, Weapons};
+use super::world::{really_overlaps, World};
 use crate::config::{PLAYER_HEIGHT, PLAYER_SPAWN_X};
 use macroquad::math::Vec2;
 
@@ -22,6 +25,12 @@ pub enum GameEvent {
     CoinsPicked { count: u32 },
     /// 몬스터·체력·레벨에 생긴 일.
     Combat(CombatEvent),
+    /// 미스를 찾았다 (`MISS_FOUND_TEXT`). `at`은 미스가 있던 몸 가운데. 무기가 떨어지기 시작한다.
+    MissFound { at: Vec2 },
+    /// 새 무기를 주웠다 (`Weapon::picked_text`). 이미 가진 무기를 또 주우면 오지 않는다.
+    WeaponPicked { kind: Weapon },
+    /// 폭발형 시민이 터졌다 (`CITIZEN_POP_TEXT`). `at`은 시민 몸 가운데.
+    CitizenPopped { at: Vec2 },
 }
 
 pub struct Game {
@@ -31,13 +40,17 @@ pub struct Game {
     pub coins: Coins,
     pub wallet: Wallet,
     pub combat: Combat,
+    /// 미스. 긴 맵에만 있고, M1 연습 맵은 None이다.
+    pub miss: Option<Miss>,
+    pub weapons: Weapons,
+    pub citizens: Citizens,
 }
 
 impl Game {
-    /// 고른 캐릭터로 새 게임. 1일째 낮, 코인 0개, 상자마다 코인 하나.
-    /// `seed`가 같으면 상자 배치와 나오는 몬스터, 나오는 쪽, 날아오르는 좀비가 늘 똑같다.
+    /// 고른 캐릭터로 새 게임. 1일째 낮, 코인 0개, 상자마다 코인 하나, 맨손.
+    /// `seed`가 같으면 상자 배치, 미스 자리, 나오는 몬스터, 나오는 쪽, 날아오르는 좀비가 늘 똑같다.
     pub fn new(kind: CharacterKind, seed: u32) -> Game {
-        Game::on_world(kind, seed, World::with_random_boxes(seed))
+        Game::on_world(kind, seed, World::long_map(seed))
     }
 
     /// 정해진 맵으로 새 게임. 테스트는 `World::m1()`을 넣어 상자 자리를 고정한다.
@@ -46,6 +59,9 @@ impl Game {
         Game {
             player: Player::new(kind, spawn),
             coins: Coins::on_boxes(&world),
+            miss: world.is_long_map().then(|| Miss::new(seed)),
+            weapons: Weapons::new(),
+            citizens: Citizens::on_world(&world, seed),
             world,
             clock: Clock::new(),
             wallet: Wallet::new(),
@@ -80,23 +96,77 @@ impl Game {
         events
     }
 
-    /// 공격 버튼을 처리하고 몬스터 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
+    /// 공격 버튼을 처리하고 몬스터·미스·무기·시민 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
     /// 이번 프레임의 낮/밤을 본다. 빨리감기여도 `dt`는 진짜 시간이다 (D13: 빨라지는 건 시계·코인뿐).
     pub fn update_combat(&mut self, input: &PlayerInput, dt: f32, events: &mut Vec<GameEvent>) {
         let player_rect = self.player.rect();
         if input.attack_pressed {
-            let hits = self.combat.player_attack(player_rect, self.player.facing);
+            let held = self.weapons.held();
+            let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), held.range());
             events.extend(hits.into_iter().map(GameEvent::Combat));
         }
         let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
         events.extend(happened.into_iter().map(GameEvent::Combat));
+        if !self.combat.health.is_down() {
+            self.update_miss_and_weapons(dt, events);
+            self.update_citizens(dt, events);
+        }
+        // 펑으로도 쓰러질 수 있어서 시민을 움직인 뒤에 다시 본다.
+        if self.combat.health.is_down() {
+            self.citizens.stop_walkers();
+        } else {
+            self.citizens.walk(dt, &self.world);
+        }
+    }
+
+    /// 카메라 왼쪽 끝 x. 로건은 그릴 때 월드 x에서 이 값을 뺀다.
+    pub fn camera_left(&self) -> f32 {
+        self.world.camera_left(self.player.rect().center().x)
+    }
+
+    /// 주인공이 있는 장소 이름.
+    pub fn place_name(&self) -> &'static str {
+        self.world.place_name_at(self.player.rect().center().x)
+    }
+
+    /// Z 키나 바꾸기 버튼을 "새로" 눌렀을 때 부른다 (US-053).
+    pub fn switch_weapon(&mut self) {
+        self.weapons.switch();
+    }
+
+    fn update_miss_and_weapons(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
+        let player_rect = self.player.rect();
+        if let Some(miss) = &mut self.miss {
+            miss.move_on_new_morning(self.clock.day_number());
+            if miss.is_hiding() && really_overlaps(miss.rect(&self.world), player_rect) {
+                let at = miss.rect(&self.world).center();
+                miss.get_found(self.clock.day_number());
+                events.push(GameEvent::MissFound { at });
+                self.weapons.drop_around(at.x, &self.world);
+            }
+        }
+        let picked = self.weapons.update(dt, player_rect);
+        events.extend(picked.into_iter().map(|kind| GameEvent::WeaponPicked { kind }));
+    }
+
+    fn update_citizens(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
+        let player_rect = self.player.rect();
+        for citizen in &mut self.citizens.list {
+            let touched = really_overlaps(citizen.rect, player_rect) || self.combat.any_monster_touches(citizen.rect);
+            if citizen.update(dt, touched) {
+                let at = citizen.rect.center();
+                events.push(GameEvent::CitizenPopped { at });
+                let happened = self.combat.citizen_blast(at, player_rect);
+                events.extend(happened.into_iter().map(GameEvent::Combat));
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{COIN_RESPAWN_SECONDS, DAY_SECONDS, GROUND_Y, WORLD_WIDTH};
+    use crate::config::{COIN_RESPAWN_SECONDS, DAY_SECONDS, GROUND_Y, NIGHT_SECONDS, WORLD_WIDTH};
     use macroquad::math::Rect;
 
     const FRAME: f32 = 1.0 / 60.0;
@@ -186,7 +256,7 @@ mod tests {
         let events = g.update(&no_input(), DAY_SECONDS);
         assert!(events.contains(&GameEvent::NightStarted));
         assert!(g.clock.is_night());
-        let events = g.update(&no_input(), DAY_SECONDS);
+        let events = g.update(&no_input(), NIGHT_SECONDS);
         assert!(events.contains(&GameEvent::DayStarted { day_number: 2 }));
         assert_eq!(g.clock.nights_survived(), 1);
     }

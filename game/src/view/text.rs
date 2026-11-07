@@ -3,6 +3,13 @@
 //! 모든 글자에 진한 테두리를 둘러서 하늘·바다·모래 어디서나 또렷하게 보이게 한다.
 
 use macroquad::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+thread_local! {
+    /// 이미 쓴 (글자, 글꼴 크기, 화면 배율). [`TextPainter::flush_before_new_glyphs`]만 쓴다.
+    static SEEN_GLYPHS: RefCell<HashSet<(char, u16, u32)>> = RefCell::new(HashSet::new());
+}
 
 /// 글자 테두리 색 (진한 남색)
 pub const OUTLINE_COLOR: Color = Color::new(0.13, 0.16, 0.36, 1.0);
@@ -48,8 +55,27 @@ impl<'a> TextPainter<'a> {
         }
     }
 
+    /// BUG-013: 새 글자로 글꼴 그림(아틀라스)이 꽉 차면 macroquad가 더 큰 그림을 만들면서 옛 그림을 바로 지운다.
+    /// 이번 프레임에 쌓아 둔 글자는 아직 옛 그림을 가리켜서 까만 네모가 된다.
+    /// 그래서 처음 쓰는 글자가 있으면, 쌓인 그리기를 먼저 끝내고 넘어간다.
+    fn flush_before_new_glyphs(&self, text: &str, font_size: u16) {
+        let dpi = screen_dpi_scale();
+        let is_new = SEEN_GLYPHS.with_borrow_mut(|seen| {
+            // 모두 넣어야 해서 `any`로 줄이지 않는다
+            text.chars().fold(false, |new, c| seen.insert((c, font_size, dpi.to_bits())) || new)
+        });
+        if is_new {
+            // miniquad는 지운 그림을 "지금 묶인 그림"으로 기억했다가 다시 묶으려 한다 (콘솔의 glBindTexture 오류).
+            // 안 보이는 네모를 마지막에 그려서 글꼴 그림이 묶인 채로 지워지지 않게 한다.
+            draw_rectangle(0.0, 0.0, 0.0, 0.0, BLANK);
+            // 안전: macroquad 창이 열린 뒤 그리는 중에만 불린다.
+            unsafe { get_internal_gl() }.flush();
+        }
+    }
+
     pub fn width(&self, text: &str, size: f32) -> f32 {
         let p = self.params(size, WHITE);
+        self.flush_before_new_glyphs(text, p.font_size);
         measure_text(text, p.font, p.font_size, p.font_scale).width
     }
 

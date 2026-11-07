@@ -8,6 +8,7 @@ use super::sky::SkyArt;
 use super::title::TitleArt;
 use crate::logic::character::CharacterKind;
 use crate::logic::skeleton::SkeletonStage;
+use crate::logic::weapon::Weapon;
 use macroquad::prelude::*;
 use std::collections::VecDeque;
 
@@ -18,6 +19,12 @@ pub const ZOMBIE_PATH: &str = "assets/sprites/zombie-round.png";
 const ZOMBIE_EMPTY_ROWS_BELOW: u16 = 1;
 /// 스켈레톤 그림 (D23, D35). `SkeletonStage` 순서 (일반, 절반, 완전체). 크기가 제각각이라 여백을 잘라 내고 쓴다.
 pub const SKELETON_PATHS: [&str; 3] = ["assets/sprites/skeleton-normal.png", "assets/sprites/skeleton-half.png", "assets/sprites/skeleton-full.png"];
+/// M6 그림 (헤일리, `art/spritecook/`).
+pub const MISS_PATH: &str = "assets/sprites/miss.png";
+pub const MISS_CITIZEN_BOMB_PATH: &str = "assets/sprites/miss-citizen-bomb.png";
+pub const WEAPON_SWORD_PATH: &str = "assets/sprites/weapon-sword.png";
+pub const WEAPON_AXE_PATH: &str = "assets/sprites/weapon-axe.png";
+pub const WEAPON_GUN_PATH: &str = "assets/sprites/weapon-gun.png";
 
 /// 원화에서 캐릭터별로 잘라 낼 네모 (x, y, 가로, 세로), 원화 픽셀 기준.
 /// 위쪽 손글씨 이름은 빼고, 머리 위 안테나(T자 선, docs/04-scenario.md)와 모자·머리·왕관은 넣었다.
@@ -104,6 +111,45 @@ pub struct Assets {
     skeletons: Vec<(Texture2D, Texture2D)>,
     /// 코드로 만든 하늘 그림 (해·달·구름·빛). 시작할 때 한 번만 만든다.
     pub sky: SkyArt,
+    pub m6: M6Art,
+}
+
+/// 미스·시민·무기 그림. 둘레 여백을 잘라서 그림 아래 끝 = 발이다.
+pub struct M6Art {
+    pub miss: Texture2D,
+    pub miss_citizen_bomb: Texture2D,
+    pub weapon_sword: Texture2D,
+    pub weapon_axe: Texture2D,
+    pub weapon_gun: Texture2D,
+}
+
+impl M6Art {
+    /// 무기 그림. 맨손은 없다.
+    pub fn weapon(&self, kind: Weapon) -> Option<&Texture2D> {
+        match kind {
+            Weapon::Hands => None,
+            Weapon::Sword => Some(&self.weapon_sword),
+            Weapon::Axe => Some(&self.weapon_axe),
+            Weapon::Gun => Some(&self.weapon_gun),
+        }
+    }
+
+    async fn load() -> M6Art {
+        // 미스·시민은 손그림이라 부드럽게, 무기는 픽셀 그림이라 또렷하게 키운다.
+        async fn load(path: &str, filter: FilterMode) -> Texture2D {
+            let bytes = load_file(path).await.expect("M6 그림을 불러오지 못했어요");
+            let texture = Texture2D::from_image(&cut_to_ink(&bytes));
+            texture.set_filter(filter);
+            texture
+        }
+        M6Art {
+            miss: load(MISS_PATH, FilterMode::Linear).await,
+            miss_citizen_bomb: load(MISS_CITIZEN_BOMB_PATH, FilterMode::Linear).await,
+            weapon_sword: load(WEAPON_SWORD_PATH, FilterMode::Nearest).await,
+            weapon_axe: load(WEAPON_AXE_PATH, FilterMode::Nearest).await,
+            weapon_gun: load(WEAPON_GUN_PATH, FilterMode::Nearest).await,
+        }
+    }
 }
 
 impl Assets {
@@ -135,10 +181,10 @@ impl Assets {
         let mut skeletons = Vec::new();
         for path in SKELETON_PATHS {
             let bytes = load_file(path).await.expect("스켈레톤 그림을 불러오지 못했어요");
-            let image = cut_skeleton(&bytes);
+            let image = cut_to_ink(&bytes);
             skeletons.push((pixel_texture(&image), pixel_texture(&white_silhouette(&image))));
         }
-        Assets { font, title, characters, zombie, zombie_flash, skeletons, sky: SkyArt::new() }
+        Assets { font, title, characters, zombie, zombie_flash, skeletons, sky: SkyArt::new(), m6: M6Art::load().await }
     }
 
     pub fn character(&self, kind: CharacterKind) -> &Texture2D {
@@ -159,9 +205,9 @@ fn cut_zombie(png: &[u8]) -> Image {
     image.sub_image(Rect::new(0.0, 0.0, image.width as f32, (image.height - ZOMBIE_EMPTY_ROWS_BELOW) as f32))
 }
 
-/// 스켈레톤 PNG를 읽고 둘레의 투명 여백을 잘라 낸다 → 그림 아래 끝 = 발, 그림 키 = 몸 키.
-fn cut_skeleton(png: &[u8]) -> Image {
-    let image = Image::from_file_with_format(png, Some(ImageFormat::Png)).expect("스켈레톤 그림(PNG)을 읽지 못했어요");
+/// PNG를 읽고 둘레의 투명 여백을 잘라 낸다 → 그림 아래 끝 = 발, 그림 키 = 몸 키.
+fn cut_to_ink(png: &[u8]) -> Image {
+    let image = Image::from_file_with_format(png, Some(ImageFormat::Png)).expect("그림(PNG)을 읽지 못했어요");
     let w = image.width as usize;
     let inked = || image.get_image_data().iter().enumerate().filter(|(_, p)| p[3] > 0).map(|(i, _)| (i % w, i / w));
     let (left, right) = (inked().map(|p| p.0).min().unwrap_or(0), inked().map(|p| p.0).max().unwrap_or(0));
@@ -361,10 +407,10 @@ mod tests {
     }
 
     #[test]
-    fn skeleton_pictures_have_no_empty_edges() {
-        for path in SKELETON_PATHS {
-            let bytes = std::fs::read(format!("{}/{path}", env!("CARGO_MANIFEST_DIR"))).expect("스켈레톤 그림");
-            let img = cut_skeleton(&bytes);
+    fn cut_pictures_have_no_empty_edges() {
+        for path in SKELETON_PATHS.into_iter().chain([MISS_PATH, MISS_CITIZEN_BOMB_PATH, WEAPON_SWORD_PATH, WEAPON_AXE_PATH, WEAPON_GUN_PATH]) {
+            let bytes = std::fs::read(format!("{}/{path}", env!("CARGO_MANIFEST_DIR"))).expect("그림");
+            let img = cut_to_ink(&bytes);
             let (w, h) = (img.width as usize, img.height as usize);
             println!("{path}: {w}x{h}");
             let data = img.get_image_data();

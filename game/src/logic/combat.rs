@@ -3,12 +3,13 @@
 //! `Combat` 하나가 체력과 좀비·스켈레톤을 함께 들고 있다. 결과는 `CombatEvent`로 돌려주고,
 //! 화면(로건)이 그걸 보고 "쓰러졌어요", "펑!" 같은 표시와 소리를 낸다.
 
-use super::monster::{pick_spawn_x, SeededRandom, Zombie, Zombies};
+use super::monster::{pick_left_side, spawn_x_on_side, SeededRandom, Zombie, Zombies};
 use super::player::Facing;
 use super::skeleton::{ProjectileKind, Skeleton, SkeletonStage, Skeletons};
-use super::world::World;
+use super::world::{really_overlaps, World};
 use crate::config::{
-    EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
+    CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
+    MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
     PLAYER_ATTACK_RANGE, PLAYER_HP_PER_LEVEL, PLAYER_HURT_INVINCIBLE_SECONDS, PLAYER_START_HP,
     SKELETON_SPAWN_CHANCE, SKELETON_WIDTH, ZOMBIE_ATTACK, ZOMBIE_FLOAT_CHANCE, ZOMBIE_MAX_ON_SCREEN,
     ZOMBIE_SPAWN_SECONDS, ZOMBIE_WIDTH,
@@ -46,7 +47,7 @@ pub enum CombatEvent {
     PlayerHurt { amount: u32, hp_left: u32 },
     /// 체력이 0이 되어 쓰러졌다 (게임오버). 한 판에 한 번만 온다.
     PlayerDown,
-    /// 아침이 와서 체력이 다시 찼다 (D27).
+    /// 아침이 오거나 (D27) 레벨이 올라서 체력이 다시 찼다.
     HealthRefilled,
 }
 
@@ -96,13 +97,18 @@ impl Default for PlayerHealth {
     }
 }
 
-/// 플레이어 앞쪽의 공격이 닿는 네모. 높이는 플레이어 키만큼.
+/// 플레이어 앞쪽의 맨손 공격이 닿는 네모. 높이는 플레이어 키만큼.
 pub fn attack_box(player_rect: Rect, facing: Facing) -> Rect {
+    attack_box_with_range(player_rect, facing, PLAYER_ATTACK_RANGE)
+}
+
+/// 플레이어 앞쪽 `range`까지 닿는 네모 (US-053: 무기마다 다르다).
+pub fn attack_box_with_range(player_rect: Rect, facing: Facing, range: f32) -> Rect {
     let x = match facing {
         Facing::Right => player_rect.x + player_rect.w,
-        Facing::Left => player_rect.x - PLAYER_ATTACK_RANGE,
+        Facing::Left => player_rect.x - range,
     };
-    Rect::new(x, player_rect.y, PLAYER_ATTACK_RANGE, player_rect.h)
+    Rect::new(x, player_rect.y, range, player_rect.h)
 }
 
 /// 몸이 겹쳐 있어도 등 뒤는 맞지 않게, 가운데가 바라보는 쪽에 있는지 본다.
@@ -114,8 +120,8 @@ fn is_in_front(player_rect: Rect, facing: Facing, target: Rect) -> bool {
 }
 
 /// 공격 범위 안이고 바라보는 쪽에 있으면 맞는다.
-fn is_reached(player_rect: Rect, facing: Facing, target: Rect) -> bool {
-    attack_box(player_rect, facing).overlaps(&target) && is_in_front(player_rect, facing, target)
+fn is_reached(player_rect: Rect, facing: Facing, range: f32, target: Rect) -> bool {
+    attack_box_with_range(player_rect, facing, range).overlaps(&target) && is_in_front(player_rect, facing, target)
 }
 
 /// 한 판의 싸움 상태. 새 게임을 하면 새로 만든다.
@@ -182,11 +188,18 @@ impl Combat {
             }
             time_left -= step;
         }
+        self.forget_far_monsters(player_rect.center().x);
         events
     }
 
-    /// 공격 버튼을 "새로" 눌렀을 때 한 번 부른다. 닿는 곳의 몬스터가 모두 체력 1씩 줄어든다.
-    pub fn player_attack(&mut self, player_rect: Rect, facing: Facing) -> Vec<CombatEvent> {
+    /// 임시-3: 뒤에 남은 몬스터가 마릿수를 채우지 않게 조용히 치운다. 경험치는 없다.
+    fn forget_far_monsters(&mut self, player_x: f32) {
+        self.zombies.list.retain(|z| (z.rect().center().x - player_x).abs() <= FORGET_DISTANCE);
+        self.skeletons.forget_far_away(player_x);
+    }
+
+    /// 공격 버튼을 "새로" 눌렀을 때 한 번 부른다. `range` 안의 몬스터가 모두 체력 `attack`씩 줄어든다.
+    pub fn attack_with(&mut self, player_rect: Rect, facing: Facing, attack: u32, range: f32) -> Vec<CombatEvent> {
         let mut events = Vec::new();
         if self.health.is_down() {
             return events;
@@ -194,10 +207,10 @@ impl Combat {
         let mut defeated = 0;
         self.zombies.list.retain_mut(|zombie| {
             let body = zombie.rect();
-            if !is_reached(player_rect, facing, body) {
+            if !is_reached(player_rect, facing, range, body) {
                 return true;
             }
-            zombie.take_hit();
+            zombie.take_hit(attack);
             if zombie.hp == 0 {
                 events.push(CombatEvent::ZombieDefeated { at: body.center() });
                 defeated += 1;
@@ -207,10 +220,10 @@ impl Combat {
             true
         });
         self.skeletons.list.retain_mut(|skeleton| {
-            if !is_reached(player_rect, facing, skeleton.rect()) {
+            if !is_reached(player_rect, facing, range, skeleton.rect()) {
                 return true;
             }
-            events.push(skeleton.take_hit());
+            events.push(skeleton.take_hit(attack));
             if skeleton.hp == 0 {
                 defeated += 1;
             }
@@ -220,28 +233,67 @@ impl Combat {
         events
     }
 
-    /// 레벨이 1 오른다: 최대 체력 +5 (D2), 몬스터도 같이 (D3). 지금 체력은 아침에 찬다.
+    /// 몬스터 몸이 `area`에 닿았는지. 떠오른 좀비도 몸이 닿으면 닿은 것이다 (US-054).
+    pub fn any_monster_touches(&self, area: Rect) -> bool {
+        self.zombies.list.iter().any(|z| really_overlaps(z.rect(), area))
+            || self.skeletons.list.iter().any(|s| really_overlaps(s.rect(), area))
+    }
+
+    /// 시민이 `at`에서 펑 터진다: 가까운 플레이어는 체력이 줄고, 가까운 몬스터는 쓰러진다.
+    /// 경험치는 없다 (임시-9).
+    pub fn citizen_blast(&mut self, at: Vec2, player_rect: Rect) -> Vec<CombatEvent> {
+        let mut events = Vec::new();
+        let is_near = |body: Rect| body.center().distance(at) <= CITIZEN_BLAST_RANGE;
+        if is_near(player_rect) {
+            self.hurt_player(CITIZEN_BLAST_DAMAGE, &mut events);
+        }
+        self.zombies.list.retain(|zombie| {
+            let near = is_near(zombie.rect());
+            if near {
+                events.push(CombatEvent::ZombieDefeated { at: zombie.rect().center() });
+            }
+            !near
+        });
+        self.skeletons.list.retain(|skeleton| {
+            let near = is_near(skeleton.rect());
+            if near {
+                events.push(CombatEvent::SkeletonDefeated { at: skeleton.rect().center() });
+            }
+            !near
+        });
+        events
+    }
+
+    /// 레벨이 1 오른다: 최대 체력 +5 (D2), 몬스터도 같이 (D3), 체력은 바로 다 찬다 (아이가 정함).
+    /// 쓰러진 뒤에는 오르지 않는다: 체력이 차면 일어나 버린다.
     pub fn level_up(&mut self) {
+        if self.health.is_down() {
+            return;
+        }
         self.level += 1;
         self.health.max_hp += PLAYER_HP_PER_LEVEL;
+        self.health.hp = self.health.max_hp;
     }
 
     /// 몬스터 `defeated`마리를 쓰러뜨린 경험치. 펑 터진 좀비는 여기 오지 않는다 (US-045).
     fn gain_experience(&mut self, defeated: u32, events: &mut Vec<CombatEvent>) {
+        if self.health.is_down() {
+            return;
+        }
         for _ in 0..defeated {
             self.experience += EXPERIENCE_PER_DEFEAT;
             if self.experience >= EXPERIENCE_PER_LEVEL {
                 self.experience = 0;
                 self.level_up();
                 events.push(CombatEvent::LevelUp { level: self.level });
+                events.push(CombatEvent::HealthRefilled);
             }
         }
     }
 
     /// 좀비와 스켈레톤이 나오는 시간을 함께 센다. 화면이 꽉 차 있는 동안은 세지 않는다.
     fn spawn_monster_when_ready(&mut self, step: f32, player_rect: Rect, world: &World, events: &mut Vec<CombatEvent>) {
-        let zombie_count = self.zombies.list.len();
-        if zombie_count + self.skeletons.list.len() >= MONSTER_MAX_ON_SCREEN {
+        if self.is_map_full() {
             return;
         }
         self.seconds_to_next_spawn -= step;
@@ -250,18 +302,46 @@ impl Combat {
         }
         self.seconds_to_next_spawn += ZOMBIE_SPAWN_SECONDS;
 
-        if zombie_count >= ZOMBIE_MAX_ON_SCREEN || self.random.next_unit() < self.skeleton_chance {
+        // 왼쪽·오른쪽 번갈아 나온다. 마릿수 상한에 닿으면 이번 차례는 거기까지다.
+        let first_from_left = pick_left_side(&mut self.random);
+        let mut taken = Vec::new();
+        for turn in 0..MONSTERS_PER_SPAWN {
+            if self.is_map_full() {
+                break;
+            }
+            let from_left = first_from_left == (turn % 2 == 0);
+            let x = self.spawn_one_monster(from_left, player_rect, world, &taken, events);
+            taken.push(x);
+        }
+    }
+
+    fn is_map_full(&self) -> bool {
+        self.zombies.list.len() + self.skeletons.list.len() >= MONSTER_MAX_ON_SCREEN
+    }
+
+    /// 좀비나 스켈레톤을 하나 뽑아 내보내고 나온 x를 돌려준다.
+    fn spawn_one_monster(
+        &mut self,
+        from_left: bool,
+        player_rect: Rect,
+        world: &World,
+        taken: &[f32],
+        events: &mut Vec<CombatEvent>,
+    ) -> f32 {
+        if self.zombies.list.len() >= ZOMBIE_MAX_ON_SCREEN || self.random.next_unit() < self.skeleton_chance {
             let stage = SkeletonStage::for_level(self.level);
-            let x = pick_spawn_x(&mut self.random, player_rect, SKELETON_WIDTH, world);
+            let x = spawn_x_on_side(from_left, player_rect, SKELETON_WIDTH, world, taken);
             let skeleton = Skeleton::new(x, world.ground_y, stage);
             events.push(CombatEvent::SkeletonAppeared { at: skeleton.rect().center(), stage });
             self.skeletons.list.push(skeleton);
+            x
         } else {
-            let x = pick_spawn_x(&mut self.random, player_rect, ZOMBIE_WIDTH, world);
+            let x = spawn_x_on_side(from_left, player_rect, ZOMBIE_WIDTH, world, taken);
             let will_float = self.random.next_unit() < ZOMBIE_FLOAT_CHANCE;
             let zombie = Zombie::new(x, world.ground_y, will_float);
             events.push(CombatEvent::ZombieAppeared { at: zombie.rect().center() });
             self.zombies.list.push(zombie);
+            x
         }
     }
 

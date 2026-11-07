@@ -37,9 +37,9 @@ pub struct Coins {
 }
 
 impl Coins {
-    /// 월드의 상자마다 코인 하나씩.
+    /// 월드의 상자마다 코인 하나씩. 나무 발판과 바위 계단에는 놓이지 않는다 (US-051).
     pub fn on_boxes(world: &World) -> Coins {
-        Coins { list: world.obstacles.iter().map(|b| Coin::above_box(*b)).collect() }
+        Coins { list: world.boxes().into_iter().map(Coin::above_box).collect() }
     }
 
     /// 시간을 흘리고, 플레이어 몸(`player_rect`)에 닿은 코인을 줍는다.

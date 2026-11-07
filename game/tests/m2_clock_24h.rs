@@ -37,16 +37,16 @@ fn starts_at_0600_day_1_nights_0() {
 #[test]
 fn config_has_day_start_and_night_start() {
     assert_eq!((DAY_START_HOUR, NIGHT_START_HOUR), (6, 18));
-    assert_eq!((DAY_SECONDS, NIGHT_SECONDS), (600.0, 600.0));
+    assert_eq!((DAY_SECONDS, NIGHT_SECONDS), (300.0, 600.0));
 }
 
 #[test]
-fn one_real_minute_is_about_72_game_minutes() {
+fn one_real_minute_of_day_is_about_144_game_minutes() {
     let mut c = Clock::new();
     run(&mut c, 60.0);
-    // 06:00 + 72분 = 07:12 (프레임 반올림 때문에 1분 모자랄 수 있음)
+    // 06:00 + 144분 = 08:24 (프레임 반올림 때문에 1분 모자랄 수 있음)
     let m = c.time_of_day_minutes();
-    assert!((431..=432).contains(&m), "실제 1분 뒤 {}", hm(&c));
+    assert!((503..=504).contains(&m), "실제 1분 뒤 {}", hm(&c));
 }
 
 #[test]
@@ -118,12 +118,12 @@ fn fast_forward_four_days_always_valid_and_forward() {
 }
 
 #[test]
-fn sunset_and_dawn_start_at_1648_and_0448() {
+fn sunset_and_dawn_start_at_1537_and_0448() {
     let mut c = Clock::new();
     c.update(DAY_SECONDS - 60.0 - 0.5);
     assert_eq!(c.sky_darkness(), 0.0, "노을 전 {}", hm(&c));
     c.update(1.0);
-    assert_eq!(hm(&c), "16:48");
+    assert_eq!(hm(&c), "15:37");
     assert!(c.sky_darkness() > 0.0);
     c.update(60.0); // 밤
     c.update(NIGHT_SECONDS - 60.0 - 1.0);

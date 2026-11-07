@@ -3,11 +3,14 @@
 //! 값은 모두 logic(clock, wallet, health)이 준 그대로 보여 준다.
 
 use super::coin::draw_coin;
+use super::assets::M6Art;
 use super::screen::VIRTUAL_WIDTH;
+use super::sprites::fit_size;
 use super::text::TextPainter;
 use super::touch::draw_star;
 use crate::config::{DAY_PERIODS, DEV_FAST_FORWARD_SCALE, EXPERIENCE_PER_LEVEL};
 use crate::logic::clock::{Clock, Phase};
+use crate::logic::weapon::Weapon;
 use macroquad::prelude::*;
 
 /// 알약 모양 판 (반투명 남색): 하늘이 밝든 어둡든 흰 글자가 잘 보이게.
@@ -17,6 +20,10 @@ const MOON_ICON: Color = Color::new(1.0, 0.95, 0.70, 1.0);
 const FAST_COLOR: Color = Color::new(1.0, 0.62, 0.15, 1.0);
 
 const MARGIN: f32 = 12.0;
+/// 주운 무기 한 칸 폭, 그림 크기, 판 양옆 여백
+const WEAPON_SLOT: f32 = 44.0;
+const WEAPON_ICON: f32 = 30.0;
+const WEAPON_PANEL_PAD: f32 = 10.0;
 const PANEL_TOP: f32 = 10.0;
 const PANEL_HEIGHT: f32 = 56.0;
 /// 판 안 글자 바닥선 (판 위쪽에서)
@@ -169,7 +176,28 @@ pub fn draw_level(text: &TextPainter, level: u32, experience: u32) {
     }
 }
 
-pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: bool) {
+/// 주운 무기: 레벨 판 아래 오른쪽 끝에 작은 그림으로. 지금 든 무기에 테두리 (US-052, US-053). 없으면 판도 없다.
+pub fn draw_weapons(art: &M6Art, owned: &[Weapon], held: Weapon) {
+    if owned.is_empty() {
+        return;
+    }
+    let w = WEAPON_SLOT * owned.len() as f32 + WEAPON_PANEL_PAD * 2.0;
+    let x = VIRTUAL_WIDTH - MARGIN - w;
+    let y = FAST_PANEL_TOP + FAST_PANEL_HEIGHT + 8.0;
+    draw_pill(x, y, w, WEAPON_SLOT + 8.0, PANEL);
+    for (i, weapon) in owned.iter().enumerate() {
+        let c = vec2(x + WEAPON_PANEL_PAD + WEAPON_SLOT * (i as f32 + 0.5), y + (WEAPON_SLOT + 8.0) / 2.0);
+        if *weapon == held {
+            draw_circle_lines(c.x, c.y, WEAPON_SLOT / 2.0 - 1.0, 3.0, FAST_COLOR);
+        }
+        if let Some(texture) = art.weapon(*weapon) {
+            let size = fit_size(texture, WEAPON_ICON);
+            draw_texture_ex(texture, c.x - size.x / 2.0, c.y - size.y / 2.0, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+        }
+    }
+}
+
+pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: bool, place: &str) {
     let mid_y = PANEL_TOP + PANEL_HEIGHT / 2.0;
     let baseline = PANEL_TOP + TEXT_BASELINE;
 
@@ -191,8 +219,8 @@ pub fn draw_hud(text: &TextPainter, clock: &Clock, coins: u32, fast_forward: boo
     }
     text.left(&time_text, MARGIN + ICON_TEXT_GAP, baseline, BIG_TEXT, WHITE);
 
-    // 가운데: N일째   버틴 날 N
-    let day_text = format!("{}일째    버틴 날 {}", clock.day_number(), clock.nights_survived());
+    // 가운데: 장소   N일째   버틴 날 N
+    let day_text = format!("{place}   {}일째   버틴 날 {}", clock.day_number(), clock.nights_survived());
     let center_w = text.width(&day_text, MID_TEXT) + 48.0;
     draw_pill(VIRTUAL_WIDTH / 2.0 - center_w / 2.0, PANEL_TOP, center_w, PANEL_HEIGHT, PANEL);
     text.centered(&day_text, VIRTUAL_WIDTH / 2.0, baseline - 2.0, MID_TEXT, WHITE);
@@ -268,7 +296,7 @@ mod tests {
         };
         let mut c = Clock::new();
         assert_eq!(show(&c), "06:00");
-        c.update(599.9);
+        c.update(299.9);
         assert_eq!(show(&c), "17:59");
         c.update(0.1);
         assert_eq!(show(&c), "18:00");

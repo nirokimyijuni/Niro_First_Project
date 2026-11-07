@@ -51,6 +51,11 @@ fn player_on(box_: Rect) -> Rect {
     Rect::new(box_.x, box_.y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT)
 }
 
+/// 맨손 공격 한 번.
+fn hands_attack(c: &mut Combat, player: Rect, facing: Facing) -> Vec<CombatEvent> {
+    c.attack_with(player, facing, HANDS_ATTACK, PLAYER_ATTACK_RANGE)
+}
+
 fn run(c: &mut Combat, seconds: f32, is_night: bool, player: Rect, world: &World) -> Vec<CombatEvent> {
     let mut events = Vec::new();
     for _ in 0..(seconds / FRAME).round() as usize {
@@ -121,7 +126,7 @@ fn defeat_a_zombie(c: &mut Combat) -> Vec<CombatEvent> {
     let mut zombie = Zombie::new(player.x + PLAYER_WIDTH, GROUND_Y, false);
     zombie.hp = 1;
     c.zombies.list.push(zombie);
-    c.player_attack(player, Facing::Right)
+    hands_attack(c, player, Facing::Right)
 }
 
 #[test]
@@ -147,15 +152,12 @@ fn five_defeats_level_up_and_experience_starts_over() {
 }
 
 #[test]
-fn level_up_waits_for_morning_to_fill_health() {
-    let w = flat_world();
+fn level_up_fills_health_right_away() {
     let mut c = empty_night();
     for _ in 0..EXPERIENCE_PER_LEVEL {
         defeat_a_zombie(&mut c);
     }
-    assert_eq!(c.health.hp(), PLAYER_START_HP, "체력은 바로 차지 않는다");
-    c.update(FRAME, false, player_at(480.0), &w);
-    assert_eq!(c.health.hp(), 12);
+    assert_eq!(c.health.hp(), 12, "아침을 기다리지 않는다");
 }
 
 #[test]
@@ -163,7 +165,7 @@ fn hit_that_does_not_defeat_gives_no_experience() {
     let mut c = empty_night();
     let player = player_at(300.0);
     c.zombies.list.push(Zombie::new(player.x + PLAYER_WIDTH, GROUND_Y, false));
-    c.player_attack(player, Facing::Right);
+    hands_attack(&mut c, player, Facing::Right);
     assert_eq!(c.experience, 0);
 }
 
@@ -183,11 +185,11 @@ fn skeleton_defeated_by_attack_gives_experience() {
     let player = player_at(300.0);
     let mut c = night_with(player.x + PLAYER_WIDTH, SkeletonStage::Normal);
     for _ in 0..SKELETON_HP - 1 {
-        let events = c.player_attack(player, Facing::Right);
+        let events = hands_attack(&mut c, player, Facing::Right);
         assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonHit { .. })), 1);
     }
     assert_eq!(c.experience, 0);
-    let events = c.player_attack(player, Facing::Right);
+    let events = hands_attack(&mut c, player, Facing::Right);
     assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonDefeated { .. })), 1);
     assert!(c.skeletons.list.is_empty());
     assert_eq!(c.experience, 1);
@@ -202,7 +204,7 @@ fn one_swing_can_cross_the_level_line_with_two_monsters() {
     let mut zombie = Zombie::new(player.x + PLAYER_WIDTH, GROUND_Y, false);
     zombie.hp = 1;
     c.zombies.list.push(zombie);
-    let events = c.player_attack(player, Facing::Right);
+    let events = hands_attack(&mut c, player, Facing::Right);
     assert_eq!(count(&events, |e| matches!(e, CombatEvent::LevelUp { .. })), 1);
     assert_eq!((c.level, c.experience), (2, 1));
 }
@@ -217,7 +219,7 @@ fn zombie_stays_hp_3_attack_2_after_level_ups() {
     c.zombies.list.push(Zombie::new(player.x, GROUND_Y, false));
     assert_eq!(c.zombies.list[0].hp, 3);
     let events = c.update(FRAME, true, player, &w);
-    assert!(events.contains(&CombatEvent::PlayerHurt { amount: 2, hp_left: 5 }));
+    assert!(events.contains(&CombatEvent::PlayerHurt { amount: 2, hp_left: 15 }));
 }
 
 #[test]
@@ -273,7 +275,9 @@ fn each_level_brings_only_its_stage() {
         for seed in 0..20 {
             let mut c = Combat::new(seed);
             c.level = level;
-            stages.extend(appeared_stages(&run(&mut c, 70.0, true, player_at(480.0), &walled_world())));
+            // 레벨이 오르기 전에 끝나게 두 차례만 본다.
+            let seconds = ZOMBIE_SPAWN_SECONDS * 2.0 + 1.0;
+            stages.extend(appeared_stages(&run(&mut c, seconds, true, player_at(480.0), &walled_world())));
         }
         assert!(!stages.is_empty());
         assert!(stages.iter().all(|s| *s == stage), "레벨 {level}: {stages:?}");
@@ -289,8 +293,8 @@ fn skeletons_and_zombies_mix_at_night() {
         zombies += count(&events, |e| matches!(e, CombatEvent::ZombieAppeared { .. }));
         skeletons += count(&events, |e| matches!(e, CombatEvent::SkeletonAppeared { .. }));
     }
-    assert_eq!(zombies + skeletons, 50, "시간이 되면 둘 중 하나가 나온다");
-    assert!((10..=40).contains(&skeletons), "50마리 중 {skeletons}마리");
+    assert_eq!(zombies + skeletons, 50 * MONSTERS_PER_SPAWN, "마리마다 둘 중 하나를 뽑는다");
+    assert!((20..=80).contains(&skeletons), "100마리 중 {skeletons}마리");
 }
 
 #[test]
@@ -308,9 +312,11 @@ fn skeletons_appear_only_at_screen_edges() {
         let mut c = Combat::new(seed);
         c.skeleton_chance = 1.0;
         let events = c.update(FRAME, true, player_at(480.0), &w);
-        assert_eq!(appeared_stages(&events).len(), 1);
-        let x = c.skeletons.list[0].pos.x;
-        assert!(x < 5.0 || x > w.width - SKELETON_WIDTH - 5.0, "seed {seed}: x={x}");
+        assert_eq!(appeared_stages(&events).len(), MONSTERS_PER_SPAWN);
+        for skeleton in &c.skeletons.list {
+            let x = skeleton.pos.x;
+            assert!(x < 5.0 || x > w.width - SKELETON_WIDTH - 5.0, "seed {seed}: x={x}");
+        }
     }
 }
 
@@ -341,7 +347,7 @@ fn a_skeleton_comes_when_zombies_are_full() {
         c.zombies.list.push(Zombie::new(0.0, GROUND_Y, false));
     }
     run(&mut c, ZOMBIE_SPAWN_SECONDS + 1.0, true, player_at(480.0), &walled_world());
-    assert_eq!((c.zombies.list.len(), c.skeletons.list.len()), (ZOMBIE_MAX_ON_SCREEN, 1));
+    assert_eq!((c.zombies.list.len(), c.skeletons.list.len()), (ZOMBIE_MAX_ON_SCREEN, MONSTERS_PER_SPAWN));
 }
 
 #[test]
@@ -354,7 +360,7 @@ fn morning_removes_skeletons_and_shots_and_next_night_starts_at_once() {
     assert!(c.skeletons.list.is_empty() && c.skeletons.projectiles.is_empty());
 
     c.update(FRAME, true, player, &w);
-    assert_eq!(c.zombies.list.len() + c.skeletons.list.len(), 1);
+    assert_eq!(c.zombies.list.len() + c.skeletons.list.len(), MONSTERS_PER_SPAWN);
 }
 
 #[test]
@@ -783,7 +789,7 @@ fn player_attack_reaches_every_stage_and_three_hits_defeat() {
     for stage in [SkeletonStage::Normal, SkeletonStage::Half, SkeletonStage::Full] {
         let mut c = night_with(player.x + PLAYER_WIDTH + PLAYER_ATTACK_RANGE - 1.0, stage);
         for _ in 0..3 {
-            c.player_attack(player, Facing::Right);
+            hands_attack(&mut c, player, Facing::Right);
         }
         assert!(c.skeletons.list.is_empty(), "{stage:?}");
     }
@@ -793,9 +799,9 @@ fn player_attack_reaches_every_stage_and_three_hits_defeat() {
 fn attack_does_not_reach_behind_or_too_far() {
     let player = player_at(300.0);
     let mut c = night_with(player.x - PLAYER_WIDTH, SkeletonStage::Normal);
-    assert!(c.player_attack(player, Facing::Right).is_empty());
+    assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
     let mut c = night_with(player.x + PLAYER_WIDTH + PLAYER_ATTACK_RANGE + 5.0, SkeletonStage::Normal);
-    assert!(c.player_attack(player, Facing::Right).is_empty());
+    assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
 }
 
 #[test]
@@ -803,7 +809,7 @@ fn hit_skeleton_flashes_for_a_moment() {
     let w = flat_world();
     let player = player_at(300.0);
     let mut c = night_with(player.x + PLAYER_WIDTH, SkeletonStage::Normal);
-    c.player_attack(player, Facing::Right);
+    hands_attack(&mut c, player, Facing::Right);
     assert!(c.skeletons.list[0].is_flashing());
     run(&mut c, SKELETON_HIT_FLASH_SECONDS + 0.05, true, player, &w);
     assert!(!c.skeletons.list[0].is_flashing());
@@ -832,7 +838,7 @@ fn nothing_happens_after_going_down_by_a_shot() {
     assert!(run(&mut c, 3.0, false, player, &w).is_empty(), "아침이 와도 움직이지 않는다");
     assert_eq!(c.skeletons.projectiles.iter().map(|p| p.pos.x).collect::<Vec<f32>>(), frozen);
     assert_eq!(c.skeletons.list[0].pos.x, x);
-    assert!(c.player_attack(player, Facing::Right).is_empty());
+    assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
 }
 
 #[test]
@@ -859,4 +865,55 @@ fn floating_zombie_state_is_not_changed_by_skeletons() {
     c.zombies.list.push(Zombie::new(0.0, GROUND_Y, true));
     run(&mut c, ZOMBIE_FLOAT_START_SECONDS + 0.1, true, player_at(900.0), &w);
     assert_eq!(c.zombies.list[0].state, ZombieState::Floating);
+}
+
+// ---- 아이가 정한 규칙: 레벨이 오르면 체력이 바로 다 찬다 ----
+
+/// 체력이 깎인 채 경험치 하나만 더 있으면 레벨이 오르는 싸움.
+fn hurt_one_defeat_from_level_up() -> Combat {
+    let mut c = Combat::new(SEED);
+    c.skeleton_chance = 0.0;
+    c.experience = EXPERIENCE_PER_LEVEL - 1;
+    let w = flat_world();
+    c.zombies.list.push(Zombie::new(100.0, GROUND_Y, false));
+    c.update(FRAME, true, Rect::new(100.0, GROUND_Y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT), &w);
+    assert!(c.health.hp() < PLAYER_START_HP);
+    c.zombies.list.clear();
+    c
+}
+
+#[test]
+fn level_up_event_comes_with_health_refilled() {
+    let mut c = hurt_one_defeat_from_level_up();
+    let player = Rect::new(100.0, GROUND_Y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+    c.zombies.list.push(Zombie::new(player.x + PLAYER_WIDTH + 10.0, GROUND_Y, false));
+    c.zombies.list[0].hp = 1;
+    let events = hands_attack(&mut c, player, Facing::Right);
+    assert_eq!(c.health.hp(), PLAYER_START_HP + PLAYER_HP_PER_LEVEL);
+    assert_eq!(c.health.hp(), c.health.max_hp());
+    let level_up_at = events.iter().position(|e| *e == CombatEvent::LevelUp { level: 2 }).expect("레벨 업");
+    assert_eq!(events.get(level_up_at + 1), Some(&CombatEvent::HealthRefilled), "{events:?}");
+}
+
+#[test]
+fn level_up_never_happens_after_going_down() {
+    let mut c = Combat::new(SEED);
+    c.skeleton_chance = 0.0;
+    c.experience = EXPERIENCE_PER_LEVEL - 1;
+    let w = flat_world();
+    let player = Rect::new(100.0, GROUND_Y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+    for _ in 0..(20.0 / FRAME) as usize {
+        if c.health.is_down() {
+            break;
+        }
+        c.zombies.list = vec![Zombie::new(100.0, GROUND_Y, false)];
+        c.update(FRAME, true, player, &w);
+    }
+    assert!(c.health.is_down());
+
+    c.zombies.list = vec![Zombie::new(player.x + PLAYER_WIDTH + 10.0, GROUND_Y, false)];
+    c.zombies.list[0].hp = 1;
+    assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
+    c.level_up();
+    assert_eq!((c.level, c.health.hp()), (1, 0), "쓰러지면 레벨도 체력도 그대로다");
 }
