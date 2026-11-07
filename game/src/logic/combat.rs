@@ -35,6 +35,8 @@ pub enum CombatEvent {
     SkeletonDefeated { at: Vec2 },
     /// 튕겨 오는 공격을 피해 스켈레톤이 뛰어올랐다.
     SkeletonDodged { at: Vec2 },
+    /// 폭발 시민이 공격에 맞아 쓰러졌다. 펑도 경험치도 없다.
+    CitizenDefeated { at: Vec2 },
     /// 절반 스켈레톤의 손이 플레이어에게 맞았다. 바로 뒤에 `PlayerHurt`가 온다.
     SkeletonHandHit { at: Vec2 },
     /// 스켈레톤이 화살이나 총알을 쐈다.
@@ -120,7 +122,7 @@ fn is_in_front(player_rect: Rect, facing: Facing, target: Rect) -> bool {
 }
 
 /// 공격 범위 안이고 바라보는 쪽에 있으면 맞는다.
-fn is_reached(player_rect: Rect, facing: Facing, range: f32, target: Rect) -> bool {
+pub fn is_reached(player_rect: Rect, facing: Facing, range: f32, target: Rect) -> bool {
     attack_box_with_range(player_rect, facing, range).overlaps(&target) && is_in_front(player_rect, facing, target)
 }
 
@@ -183,6 +185,7 @@ impl Combat {
                 self.zombies.step(step, player_rect, world, &mut events);
                 let defeated = self.skeletons.step(step, player_rect, world, &mut events);
                 self.gain_experience(defeated, &mut events);
+                self.defeat_skeletons_touching(player_rect, &mut events);
                 self.get_hurt_by_touching_zombie(player_rect, &mut events);
                 self.get_hurt_by_skeletons(player_rect, &mut events);
             }
@@ -356,6 +359,21 @@ impl Combat {
         }
     }
 
+    /// 주인공 몸에 닿은 스켈레톤은 단계와 체력에 상관없이 쓰러지고 경험치를 준다. 주인공은 다치지 않는다.
+    /// 손 공격보다 먼저 본다 (D46).
+    fn defeat_skeletons_touching(&mut self, player_rect: Rect, events: &mut Vec<CombatEvent>) {
+        let mut defeated = 0;
+        self.skeletons.list.retain(|skeleton| {
+            let touched = really_overlaps(skeleton.rect(), player_rect);
+            if touched {
+                events.push(CombatEvent::SkeletonDefeated { at: skeleton.rect().center() });
+                defeated += 1;
+            }
+            !touched
+        });
+        self.gain_experience(defeated, events);
+    }
+
     fn get_hurt_by_touching_zombie(&mut self, player_rect: Rect, events: &mut Vec<CombatEvent>) {
         if self.zombies.any_walking_zombie_touches(player_rect) {
             self.hurt_player(ZOMBIE_ATTACK, events);
@@ -369,7 +387,7 @@ impl Combat {
         if !self.health.can_be_hit() {
             return;
         }
-        if let Some(skeleton) = self.skeletons.half_skeleton_touching(player_rect) {
+        if let Some(skeleton) = self.skeletons.half_skeleton_reaching(player_rect) {
             let attack = skeleton.stage.attack();
             events.push(CombatEvent::SkeletonHandHit { at: skeleton.rect().center() });
             self.hurt_player(attack, events);

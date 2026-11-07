@@ -3,12 +3,13 @@
 
 use super::assets::M6Art;
 use super::coin::CoinPops;
+use super::hud::draw_pill;
 use super::screen::VIRTUAL_WIDTH;
-use super::sky::lerp;
+use super::sky::{hash, lerp};
 use super::sprites::{fit_size, flip_weapon};
 use super::text::TextPainter;
 use super::touch::draw_star;
-use crate::config::{CITIZEN_POP_TEXT, MISS_FOUND_TEXT};
+use crate::config::{CITIZEN_POP_TEXT, CITIZEN_TALK_SHARE, MISS_FOUND_TEXT, SKELETON_DODGE_TEXT, ZOMBIE_APPEAR_TEXT};
 use crate::logic::combat::{attack_box, attack_box_with_range, CombatEvent};
 use crate::logic::player::Facing;
 use crate::logic::weapon::Weapon;
@@ -23,6 +24,9 @@ const SPARK_SECONDS: f32 = 0.25;
 const HAND_SECONDS: f32 = 0.4;
 const LEVEL_UP_SECONDS: f32 = 1.8;
 const MESSAGE_SECONDS: f32 = 2.2;
+const CHEER_SECONDS: f32 = 1.0;
+const SMOKE_SECONDS: f32 = 0.6;
+const ZOMBIE_CALL_SECONDS: f32 = 2.0;
 /// 손이 플레이어에게 닿는 때 (전체를 0~1로 볼 때)
 const HAND_REACH_SHARE: f32 = 0.4;
 /// "레벨 업!" 글자 바닥선, 크기, 별이 도는 타원 폭·높이
@@ -33,6 +37,16 @@ const LEVEL_UP_RING: Vec2 = Vec2::new(230.0, 90.0);
 /// "미스를 찾았어요!" 같은 큰 문구 바닥선과 크기. "레벨 업!"(바닥선 215)과 겹치지 않게 그 아래.
 const MESSAGE_Y: f32 = 300.0;
 const MESSAGE_SIZE: f32 = 56.0;
+/// 말풍선: 글자 크기, 높이, 양옆 여백, 화면 끝과의 틈, 꼬리 크기
+const BUBBLE_TEXT: f32 = 24.0;
+const BUBBLE_HEIGHT: f32 = 38.0;
+const BUBBLE_PAD: f32 = 16.0;
+const BUBBLE_MARGIN: f32 = 8.0;
+const BUBBLE_TAIL: f32 = 9.0;
+/// "만세" 말풍선 아래 끝이 스켈레톤 자리에서 이만큼 위
+const CHEER_ABOVE: f32 = 48.0;
+/// "얍얍 공격하라" 말풍선 아래 끝 y. 폰의 바꾸기 버튼(y 240~)과 정보판(y ~182) 사이다.
+const ZOMBIE_CALL_Y: f32 = 232.0;
 /// 휘두를 때 손에 보이는 칼·도끼 크기
 const SWING_WEAPON_SIZE: f32 = 46.0;
 /// 칼·도끼 그림은 끝이 45도 위를 향해 있다
@@ -55,6 +69,8 @@ const SPARK: Color = Color::new(1.0, 0.97, 0.75, 0.9);
 const BONE: Color = Color::new(0.96, 0.92, 0.80, 1.0);
 const LEVEL_UP_TEXT: Color = Color::new(1.0, 0.86, 0.22, 1.0);
 const GUN_LIGHT: Color = Color::new(1.0, 0.95, 0.60, 0.9);
+const BUBBLE: Color = Color::new(0.13, 0.16, 0.36, 0.85);
+const SMOKE: Color = Color::new(0.92, 0.92, 0.95, 0.75);
 
 #[derive(Clone, Copy, PartialEq)]
 enum BurstKind {
@@ -64,6 +80,10 @@ enum BurstKind {
     Popped,
     /// 미스를 찾은 자리: 별만 퍼진다
     Found,
+    /// 스켈레톤이 피하며 "만세"
+    Cheer,
+    /// 폭발 시민이 공격에 쓰러짐: 작은 연기만
+    Smoke,
     /// 화살·총알이 나가거나 튕길 때 작은 번쩍
     Spark,
     /// 스켈레톤 손이 플레이어에게 쑥
@@ -75,6 +95,8 @@ impl BurstKind {
         match self {
             BurstKind::Defeated | BurstKind::Popped | BurstKind::Found => BURST_SECONDS,
             BurstKind::Spark => SPARK_SECONDS,
+            BurstKind::Cheer => CHEER_SECONDS,
+            BurstKind::Smoke => SMOKE_SECONDS,
             BurstKind::Hand => HAND_SECONDS,
         }
     }
@@ -96,6 +118,12 @@ pub struct Effects {
     swing_weapon: Option<Weapon>,
     /// 큰 문구와 나온 지 지난 시간
     message: Option<(&'static str, f32)>,
+    /// 좀비가 나온 맵 x와 지난 시간. 칸이 하나라 새 좀비가 나오면 바뀌어서 말풍선이 겹치지 않는다.
+    zombie_call: Option<(f32, f32)>,
+    /// 일반 시민마다 (지난 프레임에 걷고 있었는지, 이번 멈춤에 말을 하는지)
+    citizen_talk: Vec<(bool, bool)>,
+    /// 지금까지 멈춘 횟수. 말할지 뽑는 번호로 쓴다.
+    citizen_stops: u32,
     heart_sparkle_age: Option<f32>,
     level_up_age: Option<f32>,
 }
@@ -120,6 +148,27 @@ impl Effects {
         self.message = Some((message, 0.0));
     }
 
+    /// 일반 시민마다 걷는지를 프레임마다 받아서, 멈추는 순간에 이번에 말을 할지 정한다.
+    /// logic에는 "말한다"가 없다. 그림일 뿐이라 여기서 정한다.
+    pub fn watch_citizens(&mut self, walking: impl Iterator<Item = bool>) {
+        for (i, is_walking) in walking.enumerate() {
+            if i == self.citizen_talk.len() {
+                self.citizen_talk.push((is_walking, false));
+            }
+            let (was_walking, talks) = &mut self.citizen_talk[i];
+            if *was_walking && !is_walking {
+                self.citizen_stops += 1;
+                *talks = hash(self.citizen_stops) < CITIZEN_TALK_SHARE;
+            }
+            *was_walking = is_walking;
+        }
+    }
+
+    /// `index`번 일반 시민이 이번 멈춤에 말을 하는지.
+    pub fn citizen_talks(&self, index: usize) -> bool {
+        self.citizen_talk.get(index).is_some_and(|(_, talks)| *talks)
+    }
+
     pub fn on_miss_found(&mut self, at: Vec2) {
         self.burst(BurstKind::Found, at);
         self.show_message(MISS_FOUND_TEXT);
@@ -135,6 +184,9 @@ impl Effects {
             CombatEvent::ZombiePopped { at } => self.burst(BurstKind::Popped, at),
             CombatEvent::ProjectileFired { at, .. } | CombatEvent::ProjectileBounced { at } => self.burst(BurstKind::Spark, at),
             CombatEvent::SkeletonHandHit { at } => self.burst(BurstKind::Hand, at),
+            CombatEvent::SkeletonDodged { at } => self.burst(BurstKind::Cheer, at),
+            CombatEvent::CitizenDefeated { at } => self.burst(BurstKind::Smoke, at),
+            CombatEvent::ZombieAppeared { at } => self.zombie_call = Some((at.x, 0.0)),
             CombatEvent::LevelUp { .. } => self.level_up_age = Some(0.0),
             CombatEvent::HealthRefilled => self.heart_sparkle_age = Some(0.0),
             _ => {}
@@ -156,6 +208,7 @@ impl Effects {
         self.heart_sparkle_age = self.heart_sparkle_age.map(|age| age + dt).filter(|age| *age < HEART_SPARKLE_SECONDS);
         self.level_up_age = self.level_up_age.map(|age| age + dt).filter(|age| *age < LEVEL_UP_SECONDS);
         self.message = self.message.map(|(message, age)| (message, age + dt)).filter(|(_, age)| *age < MESSAGE_SECONDS);
+        self.zombie_call = self.zombie_call.map(|(x, age)| (x, age + dt)).filter(|(_, age)| *age < ZOMBIE_CALL_SECONDS);
     }
 
     /// 하트 반짝임 세기: 1 막 시작 ~ 0 끝.
@@ -163,7 +216,8 @@ impl Effects {
         self.heart_sparkle_age.map_or(0.0, |age| 1.0 - age / HEART_SPARKLE_SECONDS)
     }
 
-    pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art) {
+    /// 맵 좌표로 그린다. `camera_left`는 화면 왼쪽 끝의 맵 x (말풍선을 화면 안에 두는 데 쓴다).
+    pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art, camera_left: f32) {
         if let Some(age) = self.swing_age {
             let t = age / SWING_SECONDS;
             match self.swing_weapon.unwrap_or(Weapon::Hands) {
@@ -176,9 +230,16 @@ impl Effects {
                 BurstKind::Spark => draw_spark(burst),
                 BurstKind::Hand => draw_hand(burst, player.center()),
                 BurstKind::Defeated | BurstKind::Popped | BurstKind::Found => draw_burst(text, burst),
+                BurstKind::Cheer => draw_bubble(text, SKELETON_DODGE_TEXT, burst.at.x, burst.at.y - CHEER_ABOVE, camera_left, 1.0 - burst.age / CHEER_SECONDS),
+                BurstKind::Smoke => draw_smoke(burst),
             }
         }
         self.pops.draw(text);
+        if let Some((x, age)) = self.zombie_call {
+            // 화면 밖 x라도 `draw_bubble`이 그쪽 가장자리로 당긴다
+            let fade = ((1.0 - age / ZOMBIE_CALL_SECONDS) * 3.0).min(1.0);
+            draw_bubble(text, ZOMBIE_APPEAR_TEXT, x, ZOMBIE_CALL_Y, camera_left, fade);
+        }
     }
 
     /// 화면에 고정된 효과. 카메라를 푼 뒤에 부른다.
@@ -190,6 +251,28 @@ impl Effects {
             let fade = ((1.0 - age / MESSAGE_SECONDS) * 3.0).min(1.0);
             text.centered(message, VIRTUAL_WIDTH / 2.0, MESSAGE_Y, MESSAGE_SIZE, Color { a: fade, ..LEVEL_UP_TEXT });
         }
+    }
+}
+
+/// 말풍선 하나. 꼬리 끝이 (`x`, `bottom_y`)를 가리키고, 몸은 화면 안으로 당겨진다. 맵 좌표로 그린다.
+pub fn draw_bubble(text: &TextPainter, message: &str, x: f32, bottom_y: f32, camera_left: f32, alpha: f32) {
+    let w = text.width(message, BUBBLE_TEXT) + BUBBLE_PAD * 2.0;
+    let center = x.clamp(camera_left + BUBBLE_MARGIN + w / 2.0, camera_left + VIRTUAL_WIDTH - BUBBLE_MARGIN - w / 2.0);
+    let (top, color) = (bottom_y - BUBBLE_TAIL - BUBBLE_HEIGHT, Color { a: BUBBLE.a * alpha, ..BUBBLE });
+    draw_pill(center - w / 2.0, top, w, BUBBLE_HEIGHT, color);
+    let tail_x = x.clamp(center - w / 2.0 + BUBBLE_PAD, center + w / 2.0 - BUBBLE_PAD);
+    let base_y = top + BUBBLE_HEIGHT;
+    draw_triangle(vec2(tail_x - BUBBLE_TAIL, base_y), vec2(tail_x + BUBBLE_TAIL, base_y), vec2(tail_x, bottom_y), color);
+    text.centered(message, center, top + BUBBLE_HEIGHT - 11.0, BUBBLE_TEXT, Color { a: alpha, ..WHITE });
+}
+
+/// 폭발 시민이 공격에 쓰러질 때: 작은 연기가 위로 흩어진다.
+fn draw_smoke(burst: &Burst) {
+    let t = (burst.age / SMOKE_SECONDS).clamp(0.0, 1.0);
+    for i in 0..5 {
+        let a = i as f32 / 5.0 * TAU;
+        let p = burst.at + vec2(a.cos() * 22.0 * t, a.sin() * 12.0 * t - 26.0 * t);
+        draw_circle(p.x, p.y, 13.0 * (1.0 - t * 0.4), Color { a: SMOKE.a * (1.0 - t), ..SMOKE });
     }
 }
 
@@ -350,6 +433,42 @@ mod tests {
         assert_eq!(e.bursts.len(), 2);
         e.update(MESSAGE_SECONDS);
         assert!(e.message.is_none() && e.bursts.is_empty());
+    }
+
+    #[test]
+    fn only_one_zombie_call_at_a_time() {
+        let mut e = Effects::new();
+        e.on_combat(CombatEvent::ZombieAppeared { at: vec2(100.0, 0.0) });
+        e.update(1.0);
+        e.on_combat(CombatEvent::ZombieAppeared { at: vec2(900.0, 0.0) });
+        assert_eq!(e.zombie_call, Some((900.0, 0.0)), "새 좀비로 바뀐다");
+        e.update(ZOMBIE_CALL_SECONDS);
+        assert_eq!(e.zombie_call, None);
+    }
+
+    #[test]
+    fn cheer_and_smoke_go_away() {
+        let mut e = Effects::new();
+        e.on_combat(CombatEvent::SkeletonDodged { at: Vec2::ZERO });
+        e.on_combat(CombatEvent::CitizenDefeated { at: Vec2::ZERO });
+        assert_eq!(e.bursts.len(), 2);
+        e.update(CHEER_SECONDS);
+        assert!(e.bursts.is_empty());
+    }
+
+    #[test]
+    fn about_half_of_the_stops_talk_and_it_stays_during_a_stop() {
+        let mut e = Effects::new();
+        let mut talked = 0;
+        for _ in 0..200 {
+            e.watch_citizens([true].into_iter());
+            e.watch_citizens([false].into_iter());
+            let talks = e.citizen_talks(0);
+            e.watch_citizens([false].into_iter());
+            assert_eq!(e.citizen_talks(0), talks, "멈춘 동안은 그대로다");
+            talked += talks as u32;
+        }
+        assert!((60..=140).contains(&talked), "{talked}");
     }
 
     #[test]

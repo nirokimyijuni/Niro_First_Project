@@ -291,43 +291,18 @@ fn morning_clears_monsters_and_shots_even_off_screen() {
 
 // ---- 엘리 관찰: 왼쪽 끝에서 스켈레톤 옆에 있어도 안 맞음 ----
 
-/// 스켈레톤이 플레이어와 같은 자리에 섰을 때 쏜 공격에 맞는지.
-fn hurt_by_skeleton_on_same_spot(x: f32, stage: SkeletonStage, w: &World) -> bool {
-    let mut c = Combat::new(7);
-    c.skeletons.list.push(Skeleton::new(x, w.ground_y, stage));
-    let player = body_at(x, w);
-    for _ in 0..(ARROW_INTERVAL_SECONDS * 2.0 / FRAME) as usize {
-        // 나올 몬스터가 끼어들지 않게 치운다.
-        c.zombies.list.clear();
-        c.skeletons.list.truncate(1);
-        c.update(FRAME, true, player, w);
-    }
-    c.health.hp() < PLAYER_START_HP
-}
-
 #[test]
-fn skeleton_on_the_same_spot_hits_at_both_map_ends_and_in_the_middle() {
+fn skeleton_on_the_same_spot_is_defeated_at_both_map_ends_and_in_the_middle() {
     let flat = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
     for x in [0.0, 400.0, WORLD_WIDTH - SKELETON_WIDTH] {
-        for stage in [SkeletonStage::Normal, SkeletonStage::Full] {
-            assert!(hurt_by_skeleton_on_same_spot(x, stage, &flat), "x {x}, {stage:?}");
+        for stage in [SkeletonStage::Normal, SkeletonStage::Half, SkeletonStage::Full] {
+            let mut c = Combat::new(7);
+            c.skeletons.list.push(Skeleton::new(x, GROUND_Y, stage));
+            let events = c.update(FRAME, true, body_at(x, &flat), &flat);
+            assert!(events.iter().any(|e| matches!(e, CombatEvent::SkeletonDefeated { .. })), "x {x}, {stage:?}");
+            assert_eq!(c.health.hp(), PLAYER_START_HP, "닿아서는 안 다친다");
         }
     }
-}
-
-#[test]
-fn skeleton_slightly_off_the_player_also_hits() {
-    // 몸 앞에서 나가면 이 자리의 화살은 첫 걸음에 플레이어를 지나쳐 버린다.
-    let flat = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
-    let mut c = Combat::new(7);
-    c.skeletons.list.push(Skeleton::new(100.0, GROUND_Y, SkeletonStage::Normal));
-    let player = Rect::new(101.0, GROUND_Y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
-    for _ in 0..(ARROW_INTERVAL_SECONDS * 2.0 / FRAME) as usize {
-        c.zombies.list.clear();
-        c.skeletons.list.truncate(1);
-        c.update(FRAME, true, player, &flat);
-    }
-    assert!(c.health.hp() < PLAYER_START_HP);
 }
 
 #[test]

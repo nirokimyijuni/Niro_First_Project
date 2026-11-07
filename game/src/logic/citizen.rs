@@ -1,5 +1,6 @@
 //! 폭발형 미스 시민 (US-054, D21): 자기 자리에 서 있다가 플레이어나 몬스터 몸이 닿으면 펑 터진다.
-//! 터진 뒤 일은 `Combat::citizen_blast`가 맡는다. 화살·총알·공격에는 터지지 않는다.
+//! 터진 뒤 일은 `Combat::citizen_blast`가 맡는다. 화살·총알에는 터지지 않는다.
+//! 주인공이 공격하면 터지지 않고 그냥 쓰러진다 (아이가 정한 임시 규칙).
 //!
 //! 일반 시민(`WalkingCitizen`)은 장소 안을 천천히 오가는 구경꾼이다. 아무와도 부딪히지 않고 맞지도 않는다.
 //! 상자·구조물·구멍과 장소 끝에 닿으면 돌아선다. 게임 규칙에는 끼어들지 않는다.
@@ -12,7 +13,7 @@ use crate::config::{
     WALKING_CITIZEN_HEIGHT, WALKING_CITIZEN_PAUSE_SECONDS, WALKING_CITIZEN_SPEED, WALKING_CITIZEN_WALK_SECONDS,
     WALKING_CITIZEN_WIDTH,
 };
-use macroquad::math::Rect;
+use macroquad::math::{Rect, Vec2};
 
 pub struct Citizen {
     /// 시민 몸 네모 (왼쪽 위 기준). 터져도 다시 나올 자리로 그대로 둔다.
@@ -33,13 +34,18 @@ impl Citizen {
         self.standing
     }
 
+    /// 공격을 맞아 조용히 쓰러진다. 다시 나오는 시간은 터질 때와 같다.
+    fn knock_down(&mut self) {
+        self.standing = false;
+        self.respawn_seconds_left = CITIZEN_RESPAWN_SECONDS;
+    }
+
     /// 시간을 흘린다. `touched`는 플레이어나 몬스터 몸이 이 자리에 닿았는지. 지금 터졌으면 true.
     /// 사라진 동안 누가 자리에 있으면 비켜날 때까지 기다렸다가 나타난다.
     pub fn update(&mut self, dt: f32, touched: bool) -> bool {
         if self.standing {
             if touched {
-                self.standing = false;
-                self.respawn_seconds_left = CITIZEN_RESPAWN_SECONDS;
+                self.knock_down();
             }
             return touched;
         }
@@ -135,6 +141,16 @@ impl Citizens {
             list: CITIZEN_XS.iter().map(|x| Citizen::at(*x, world.ground_y)).collect(),
             walkers: (0..PLACE_NAMES.len()).map(|place| WalkingCitizen::in_place(place, &mut random, world)).collect(),
         }
+    }
+
+    /// 공격이 닿은 시민들이 쓰러진다. 돌려주는 값: 쓰러진 자리들 (몸 가운데).
+    pub fn knock_down_reached(&mut self, is_reached: impl Fn(Rect) -> bool) -> Vec<Vec2> {
+        let mut knocked_down = Vec::new();
+        for citizen in self.list.iter_mut().filter(|c| c.standing && is_reached(c.rect)) {
+            citizen.knock_down();
+            knocked_down.push(citizen.rect.center());
+        }
+        knocked_down
     }
 
     /// 쓰러진 화면: 일반 시민이 그 자리에 멈춘다.

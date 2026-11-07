@@ -294,25 +294,6 @@ fn measure_where_walking_straight_goes_down() {
     println!("곧장 걷다 쓰러진 자리: {at:?}, 평균 {:.1}초", secs / 500.0);
 }
 
-/// BUG-019 뒤로 산에는 상자가 없다. 땅에서 달려 뛰면 시민을 넘어 바위 첫 칸에 오른다.
-#[test]
-fn running_jump_clears_the_mountain_citizen() {
-    let mut g = game(0);
-    g.citizens.walkers.clear();
-    let body = g.citizens.list[2].rect;
-    g.player.pos = Vec2::new(body.x - PLAYER_WIDTH - 60.0, g.world.ground_y - PLAYER_HEIGHT);
-    g.update(&PlayerInput::default(), FRAME);
-    assert!(g.player.on_ground);
-    let mut jumped = false;
-    for _ in 0..120 {
-        let jump = !jumped && body.x - (g.player.pos.x + PLAYER_WIDTH) <= 40.0;
-        jumped |= jump;
-        let events = g.update(&PlayerInput { right: true, jump_pressed: jump, ..Default::default() }, FRAME);
-        assert!(!events.iter().any(|e| matches!(e, GameEvent::CitizenPopped { .. })));
-    }
-    assert!(g.player.pos.x > CITIZEN_XS[2]);
-}
-
 /// 빨리감기처럼 한 프레임: 시계와 코인만 10배. main.rs `update_with_time_scale`과 같은 순서다.
 fn fast_frame(g: &mut Game, input: &PlayerInput) -> Vec<GameEvent> {
     let mut events = Vec::new();
@@ -359,7 +340,7 @@ fn d44_monsters_arrive_two_every_six_seconds_up_to_eight() {
         let night = night_at.unwrap();
         assert!((night - 30.0).abs() < 0.2, "시드 {seed} 밤 {night}");
         assert!((day_at.unwrap() - 90.0).abs() < 0.2, "시드 {seed} 아침 {day_at:?}");
-        assert!(g.combat.health.hp() == PLAYER_START_HP, "시드 {seed}: 꼭대기에서 맞음");
+        assert!(g.combat.health.hp() == g.combat.health.max_hp(), "시드 {seed}: 꼭대기에서 맞음");
         assert!(most <= MONSTER_MAX_ON_SCREEN && most_zombies <= ZOMBIE_MAX_ON_SCREEN, "시드 {seed}: {most}, {most_zombies}");
         for (i, (t, n)) in rounds.iter().take(4).enumerate() {
             assert_eq!(*n, MONSTERS_PER_SPAWN as u32, "시드 {seed}: {rounds:?}");
@@ -390,7 +371,8 @@ fn measure_d44_night() {
             stand(&mut g, x);
             g.update(&PlayerInput::default(), FRAME);
             if gun {
-                g.weapons.drop_around(x, &g.world);
+                let gun_weapon = logic::weapon::DroppedWeapon::above(logic::weapon::Weapon::Gun, x, &g.world);
+                g.weapons.dropped.push(gun_weapon);
                 g.weapons.update(5.0, Rect::new(0.0, -100.0, MAP_WIDTH, 700.0));
             }
             let reach = if gun { GUN_RANGE } else { 75.0 };
@@ -454,4 +436,93 @@ fn measure_count_at_48_seconds() {
         count[g.combat.zombies.list.len() + g.combat.skeletons.list.len()] += 1;
     }
     println!("48.5초 마릿수 분포 0~8: {count:?}");
+}
+
+/// 빨리감기 60초 밤에 말풍선이 몇 번 나오는지와 D46·D47을 넣은 밤 난이도. 일반 시민 말풍선은 화면에서 잰다.
+#[test]
+#[ignore]
+fn measure_d45_night_and_bubbles() {
+    let seeds = 300;
+    for (name, x, reach, gun) in [("x=120 서 있기", 120.0, 0.0, false), ("x=1100 서 있기", 1100.0, 0.0, false), ("x=120 맨손", 120.0, 75.0, false), ("x=1100 맨손", 1100.0, 75.0, false), ("x=120 총", 120.0, GUN_RANGE, true), ("x=1100 총", 1100.0, GUN_RANGE, true)] {
+        let (mut alive, mut down_at, mut level, mut zombies, mut dodges, mut hurts) = (0, 0.0, 0, 0, 0, 0);
+        for seed in 0..seeds {
+            let mut g = game(seed);
+            g.clock.update(DAY_SECONDS);
+            stand(&mut g, x);
+            g.update(&PlayerInput::default(), FRAME);
+            if gun {
+                for _ in 0..3 {
+                    g.weapons.drop_one(x, &g.world);
+                }
+                g.weapons.update(5.0, Rect::new(0.0, -100.0, MAP_WIDTH, 700.0));
+            }
+            let mut t = 0.0;
+            while t < 60.0 && !g.combat.health.is_down() {
+                let center = g.player.rect().center().x;
+                let bodies = g.combat.zombies.list.iter().map(|z| z.rect()).chain(g.combat.skeletons.list.iter().map(|s| s.rect()));
+                let near = bodies.map(|b| b.center().x - center).min_by(|a, b| a.abs().total_cmp(&b.abs()));
+                let input = match near {
+                    Some(d) if d.abs() < reach => PlayerInput { left: d < 0.0, right: d > 0.0, attack_pressed: (t * 60.0) as u32 % 20 == 0, ..Default::default() },
+                    _ => PlayerInput::default(),
+                };
+                for e in fast_frame(&mut g, &input) {
+                    match e {
+                        GameEvent::Combat(CombatEvent::ZombieAppeared { .. }) => zombies += 1,
+                        GameEvent::Combat(CombatEvent::SkeletonDodged { .. }) => dodges += 1,
+                        GameEvent::Combat(CombatEvent::PlayerHurt { .. }) => hurts += 1,
+                        _ => {}
+                    }
+                }
+                t += FRAME;
+            }
+            if g.combat.health.is_down() {
+                down_at += t;
+            } else {
+                alive += 1;
+            }
+            level += g.combat.level;
+        }
+        let n = seeds as f32;
+        println!(
+            "{name}: 버팀 {alive}/{seeds}, 쓰러진 평균 {:.1}초, 평균 레벨 {:.2}, 맞은 횟수 {:.1}, 얍얍 {:.1}번, 만세 {:.1}번",
+            down_at / (seeds - alive).max(1) as f32, level as f32 / n, hurts as f32 / n, zombies as f32 / n, dodges as f32 / n
+        );
+    }
+}
+
+/// 빨리감기 밤에 "만세"가 화면 안에서 몇 번 나오는지. 몬스터는 시작 자리 맨손 로봇이 싸운다.
+#[test]
+#[ignore]
+fn measure_cheer_on_screen() {
+    for x in [120.0, 1100.0, 2300.0, 3000.0] {
+        let mut counts = Vec::new();
+        let mut busiest_second = 0;
+        for seed in 0..200 {
+            let mut g = game(seed);
+            g.clock.update(DAY_SECONDS);
+            stand(&mut g, x);
+            g.update(&PlayerInput::default(), FRAME);
+            let (mut t, mut seen, mut in_second, mut second) = (0.0, 0, 0, 0);
+            while t < 60.0 && !g.combat.health.is_down() {
+                let left = g.camera_left();
+                for e in fast_frame(&mut g, &PlayerInput::default()) {
+                    if let GameEvent::Combat(CombatEvent::SkeletonDodged { at }) = e {
+                        if (left..left + SCREEN_WIDTH).contains(&at.x) {
+                            seen += 1;
+                            if t as i32 != second {
+                                second = t as i32;
+                                in_second = 0;
+                            }
+                            in_second += 1;
+                            busiest_second = busiest_second.max(in_second);
+                        }
+                    }
+                }
+                t += FRAME;
+            }
+            counts.push(seen);
+        }
+        counts.sort();
+        println!("x={x}: 화면 안 만세 중앙값 {}, 90% {}, 최대 {}, 1초에 가장 많이 {busiest_second}", counts[100], counts[180], counts[199]);
+    }
 }

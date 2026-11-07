@@ -14,7 +14,7 @@ use logic::game::{Game, GameEvent};
 use logic::monster::{Zombie, ZombieState};
 use logic::player::{Facing, PlayerInput};
 use logic::skeleton::{Projectile, ProjectileKind, Skeleton, SkeletonStage};
-use logic::weapon::Weapon;
+use logic::weapon::{DroppedWeapon, Weapon};
 use logic::world::World;
 use macroquad::math::{Rect, Vec2};
 
@@ -135,12 +135,13 @@ fn touching_miss_finds_her_day_or_night_and_she_disappears() {
 }
 
 #[test]
-fn found_miss_moves_to_a_different_spot_next_morning_and_can_be_found_again() {
+fn found_miss_hides_somewhere_else_after_20_seconds_and_can_be_found_again() {
     for seed in 0..200 {
         let mut g = quiet_game(seed);
         let first = miss_rect(&g);
         find_miss(&mut g);
-        go_to_next_morning(&mut g);
+        stand(&mut g, 40.0);
+        g.update(&none(), MISS_RETURN_SECONDS + 0.1);
         assert!(g.miss.as_ref().unwrap().is_hiding(), "seed {seed}");
         assert_ne!(miss_rect(&g), first, "seed {seed}: 조금 전과 다른 곳");
         let events = find_miss(&mut g);
@@ -149,20 +150,25 @@ fn found_miss_moves_to_a_different_spot_next_morning_and_can_be_found_again() {
 }
 
 #[test]
-fn found_miss_stays_gone_until_morning_even_after_night_comes() {
+fn found_miss_comes_back_after_20_real_seconds_not_by_the_clock() {
     let mut g = quiet_game(5);
     find_miss(&mut g);
     stand(&mut g, 40.0);
-    g.clock.update(DAY_SECONDS);
+    g.clock.update(DAY_SECONDS + NIGHT_SECONDS);
     g.update(&none(), FRAME);
-    assert!(g.clock.is_night());
+    assert!(!g.miss.as_ref().unwrap().is_hiding(), "아침이 와도 시간이 다 차기 전에는 안 나온다");
+    run(&mut g, &none(), MISS_RETURN_SECONDS - 1.0);
     assert!(!g.miss.as_ref().unwrap().is_hiding());
+    run(&mut g, &none(), 1.5);
+    assert!(g.miss.as_ref().unwrap().is_hiding());
 }
 
 #[test]
-fn unfound_miss_stays_in_place_after_morning() {
+fn unfound_miss_stays_in_place_through_time_and_mornings() {
     let mut g = quiet_game(5);
     let before = miss_rect(&g);
+    stand(&mut g, 40.0);
+    run(&mut g, &none(), MISS_RETURN_SECONDS * 2.0);
     for _ in 0..3 {
         go_to_next_morning(&mut g);
     }
@@ -195,22 +201,98 @@ fn new_game_forgets_found_miss_and_weapons() {
 // ---- US-052 쏟아지는 무기 ----
 
 #[test]
-fn finding_miss_drops_sword_axe_gun_around_her() {
-    let mut g = quiet_game(4);
-    let x = miss_rect(&g).center().x;
-    find_miss(&mut g);
-    stand(&mut g, 40.0);
-    let list: Vec<(Weapon, f32)> = g.weapons.dropped.iter().map(|w| (w.kind, w.rect.center().x)).collect();
-    let expect_x = |dx: f32| (x + dx).clamp(WEAPON_SIZE / 2.0, MAP_WIDTH - WEAPON_SIZE / 2.0);
-    assert_eq!(
-        list,
-        [
-            (Weapon::Sword, expect_x(-WEAPON_DROP_SPREAD)),
-            (Weapon::Axe, expect_x(0.0)),
-            (Weapon::Gun, expect_x(WEAPON_DROP_SPREAD)),
-        ]
-    );
-    assert!(g.weapons.dropped.iter().all(|w| w.is_falling() && w.rect.y < 0.0), "화면 위쪽에서 시작");
+fn finding_miss_drops_one_weapon_at_her_spot() {
+    for seed in 0..100 {
+        let mut g = quiet_game(seed);
+        let x = miss_rect(&g).center().x;
+        find_miss(&mut g);
+        assert_eq!(g.weapons.dropped.len(), 1, "seed {seed}");
+        let dropped = &g.weapons.dropped[0];
+        assert_ne!(dropped.kind, Weapon::Hands);
+        assert_eq!(dropped.rect.center().x, x);
+        assert!(dropped.is_falling() && dropped.rect.y < 0.0, "화면 위쪽에서 시작");
+    }
+}
+
+/// 시드가 같은 무기 꾸러미에서 줍기를 되풀이한 무기 순서.
+fn weapons_in_drop_order(seed: u32, drops: usize, w: &World) -> Vec<Weapon> {
+    let mut weapons = logic::weapon::Weapons::new(seed);
+    let mut order = Vec::new();
+    for _ in 0..drops {
+        weapons.drop_one(100.0, w);
+        order.push(weapons.dropped[0].kind);
+        // 플레이어가 떨어지는 무기를 바로 줍는다.
+        weapons.update(0.0, weapons.dropped[0].rect);
+    }
+    order
+}
+
+#[test]
+fn drops_follow_the_seed_and_blades_come_new_ones_first_and_gun_only_once() {
+    let w = World::long_map(1);
+    let mut first_kinds = Vec::new();
+    for seed in 0..100 {
+        let order = weapons_in_drop_order(seed, 12, &w);
+        assert_eq!(order, weapons_in_drop_order(seed, 12, &w), "시드가 같으면 같다");
+        let mut owned = Vec::new();
+        for kind in &order {
+            assert_ne!(*kind, Weapon::Hands);
+            if *kind == Weapon::Gun {
+                assert!(!owned.contains(&Weapon::Gun), "seed {seed}: 총을 가졌는데 또 나옴 {order:?}");
+            } else if owned.contains(kind) {
+                let other = if *kind == Weapon::Sword { Weapon::Axe } else { Weapon::Sword };
+                assert!(owned.contains(&other), "seed {seed}: 없는 칼·도끼가 먼저다 {order:?}");
+            }
+            owned.push(*kind);
+        }
+        first_kinds.push(order[0]);
+    }
+    for kind in [Weapon::Sword, Weapon::Axe, Weapon::Gun] {
+        assert!(first_kinds.contains(&kind), "첫 무기로 {kind:?}도 나온다");
+    }
+}
+
+/// 시드마다 `owned`를 가진 뒤 한 번 떨어뜨려서 총이 나온 비율.
+fn gun_share_with(owned: &[Weapon], w: &World) -> f32 {
+    const SEEDS: u32 = 5000;
+    let far = Rect::new(-999.0, -999.0, 1.0, 1.0);
+    let mut guns = 0;
+    for seed in 0..SEEDS {
+        let mut weapons = logic::weapon::Weapons::new(seed);
+        for kind in owned {
+            let drop = DroppedWeapon::above(*kind, 100.0, w);
+            let body = drop.rect;
+            weapons.dropped.push(drop);
+            weapons.update(0.0, body);
+        }
+        weapons.update(0.0, far);
+        weapons.drop_one(100.0, w);
+        guns += u32::from(weapons.dropped[0].kind == Weapon::Gun);
+    }
+    guns as f32 / SEEDS as f32
+}
+
+#[test]
+fn gun_drops_about_10_percent_even_when_only_the_gun_is_missing() {
+    let w = World::long_map(1);
+    assert_eq!(GUN_DROP_CHANCE, 0.1);
+    for owned in [&[][..], &[Weapon::Sword], &[Weapon::Sword, Weapon::Axe]] {
+        let share = gun_share_with(owned, &w);
+        assert!((0.085..0.115).contains(&share), "{owned:?}: 총 {share}");
+    }
+    assert_eq!(gun_share_with(&[Weapon::Gun], &w), 0.0, "이미 있으면 안 나온다");
+}
+
+#[test]
+fn blade_lying_on_the_ground_is_not_dropped_twice() {
+    let w = World::long_map(1);
+    for seed in 0..200 {
+        let mut weapons = logic::weapon::Weapons::new(seed);
+        weapons.drop_one(100.0, &w);
+        weapons.drop_one(200.0, &w);
+        let (first, second) = (weapons.dropped[0].kind, weapons.dropped[1].kind);
+        assert!(first != second || first == Weapon::Gun, "seed {seed}: {first:?}");
+    }
 }
 
 #[test]
@@ -218,8 +300,8 @@ fn weapon_falls_at_300_and_lands_on_the_surface_on_every_spot_and_map() {
     for seed in 0..500 {
         let w = World::long_map(seed);
         for (_, x, _) in HIDE_SPOTS {
-            let mut weapons = logic::weapon::Weapons::new();
-            weapons.drop_around(x, &w);
+            let mut weapons = logic::weapon::Weapons::new(seed);
+            weapons.drop_one(x, &w);
             let far = Rect::new(-999.0, -999.0, 1.0, 1.0);
             weapons.update(1.0, far);
             let one_second_down = -WEAPON_SIZE + WEAPON_FALL_SPEED;
@@ -249,16 +331,16 @@ fn fast_forward_does_not_speed_up_falling_weapons() {
 #[test]
 fn touching_a_weapon_picks_it_up_and_holds_it_even_in_the_air() {
     let mut g = quiet_game(4);
-    find_miss(&mut g);
+    drop_weapon(&mut g, Weapon::Sword, 300.0);
+    drop_weapon(&mut g, Weapon::Gun, 500.0);
     let sword = g.weapons.dropped[0].rect;
-    assert_eq!(g.weapons.dropped[0].kind, Weapon::Sword);
     g.player.pos = sword.point();
     g.player.vel = Vec2::ZERO;
     let events = g.update(&none(), FRAME);
     assert!(events.contains(&GameEvent::WeaponPicked { kind: Weapon::Sword }), "{events:?}");
     assert_eq!(g.weapons.held(), Weapon::Sword);
     assert_eq!(g.weapons.owned(), [Weapon::Sword]);
-    assert_eq!(g.weapons.dropped.len(), 2);
+    assert_eq!(g.weapons.dropped.len(), 1);
     assert_eq!(Weapon::Sword.picked_text(), "칼을 주웠어요!");
     assert_eq!(Weapon::Axe.picked_text(), "도끼를 주웠어요!");
     assert_eq!(Weapon::Gun.picked_text(), "총을 주웠어요!");
@@ -275,54 +357,99 @@ fn weapon_does_not_block_and_monsters_leave_it_alone() {
     stand(&mut g, x - 300.0);
     g.update(&none(), FRAME);
     assert_eq!(g.combat.zombies.list.len(), 1);
-    assert_eq!(g.weapons.dropped.len(), 3);
+    assert_eq!(g.weapons.dropped.len(), 1);
 }
 
 #[test]
 fn picking_up_a_weapon_you_have_only_removes_it() {
     let mut g = quiet_game(4);
-    find_miss(&mut g);
-    let axe = g.weapons.dropped[1].rect;
-    g.player.pos = axe.point();
-    g.update(&none(), FRAME);
+    give(&mut g, &[Weapon::Axe]);
     assert_eq!(g.weapons.held(), Weapon::Axe);
-    go_to_next_morning(&mut g);
-    find_miss(&mut g);
     g.weapons.switch();
     assert_eq!(g.weapons.held(), Weapon::Hands);
-    let axe = g.weapons.dropped.iter().rfind(|w| w.kind == Weapon::Axe).map(|w| w.rect).unwrap();
-    let left = g.weapons.dropped.len();
-    g.player.pos = axe.point();
+    drop_weapon(&mut g, Weapon::Axe, 300.0);
+    g.player.pos = g.weapons.dropped[0].rect.point();
     let events = g.update(&none(), FRAME);
-    assert_eq!(g.weapons.dropped.len(), left - 1, "땅에서 사라진다");
+    assert!(g.weapons.dropped.is_empty(), "땅에서 사라진다");
     assert!(!events.iter().any(|e| matches!(e, GameEvent::WeaponPicked { .. })));
     assert_eq!(g.weapons.owned(), [Weapon::Axe], "하나뿐이다");
     assert_eq!(g.weapons.held(), Weapon::Hands);
 }
 
 #[test]
-fn unpicked_weapons_stay_through_the_night() {
+fn unpicked_weapon_vanishes_15_seconds_after_landing() {
     let mut g = quiet_game(4);
     find_miss(&mut g);
     stand(&mut g, 40.0);
+    let falling_seconds = (GROUND_Y + WEAPON_SIZE) / WEAPON_FALL_SPEED;
+    run(&mut g, &none(), 0.5);
+    assert_eq!(g.weapons.dropped[0].seconds_left(), WEAPON_GROUND_SECONDS, "떨어지는 동안은 줄지 않는다");
+    run(&mut g, &none(), falling_seconds + 0.5);
+    assert!(!g.weapons.dropped[0].is_falling());
+    let left = g.weapons.dropped[0].seconds_left();
+    assert!(left < WEAPON_GROUND_SECONDS);
+    run(&mut g, &none(), left - 0.5);
+    assert_eq!(g.weapons.dropped.len(), 1, "시간이 남으면 그대로 있다");
+    let events = run(&mut g, &none(), 1.0);
+    assert!(g.weapons.dropped.is_empty());
+    assert!(!events.iter().any(|e| matches!(e, GameEvent::WeaponPicked { .. })), "주운 것이 아니다");
+    assert!(g.weapons.owned().is_empty());
+}
+
+#[test]
+fn clock_alone_does_not_shorten_a_weapons_time() {
+    let mut g = quiet_game(4);
+    drop_weapon(&mut g, Weapon::Sword, 300.0);
+    stand(&mut g, 40.0);
     run(&mut g, &none(), 3.0);
-    go_to_next_morning(&mut g);
-    assert_eq!(g.weapons.dropped.len(), 3);
+    let left = g.weapons.dropped[0].seconds_left();
+    g.clock.update(WEAPON_GROUND_SECONDS * 3.0);
+    assert_eq!(g.weapons.dropped[0].seconds_left(), left);
+}
+
+#[test]
+fn vanished_weapon_can_drop_again_and_owned_weapons_stay() {
+    let w = World::long_map(1);
+    let mut weapons = logic::weapon::Weapons::new(1);
+    let far = Rect::new(-999.0, -999.0, 1.0, 1.0);
+    weapons.drop_one(100.0, &w);
+    weapons.drop_one(200.0, &w);
+    let first = weapons.dropped[0].rect;
+    let kept = weapons.dropped[0].kind;
+    let vanishing = weapons.dropped[1].kind;
+    weapons.update(0.0, first);
+    assert_eq!(weapons.held(), kept);
+    weapons.update(3.0, far);
+    weapons.update(WEAPON_GROUND_SECONDS + 1.0, far);
+    assert!(weapons.dropped.is_empty());
+    assert_eq!((weapons.owned(), weapons.held()), (vec![kept], kept), "가진 무기와 손의 무기는 그대로다");
+
+    let mut seen = Vec::new();
+    for _ in 0..200 {
+        weapons.drop_one(100.0, &w);
+        seen.push(weapons.dropped[0].kind);
+        weapons.dropped.clear();
+    }
+    assert!(seen.contains(&vanishing), "사라진 무기는 다시 나올 수 있다");
+    assert!(!seen.contains(&kept), "새 무기가 있으면 가진 무기는 안 나온다");
 }
 
 // ---- US-053 무기로 공격 ----
 
 fn give(g: &mut Game, kinds: &[Weapon]) {
-    find_miss(g);
     for kind in kinds {
-        let rect = g.weapons.dropped.iter().find(|d| d.kind == *kind).expect("떨어진 무기").rect;
-        g.player.pos = rect.point();
+        drop_weapon(g, *kind, 300.0);
+        g.player.pos = g.weapons.dropped[0].rect.point();
         g.player.vel = Vec2::ZERO;
         g.update(&none(), FRAME);
     }
-    g.weapons.dropped.clear();
     stand(g, 300.0);
     g.player.facing = Facing::Right;
+}
+
+/// 미스를 찾지 않고 무기 하나를 하늘에서 떨어뜨린다.
+fn drop_weapon(g: &mut Game, kind: Weapon, x: f32) {
+    g.weapons.dropped.push(DroppedWeapon::above(kind, x, &g.world));
 }
 
 fn attack_input() -> PlayerInput {
@@ -451,14 +578,15 @@ fn step_onto_citizen(g: &mut Game, index: usize) -> Vec<GameEvent> {
 }
 
 #[test]
-fn one_citizen_per_place_standing_on_the_ground() {
+fn two_citizens_stand_in_the_volcano_and_the_house() {
     let g = citizen_game();
     let xs: Vec<f32> = g.citizens.list.iter().map(|c| c.rect.center().x).collect();
-    assert_eq!(xs, [480.0, 1500.0, 2400.0, 3200.0]);
-    for (i, c) in g.citizens.list.iter().enumerate() {
+    assert_eq!(xs, [1500.0, 3200.0]);
+    let places: Vec<&str> = xs.iter().map(|x| g.world.place_name_at(*x)).collect();
+    assert_eq!(places, ["화산", "집"]);
+    for c in &g.citizens.list {
         assert!(c.is_standing());
         assert_eq!(c.rect.y + c.rect.h, g.world.ground_y);
-        assert_eq!(g.world.place_index_at(c.rect.x), i);
     }
 }
 
@@ -511,7 +639,7 @@ fn monster_touch_pops_and_nearby_player_is_hurt_but_far_player_is_not() {
 #[test]
 fn floating_zombie_pops_only_when_its_body_touches() {
     let mut g = citizen_game();
-    let body = g.citizens.list[2].rect;
+    let body = g.citizens.list[1].rect;
     stand(&mut g, body.x - 400.0);
     let mut zombie = Zombie::new(body.x, g.world.ground_y, true);
     zombie.state = ZombieState::Floating;
@@ -523,16 +651,77 @@ fn floating_zombie_pops_only_when_its_body_touches() {
 }
 
 #[test]
-fn arrows_and_attacks_do_not_pop_citizens() {
+fn arrows_do_not_touch_citizens() {
     let mut g = citizen_game();
     let body = g.citizens.list[0].rect;
     stand(&mut g, body.x - PLAYER_WIDTH - 20.0);
-    g.update(&attack_input(), 0.0);
-    assert!(g.citizens.list[0].is_standing());
     let world = World { width: MAP_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
     g.combat.skeletons.projectiles.push(Projectile::new(body.x, 1.0, ProjectileKind::Arrow, 2, &world));
     g.clock.update(DAY_SECONDS);
     g.update(&none(), FRAME);
+    assert!(g.citizens.list[0].is_standing());
+}
+
+/// 시민 앞 `distance`에서 바라보고 때린다.
+fn attack_citizen_from(g: &mut Game, distance: f32) -> Vec<GameEvent> {
+    let body = g.citizens.list[0].rect;
+    stand(g, body.x - PLAYER_WIDTH - distance);
+    g.player.facing = Facing::Right;
+    g.update(&attack_input(), 0.0)
+}
+
+#[test]
+fn attack_knocks_a_citizen_down_quietly_with_every_weapon() {
+    for (weapon, distance) in [
+        (None, PLAYER_ATTACK_RANGE - 1.0),
+        (Some(Weapon::Sword), SWORD_RANGE - 1.0),
+        (Some(Weapon::Axe), AXE_RANGE - 1.0),
+        (Some(Weapon::Gun), GUN_RANGE - 1.0),
+    ] {
+        let mut g = citizen_game();
+        if let Some(kind) = weapon {
+            give(&mut g, &[kind]);
+        }
+        let at = g.citizens.list[0].rect.center();
+        let events = attack_citizen_from(&mut g, distance);
+        assert_eq!(events, [GameEvent::Combat(CombatEvent::CitizenDefeated { at })], "{weapon:?}");
+        assert!(!g.citizens.list[0].is_standing());
+        assert!(g.citizens.list[1].is_standing());
+        assert_eq!(g.combat.health.hp(), PLAYER_START_HP, "주인공은 안 다친다");
+        assert_eq!(g.combat.experience, 0, "경험치 없음");
+    }
+}
+
+#[test]
+fn attack_blast_does_not_defeat_monsters_next_to_the_citizen() {
+    let mut g = citizen_game();
+    let body = g.citizens.list[0].rect;
+    g.combat.zombies.list.push(Zombie::new(body.x + 60.0, g.world.ground_y, false));
+    attack_citizen_from(&mut g, 10.0);
+    assert_eq!(g.combat.zombies.list.len(), 1, "터지지 않으니 곁의 몬스터도 그대로다");
+}
+
+#[test]
+fn attack_does_not_reach_citizens_too_far_or_behind() {
+    let mut g = citizen_game();
+    attack_citizen_from(&mut g, PLAYER_ATTACK_RANGE + 1.0);
+    assert!(g.citizens.list[0].is_standing(), "멀면 안 닿는다");
+
+    g.player.facing = Facing::Left;
+    let body = g.citizens.list[0].rect;
+    stand(&mut g, body.x - PLAYER_WIDTH - 10.0);
+    g.update(&attack_input(), 0.0);
+    assert!(g.citizens.list[0].is_standing(), "등 뒤는 안 맞는다");
+}
+
+#[test]
+fn citizen_knocked_down_by_attack_comes_back_after_30_seconds() {
+    let mut g = citizen_game();
+    attack_citizen_from(&mut g, 10.0);
+    stand(&mut g, 40.0);
+    run(&mut g, &none(), CITIZEN_RESPAWN_SECONDS - 0.5);
+    assert!(!g.citizens.list[0].is_standing());
+    run(&mut g, &none(), 1.0);
     assert!(g.citizens.list[0].is_standing());
 }
 
@@ -561,17 +750,38 @@ fn blast_defeats_near_monsters_of_any_hp_without_experience_and_leaves_far_ones(
 #[test]
 fn blast_can_bring_the_player_down() {
     let mut g = citizen_game();
-    g.combat.health = logic::combat::PlayerHealth::new();
-    let mut last = Vec::new();
-    for round in 0..4 {
-        for _ in 0..(PLAYER_HURT_INVINCIBLE_SECONDS / FRAME) as usize + 2 {
-            g.update(&none(), FRAME);
-        }
-        last = step_onto_citizen(&mut g, round);
-        assert_eq!(popped(&last), 1);
-    }
+    wear_down_to_one_blast_left(&mut g);
+    run(&mut g, &none(), PLAYER_HURT_INVINCIBLE_SECONDS + 0.1);
+    let events = step_onto_citizen(&mut g, 0);
+    assert_eq!(popped(&events), 1);
     assert!(g.combat.health.is_down(), "체력 7이 2씩 네 번이면 쓰러진다");
-    assert!(last.contains(&GameEvent::Combat(CombatEvent::PlayerDown)));
+    assert!(events.contains(&GameEvent::Combat(CombatEvent::PlayerDown)));
+}
+
+/// 펑을 세 번 맞혀서 한 번만 더 맞으면 쓰러지게 한다.
+fn wear_down_to_one_blast_left(g: &mut Game) {
+    stand(g, 40.0);
+    for _ in 0..3 {
+        run(g, &none(), PLAYER_HURT_INVINCIBLE_SECONDS + 0.1);
+        let body = g.player.rect();
+        g.combat.citizen_blast(body.center(), body);
+    }
+    assert_eq!(g.combat.health.hp(), 1);
+}
+
+#[test]
+fn blast_shares_the_5_second_safety_with_every_other_hit() {
+    let mut g = citizen_game();
+    stand(&mut g, 40.0);
+    let body = g.player.rect();
+    g.combat.citizen_blast(body.center(), body);
+    assert_eq!(g.combat.health.hp(), PLAYER_START_HP - 2);
+    run(&mut g, &none(), PLAYER_HURT_INVINCIBLE_SECONDS - 0.5);
+    g.combat.citizen_blast(body.center(), body);
+    assert_eq!(g.combat.health.hp(), PLAYER_START_HP - 2, "5초 안에는 안 다친다");
+    run(&mut g, &none(), 1.0);
+    g.combat.citizen_blast(body.center(), body);
+    assert_eq!(g.combat.health.hp(), PLAYER_START_HP - 4);
 }
 
 #[test]
@@ -623,7 +833,8 @@ fn down_screen_stops_the_citizen_timer() {
 }
 
 fn while_player_goes_down(g: &mut Game) {
-    for _ in 0..600 {
+    // 체력 7은 네 번 맞아야 하고, 맞을 때마다 5초씩 안 맞는다.
+    for _ in 0..(PLAYER_HURT_INVINCIBLE_SECONDS * 5.0 / FRAME) as usize {
         if g.combat.health.is_down() {
             return;
         }
@@ -752,15 +963,29 @@ fn walking_citizens_stop_on_the_down_screen() {
 }
 
 #[test]
-fn walking_citizens_start_near_the_middle_of_their_place() {
+fn walking_citizens_start_at_the_free_spot_nearest_the_middle_of_their_place() {
+    let mut started_in_the_middle = 0;
     for seed in 0..500 {
         let g = new_game(seed);
         for (place, walker) in g.citizens.walkers.iter().enumerate() {
-            let middle = (place as f32 + 0.5) * SCREEN_WIDTH;
-            assert!((walker.rect.center().x - middle).abs() <= 160.0, "seed {seed}: {:?}", walker.rect);
-            assert!(!g.world.monster_walls().any(|wall| logic::world::really_overlaps(wall, walker.rect)));
+            let r = walker.rect;
+            let is_blocked = |x: f32| {
+                let body = Rect { x, ..r };
+                g.world.monster_walls().any(|wall| logic::world::really_overlaps(wall, body))
+            };
+            assert!(!is_blocked(r.x), "seed {seed}: {r:?}");
+            let middle_x = place as f32 * SCREEN_WIDTH + (SCREEN_WIDTH - r.w) / 2.0;
+            let distance = (r.x - middle_x).abs();
+            started_in_the_middle += u32::from(distance == 0.0);
+            // 찾는 칸이 8픽셀이라 그만큼은 더 멀 수 있다.
+            let mut closer = 0.0;
+            while closer + 8.0 < distance {
+                assert!(is_blocked(middle_x - closer) && is_blocked(middle_x + closer), "seed {seed}: {r:?}");
+                closer += 8.0;
+            }
         }
     }
+    assert!(started_in_the_middle > 1000, "가운데에 선 시민 {started_in_the_middle}/2000");
 }
 
 #[test]
@@ -797,10 +1022,9 @@ fn walking_citizens_are_not_walking_on_the_down_screen() {
 
     // 펑으로 쓰러지는 바로 그 프레임에도.
     let mut g = citizen_game();
-    for round in 0..4 {
-        run(&mut g, &none(), PLAYER_HURT_INVINCIBLE_SECONDS + 0.1);
-        step_onto_citizen(&mut g, round);
-    }
+    wear_down_to_one_blast_left(&mut g);
+    run(&mut g, &none(), PLAYER_HURT_INVINCIBLE_SECONDS + 0.1);
+    step_onto_citizen(&mut g, 0);
     assert!(g.combat.health.is_down());
     assert!(g.citizens.walkers.iter().all(|w| !w.is_walking()));
 }
@@ -855,14 +1079,7 @@ fn holding_left_and_jumping_clears_every_citizen_on_many_maps() {
         for index in 0..CITIZEN_XS.len() {
             let probe = new_game(seed);
             let body = probe.citizens.list[index].rect;
-            // 산 시민 오른쪽은 바위 첫 칸이다. 그 위에서 뛴다.
-            let step = probe.world.rock_steps()[0];
-            let on_rock = step.x < body.x + 100.0 && body.x < step.x;
-            let mut g = game_near_citizen(seed, if on_rock { step.x } else { body.x + body.w + 52.0 });
-            if on_rock {
-                g.player.pos = Vec2::new(step.x + 8.0, step.y - PLAYER_HEIGHT);
-                g.update(&none(), FRAME);
-            }
+            let mut g = game_near_citizen(seed, body.x + body.w + 52.0);
             assert!(run_and_jump_over(&mut g, index, false), "seed {seed}: {index}번 시민을 못 넘음, {:?}", g.player.pos);
         }
     }
@@ -914,4 +1131,57 @@ fn jumping_a_box_then_the_citizen_works_from_most_take_off_spots() {
     println!("상자 앞에서 뛰고 시민도 넘은 판 {cleared}/{tries}");
     assert!(tries > 100);
     assert!(cleared * 2 > tries, "{cleared}/{tries}");
+}
+
+// ---- 아이가 정한 문구 ----
+
+#[test]
+fn texts_for_the_screen() {
+    assert_eq!(ZOMBIE_APPEAR_TEXT, "얍얍 공격하라");
+    assert_eq!(SKELETON_DODGE_TEXT, "만세");
+    assert_eq!(CITIZEN_HELP_TEXT, "도움이 필요해요");
+}
+
+// ---- REVIEW-011 ----
+
+#[test]
+fn returning_miss_never_lands_on_the_player() {
+    let ground_spots: Vec<f32> = HIDE_SPOTS.iter().filter(|spot| spot.2 == 0.0).map(|spot| spot.1).collect();
+    for seed in 0..300 {
+        let mut g = quiet_game(seed);
+        let found_x = miss_rect(&g).center().x;
+        find_miss(&mut g);
+        let wait_x = ground_spots.iter().copied().find(|x| *x != found_x).unwrap();
+        stand(&mut g, wait_x - PLAYER_WIDTH / 2.0);
+        let events = g.update(&none(), MISS_RETURN_SECONDS + 0.1);
+        assert!(!events.iter().any(|e| matches!(e, GameEvent::MissFound { .. })), "seed {seed}: 보이기 전에 찾아짐");
+        assert!(g.miss.as_ref().unwrap().is_hiding());
+        assert_ne!(miss_rect(&g).center().x, wait_x, "seed {seed}");
+        assert_ne!(miss_rect(&g).center().x, found_x, "seed {seed}");
+    }
+}
+
+#[test]
+fn miss_still_comes_back_when_every_spot_is_near_the_player() {
+    let w = World::long_map(1);
+    let everywhere = Rect::new(-100.0, -100.0, MAP_WIDTH + 200.0, 1000.0);
+    let mut miss = logic::miss::Miss::new(1);
+    let before = miss.rect(&w);
+    miss.get_found();
+    miss.wait_to_come_back(MISS_RETURN_SECONDS + 0.1, everywhere, &w);
+    assert!(miss.is_hiding());
+    assert_ne!(miss.rect(&w), before);
+}
+
+#[test]
+fn hitting_the_empty_citizen_spot_does_not_restart_the_30_seconds() {
+    let mut g = citizen_game();
+    attack_citizen_from(&mut g, 10.0);
+    assert!(!g.citizens.list[0].is_standing());
+    run(&mut g, &none(), 10.0);
+    assert!(attack_citizen_from(&mut g, 10.0).is_empty(), "쓰러진 시민은 또 안 맞는다");
+    run(&mut g, &none(), CITIZEN_RESPAWN_SECONDS - 10.5);
+    assert!(!g.citizens.list[0].is_standing());
+    run(&mut g, &none(), 1.0);
+    assert!(g.citizens.list[0].is_standing(), "처음 쓰러진 때부터 30초에 돌아온다");
 }

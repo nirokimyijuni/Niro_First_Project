@@ -18,6 +18,8 @@ use logic::world::World;
 use macroquad::math::Rect;
 
 const FRAME: f32 = 1.0 / 60.0;
+/// 체력 7이 좀비에게 네 번 맞아 쓰러질 만큼의 시간. 맞을 때마다 그만큼 안 맞는다.
+const SECONDS_TO_GO_DOWN: f32 = PLAYER_HURT_INVINCIBLE_SECONDS * 3.0 + 1.0;
 const SEED: u32 = 7;
 
 /// 좀비만 나오는 밤. 스켈레톤이 섞인 밤은 m5_skeleton.rs가 본다.
@@ -352,7 +354,7 @@ fn touching_a_zombie_takes_2_hp_then_1_second_of_safety() {
     assert!(c.health.is_invincible());
 
     let events = run(&mut c, PLAYER_HURT_INVINCIBLE_SECONDS - 0.1, true, player, &w);
-    assert_eq!(c.health.hp(), 5, "1초 동안은 다시 맞지 않는다");
+    assert_eq!(c.health.hp(), 5, "무적 시간 동안은 다시 맞지 않는다");
     assert!(events.is_empty());
 }
 
@@ -363,7 +365,7 @@ fn hp_stops_at_0_and_game_over_comes_once() {
     let mut c = night_with_one_zombie(player.x, false);
     c.zombies.list.push(Zombie::new(player.x, GROUND_Y, false));
 
-    let events = run(&mut c, 5.0, true, player, &w);
+    let events = run(&mut c, SECONDS_TO_GO_DOWN, true, player, &w);
     assert_eq!(c.health.hp(), 0, "7 - 2 - 2 - 2 - 2는 0에서 멈춘다");
     assert!(c.health.is_down());
     assert_eq!(count(&events, |e| matches!(e, CombatEvent::PlayerHurt { .. })), 4);
@@ -375,7 +377,7 @@ fn after_going_down_nothing_moves() {
     let w = flat_world();
     let player = player_at(300.0);
     let mut c = night_with_one_zombie(player.x, false);
-    run(&mut c, 5.0, true, player, &w);
+    run(&mut c, SECONDS_TO_GO_DOWN, true, player, &w);
     assert!(c.health.is_down());
 
     let far = player_at(900.0);
@@ -585,7 +587,7 @@ fn after_player_down_clock_player_coins_and_zombies_all_stop() {
     let x = g.player.pos.x;
     zombie_at(&mut g, x);
     let mut events = Vec::new();
-    for _ in 0..(5.0 / FRAME) as usize {
+    for _ in 0..(SECONDS_TO_GO_DOWN / FRAME) as usize {
         events.extend(g.update(&PlayerInput::default(), FRAME));
     }
     assert!(g.combat.health.is_down());

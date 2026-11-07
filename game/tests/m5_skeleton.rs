@@ -761,18 +761,99 @@ fn half_skeleton_never_shoots() {
 }
 
 #[test]
-fn hand_hits_for_3_when_touching_then_safety() {
+fn touching_is_checked_before_the_hand_so_the_hand_misses_on_contact() {
     let w = flat_world();
     let player = player_at(300.0);
     let mut c = night_with(player.x + 10.0, SkeletonStage::Half);
     let events = c.update(FRAME, true, player, &w);
-    assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonHandHit { .. })), 1);
-    assert!(events.contains(&CombatEvent::PlayerHurt { amount: 3, hp_left: 4 }));
-
-    let events = run(&mut c, PLAYER_HURT_INVINCIBLE_SECONDS - 0.1, true, player, &w);
-    assert_eq!(hurts(&events), 0);
     assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonHandHit { .. })), 0);
-    assert_eq!(hurts(&run(&mut c, 0.2, true, player, &w)), 1);
+    assert_eq!(hurts(&events), 0);
+    assert!(c.skeletons.list.is_empty());
+}
+
+/// 몸 사이가 `gap`인 자리에 절반 스켈레톤을 세운다. 한 프레임만 보면 걸어서 달라지지 않는다.
+fn half_skeleton_with_gap(player: Rect, gap: f32) -> Combat {
+    night_with(player.x + player.w + gap, SkeletonStage::Half)
+}
+
+#[test]
+fn hand_reaches_60_pixels_in_front_for_3_damage() {
+    let w = flat_world();
+    let player = player_at(300.0);
+    let mut c = half_skeleton_with_gap(player, SKELETON_HAND_RANGE - 5.0);
+    let events = c.update(FRAME, true, player, &w);
+    assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonHandHit { .. })), 1);
+    assert!(events.contains(&CombatEvent::PlayerHurt { amount: SKELETON_HALF_ATTACK, hp_left: PLAYER_START_HP - 3 }));
+    assert_eq!(c.skeletons.list.len(), 1, "손이 닿아도 스켈레톤은 안 쓰러진다");
+
+    let mut c = half_skeleton_with_gap(player, SKELETON_HAND_RANGE + 5.0);
+    assert_eq!(hurts(&c.update(FRAME, true, player, &w)), 0, "손 거리 밖");
+
+    // 왼쪽에서도 같다.
+    let mut c = night_with(player.x - SKELETON_WIDTH - SKELETON_HAND_RANGE + 5.0, SkeletonStage::Half);
+    assert_eq!(hurts(&c.update(FRAME, true, player, &w)), 1);
+}
+
+#[test]
+fn only_the_half_skeleton_has_a_hand() {
+    let w = flat_world();
+    let player = player_at(300.0);
+    for stage in [SkeletonStage::Normal, SkeletonStage::Full] {
+        let mut c = night_with(player.x + player.w + 20.0, stage);
+        assert_eq!(hurts(&c.update(FRAME, true, player, &w)), 0, "{stage:?}");
+    }
+}
+
+#[test]
+fn hand_waits_for_the_5_second_safety() {
+    let w = flat_world();
+    let player = player_at(300.0);
+    let mut c = half_skeleton_with_gap(player, SKELETON_HAND_RANGE - 5.0);
+    let mut hand_hits = 0;
+    let mut hurt = 0;
+    for _ in 0..((PLAYER_HURT_INVINCIBLE_SECONDS - 0.2) / FRAME) as usize {
+        // 걸어와 닿아서 쓰러지지 않게 자리를 지킨다.
+        c.skeletons.list.truncate(1);
+        c.zombies.list.clear();
+        c.skeletons.list[0].pos.x = player.x + player.w + SKELETON_HAND_RANGE - 5.0;
+        let events = c.update(FRAME, true, player, &w);
+        hand_hits += count(&events, |e| matches!(e, CombatEvent::SkeletonHandHit { .. }));
+        hurt += hurts(&events);
+    }
+    assert_eq!((hand_hits, hurt), (1, 1), "무적 동안은 또 안 맞는다");
+}
+
+#[test]
+fn running_in_gets_one_hand_hit_then_contact_defeats_the_skeleton() {
+    let w = flat_world();
+    let mut c = night_with(500.0, SkeletonStage::Half);
+    let mut player = player_at(300.0);
+    let mut all = Vec::new();
+    for _ in 0..(2.0 / FRAME) as usize {
+        player.x += PLAYER_WALK_SPEED * FRAME;
+        c.zombies.list.clear();
+        all.extend(c.update(FRAME, true, player, &w));
+        if c.skeletons.list.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(count(&all, |e| matches!(e, CombatEvent::SkeletonHandHit { .. })), 1);
+    assert_eq!(count(&all, |e| matches!(e, CombatEvent::SkeletonDefeated { .. })), 1);
+    assert_eq!(c.health.hp(), PLAYER_START_HP - SKELETON_HALF_ATTACK);
+    assert_eq!(c.experience, EXPERIENCE_PER_DEFEAT);
+}
+
+#[test]
+fn running_in_while_safe_or_dropping_from_above_avoids_the_hand() {
+    let w = flat_world();
+    // 머리 위에서는 손이 안 닿고, 내려앉으면 몸이 먼저 닿는다.
+    let mut c = night_with(300.0, SkeletonStage::Half);
+    let above = Rect::new(300.0, GROUND_Y - SKELETON_HEIGHT - PLAYER_HEIGHT - 1.0, PLAYER_WIDTH, PLAYER_HEIGHT);
+    assert_eq!(hurts(&c.update(FRAME, true, above, &w)), 0);
+    let landed = Rect { y: above.y + 10.0, ..above };
+    let events = c.update(FRAME, true, landed, &w);
+    assert_eq!(hurts(&events), 0);
+    assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonDefeated { .. })), 1);
 }
 
 #[test]
@@ -842,20 +923,24 @@ fn nothing_happens_after_going_down_by_a_shot() {
 }
 
 #[test]
-fn hand_that_downs_the_player_ends_the_events() {
+fn touching_a_skeleton_cannot_bring_down_a_weak_player() {
     let w = flat_world();
     let player = player_at(300.0);
-    let mut c = night_with(player.x, SkeletonStage::Half);
-    c.skeletons.list.push(Skeleton::new(player.x, GROUND_Y, SkeletonStage::Half));
-    let mut events = Vec::new();
-    let mut frames = 0;
-    while !c.health.is_down() {
-        events.extend(c.update(FRAME, true, player, &w));
-        frames += 1;
-        assert!(frames < 36_000, "10분 안에 쓰러져야 한다");
+    let mut c = night_with(0.0, SkeletonStage::Half);
+    c.skeletons.clear();
+    for _ in 0..3 {
+        c.update(PLAYER_HURT_INVINCIBLE_SECONDS + 0.1, false, player, &w);
+        c.citizen_blast(player.center(), player);
     }
-    assert_eq!(events.last(), Some(&CombatEvent::PlayerDown));
-    assert_eq!(hurts(&events), 3, "7 → 4 → 1 → 0");
+    assert_eq!(c.health.hp(), 1);
+    c.update(PLAYER_HURT_INVINCIBLE_SECONDS + 0.1, false, player, &w);
+    c.skeletons.list.push(Skeleton::new(player.x, GROUND_Y, SkeletonStage::Half));
+    c.skeletons.list.push(Skeleton::new(player.x, GROUND_Y, SkeletonStage::Half));
+    let events = c.update(FRAME, true, player, &w);
+    assert_eq!(hurts(&events), 0);
+    assert_eq!(c.health.hp(), 1);
+    assert!(!c.health.is_down());
+    assert!(c.skeletons.list.is_empty());
 }
 
 #[test]
@@ -916,4 +1001,70 @@ fn level_up_never_happens_after_going_down() {
     assert!(hands_attack(&mut c, player, Facing::Right).is_empty());
     c.level_up();
     assert_eq!((c.level, c.health.hp()), (1, 0), "쓰러지면 레벨도 체력도 그대로다");
+}
+
+// ---- 아이가 정한 규칙: 몸으로 닿으면 스켈레톤이 쓰러진다 ----
+
+#[test]
+fn touching_any_skeleton_defeats_it_for_one_experience_without_hurting_the_player() {
+    for stage in [SkeletonStage::Normal, SkeletonStage::Half, SkeletonStage::Full] {
+        let w = flat_world();
+        let player = player_at(300.0);
+        let mut c = empty_night();
+        c.skeletons.list.push(Skeleton::new(player.x + 10.0, GROUND_Y, stage));
+        let events = c.update(FRAME, true, player, &w);
+        assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonDefeated { .. })), 1, "{stage:?}");
+        assert_eq!(count(&events, |e| matches!(e, CombatEvent::SkeletonHandHit { .. })), 0, "손보다 먼저다");
+        assert_eq!(count(&events, |e| matches!(e, CombatEvent::PlayerHurt { .. })), 0);
+        assert!(c.skeletons.list.is_empty());
+        assert_eq!(c.experience, EXPERIENCE_PER_DEFEAT);
+        assert_eq!(c.health.hp(), PLAYER_START_HP);
+    }
+}
+
+#[test]
+fn skeleton_just_beside_the_player_is_not_defeated() {
+    let w = flat_world();
+    let player = player_at(300.0);
+    let mut c = empty_night();
+    c.skeletons.list.push(Skeleton::new(player.x + PLAYER_WIDTH, GROUND_Y, SkeletonStage::Normal));
+    c.update(0.0, true, player, &w);
+    assert_eq!(c.skeletons.list.len(), 1, "선으로만 닿은 것은 닿은 게 아니다");
+}
+
+#[test]
+fn touching_a_skeleton_can_level_up() {
+    let w = flat_world();
+    let player = player_at(300.0);
+    let mut c = empty_night();
+    c.experience = EXPERIENCE_PER_LEVEL - 1;
+    c.skeletons.list.push(Skeleton::new(player.x, GROUND_Y, SkeletonStage::Half));
+    let events = c.update(FRAME, true, player, &w);
+    assert!(events.contains(&CombatEvent::LevelUp { level: 2 }));
+}
+
+#[test]
+fn hit_gives_5_real_seconds_of_safety() {
+    let w = flat_world();
+    let player = player_at(300.0);
+    let mut c = empty_night();
+    c.zombies.list.push(Zombie::new(player.x, GROUND_Y, false));
+    let keep_only_that_zombie = |c: &mut Combat| {
+        c.zombies.list.truncate(1);
+        c.zombies.list[0].pos.x = player.x;
+        c.skeletons.clear();
+    };
+    c.update(FRAME, true, player, &w);
+    assert_eq!(c.health.hp(), PLAYER_START_HP - ZOMBIE_ATTACK);
+    assert_eq!(PLAYER_HURT_INVINCIBLE_SECONDS, 5.0);
+    for _ in 0..((PLAYER_HURT_INVINCIBLE_SECONDS - 0.2) / FRAME) as usize {
+        keep_only_that_zombie(&mut c);
+        c.update(FRAME, true, player, &w);
+    }
+    assert_eq!(c.health.hp(), PLAYER_START_HP - ZOMBIE_ATTACK, "5초가 차기 전에는 안 맞는다");
+    for _ in 0..(0.4 / FRAME) as usize {
+        keep_only_that_zombie(&mut c);
+        c.update(FRAME, true, player, &w);
+    }
+    assert_eq!(c.health.hp(), PLAYER_START_HP - ZOMBIE_ATTACK * 2);
 }

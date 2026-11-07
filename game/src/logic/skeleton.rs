@@ -11,7 +11,7 @@ use super::world::{really_overlaps, World};
 use crate::config::{
     ARROW_INTERVAL_SECONDS, ARROW_SPEED, ARROW_WIDTH, BULLET_INTERVAL_SECONDS, BULLET_SPEED, BULLET_WIDTH,
     FORGET_DISTANCE, GRAVITY, PROJECTILE_BOUNCED_RANGE, PROJECTILE_FLIGHT_HEIGHT, PROJECTILE_HEIGHT, SKELETON_DODGE_JUMP_SPEED,
-    SKELETON_DODGE_SENSE_DISTANCE, SKELETON_FULL_ATTACK, SKELETON_FULL_MIN_LEVEL, SKELETON_HALF_ATTACK,
+    SKELETON_DODGE_SENSE_DISTANCE, SKELETON_FULL_ATTACK, SKELETON_HAND_RANGE, SKELETON_FULL_MIN_LEVEL, SKELETON_HALF_ATTACK,
     SKELETON_HALF_MIN_LEVEL, SKELETON_HEIGHT, SKELETON_HIT_FLASH_SECONDS, SKELETON_HP, SKELETON_NORMAL_ATTACK,
     SKELETON_SHOOT_DISTANCE, SKELETON_WALK_SPEED, SKELETON_WIDTH,
 };
@@ -212,17 +212,14 @@ impl Projectile {
         Projectile { pos: Vec2::new(x, y), kind, attack, direction, bounced: false, distance_since_bounce: 0.0 }
     }
 
-    /// 스켈레톤 몸 앞에서 플레이어 쪽으로 나간다. 몸이 거의 겹치면 플레이어 자리에서 나간다:
-    /// 몸 앞은 플레이어보다 멀어서 맞지 않고, 맵 끝에서는 나가자마자 사라진다 (엘리 관찰: 왼쪽 끝).
+    /// 스켈레톤 몸 앞에서 플레이어 쪽으로 나간다.
     fn fired_by(skeleton: &Skeleton, kind: ProjectileKind, player_x: f32, world: &World) -> Projectile {
         let body = skeleton.rect();
-        let (front_x, direction) = if player_x < body.center().x {
+        let (x, direction) = if player_x < body.center().x {
             (body.x - kind.width(), -1.0)
         } else {
             (body.x + body.w, 1.0)
         };
-        let is_touching = (player_x - body.center().x).abs() < body.w / 2.0;
-        let x = if is_touching { player_x - kind.width() / 2.0 } else { front_x };
         Projectile::new(x, direction, kind, skeleton.stage.attack(), world)
     }
 
@@ -308,9 +305,14 @@ impl Skeletons {
         strongest
     }
 
-    /// 플레이어 몸에 닿은 절반 스켈레톤. 손은 몸이 닿을 만큼 가까워야 맞는다 (US-047).
-    pub fn half_skeleton_touching(&self, player_rect: Rect) -> Option<&Skeleton> {
-        self.list.iter().find(|s| s.stage == SkeletonStage::Half && really_overlaps(s.rect(), player_rect))
+    /// 손이 플레이어 몸에 닿는 절반 스켈레톤. 손은 몸 양옆으로 `SKELETON_HAND_RANGE`까지 닿는다.
+    /// 높이는 몸과 같아서 머리 위로 뛰면 안 닿는다.
+    pub fn half_skeleton_reaching(&self, player_rect: Rect) -> Option<&Skeleton> {
+        self.list.iter().find(|s| {
+            let body = s.rect();
+            let reach = Rect::new(body.x - SKELETON_HAND_RANGE, body.y, body.w + SKELETON_HAND_RANGE * 2.0, body.h);
+            s.stage == SkeletonStage::Half && really_overlaps(reach, player_rect)
+        })
     }
 
     fn dodge_bounced_attacks(&mut self, events: &mut Vec<CombatEvent>) {

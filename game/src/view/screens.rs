@@ -5,7 +5,7 @@
 
 use super::assets::{height_with_antenna, Assets};
 use super::coin::draw_coins;
-use super::effects::Effects;
+use super::effects::{draw_bubble, Effects};
 use super::gameover::{draw_down_panel, draw_fallen_player, DownScreen};
 use super::hud::{draw_health, draw_hud, draw_level, draw_weapons};
 use super::places;
@@ -13,6 +13,7 @@ use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
 use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, max_half_width, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
+use crate::config::CITIZEN_HELP_TEXT;
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
 use crate::logic::monster::ZombieState;
@@ -86,6 +87,11 @@ const HELD_WEAPON_UP: f32 = 44.0;
 /// 땅에 놓인 무기 뒤의 빛 (밤에도 보이게)
 const WEAPON_GLOW: Color = Color::new(1.0, 1.0, 0.85, 0.35);
 const WEAPON_GLOW_RADIUS: f32 = 24.0;
+/// 땅의 무기가 사라지기 이만큼 전부터 깜빡인다 (초), 초당 깜빡임
+const WEAPON_BLINK_FROM: f32 = 3.0;
+const WEAPON_BLINKS_PER_SECOND: f32 = 4.0;
+/// 일반 시민 말풍선 꼬리 끝이 머리 위로 떨어진 거리
+const CITIZEN_BUBBLE_GAP: f32 = 22.0;
 /// 멈춘 일반 시민이 고개를 돌리는 간격 (초). 멈추는 2초 동안 두어 번 두리번거린다.
 const CITIZEN_LOOK_SECONDS: f32 = 0.6;
 
@@ -339,6 +345,9 @@ fn draw_miss_like(texture: &Texture2D, r: Rect, t: f32, tint: Color) {
 /// 하늘에서 떨어지는 무기와 놓인 무기. 놓이면 뒤에 빛이 깜빡여서 밤에도 찾기 쉽다.
 fn draw_dropped_weapons(assets: &Assets, game: &Game) {
     for w in &game.weapons.dropped {
+        if w.seconds_left() <= WEAPON_BLINK_FROM && (time() * WEAPON_BLINKS_PER_SECOND).fract() < 0.5 {
+            continue;
+        }
         let c = w.rect.center();
         if !w.is_falling() {
             let glow = Color { a: WEAPON_GLOW.a * (0.7 + 0.3 * (time() * 4.0).sin()), ..WEAPON_GLOW };
@@ -422,7 +431,15 @@ pub fn draw_play(
     }
 
     game.combat.skeletons.projectiles.iter().for_each(draw_projectile);
-    effects.draw(text, r, player.facing, &assets.m6);
+    effects.draw(text, r, player.facing, &assets.m6, game.camera_left());
+    if down.is_none() {
+        for (i, walker) in game.citizens.walkers.iter().enumerate() {
+            let head = vec2(walker.rect.center().x, walker.rect.y - CITIZEN_BUBBLE_GAP);
+            if !walker.is_walking() && effects.citizen_talks(i) && game.world.is_on_screen(head.x, r.center().x) {
+                draw_bubble(text, CITIZEN_HELP_TEXT, head.x, head.y, game.camera_left(), 1.0);
+            }
+        }
+    }
 
     // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다.
     Letterbox::current().look_at(0.0);
@@ -433,7 +450,7 @@ pub fn draw_play(
     let owned = game.weapons.owned();
     draw_weapons(&assets.m6, &owned, game.weapons.held());
     if !touch_mode && down.is_none() {
-        let hint = if owned.is_empty() { "화살표: 걷기   Space: 점프   X: 공격   Esc: 캐릭터 고르기" } else { "화살표: 걷기   Space: 점프   X: 공격   Z: 바꾸기   Esc: 고르기" };
+        let hint = if owned.is_empty() { "화살표: 걷기   Space: 점프   Q: 공격   Esc: 캐릭터 고르기" } else { "화살표: 걷기   Space: 점프   Q: 공격   W: 바꾸기   Esc: 고르기" };
         text.centered(hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
     if let Some(down) = down {

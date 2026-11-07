@@ -6,7 +6,7 @@ use super::character::CharacterKind;
 use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
-use super::combat::{Combat, CombatEvent};
+use super::combat::{is_reached, Combat, CombatEvent};
 use super::miss::Miss;
 use super::player::{Player, PlayerInput};
 use super::weapon::{Weapon, Weapons};
@@ -60,7 +60,7 @@ impl Game {
             player: Player::new(kind, spawn),
             coins: Coins::on_boxes(&world),
             miss: world.is_long_map().then(|| Miss::new(seed)),
-            weapons: Weapons::new(),
+            weapons: Weapons::new(seed),
             citizens: Citizens::on_world(&world, seed),
             world,
             clock: Clock::new(),
@@ -104,6 +104,9 @@ impl Game {
             let held = self.weapons.held();
             let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), held.range());
             events.extend(hits.into_iter().map(GameEvent::Combat));
+            let facing = self.player.facing;
+            let knocked_down = self.citizens.knock_down_reached(|body| is_reached(player_rect, facing, held.range(), body));
+            events.extend(knocked_down.into_iter().map(|at| GameEvent::Combat(CombatEvent::CitizenDefeated { at })));
         }
         let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
         events.extend(happened.into_iter().map(GameEvent::Combat));
@@ -129,7 +132,7 @@ impl Game {
         self.world.place_name_at(self.player.rect().center().x)
     }
 
-    /// Z 키나 바꾸기 버튼을 "새로" 눌렀을 때 부른다 (US-053).
+    /// W 키나 바꾸기 버튼을 "새로" 눌렀을 때 부른다 (US-053).
     pub fn switch_weapon(&mut self) {
         self.weapons.switch();
     }
@@ -137,12 +140,12 @@ impl Game {
     fn update_miss_and_weapons(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
         let player_rect = self.player.rect();
         if let Some(miss) = &mut self.miss {
-            miss.move_on_new_morning(self.clock.day_number());
+            miss.wait_to_come_back(dt, player_rect, &self.world);
             if miss.is_hiding() && really_overlaps(miss.rect(&self.world), player_rect) {
                 let at = miss.rect(&self.world).center();
-                miss.get_found(self.clock.day_number());
+                miss.get_found();
                 events.push(GameEvent::MissFound { at });
-                self.weapons.drop_around(at.x, &self.world);
+                self.weapons.drop_one(at.x, &self.world);
             }
         }
         let picked = self.weapons.update(dt, player_rect);
@@ -253,6 +256,7 @@ mod tests {
         let wall = |x| Rect::new(x, 0.0, 10.0, GROUND_Y);
         let walled = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![wall(100.0), wall(180.0)] };
         let mut g = Game::on_world(CharacterKind::Niro, SEED, walled);
+        g.combat.skeleton_chance = 0.0; // 절반 스켈레톤의 손은 얇은 벽 너머로 닿는다
         let events = g.update(&no_input(), DAY_SECONDS);
         assert!(events.contains(&GameEvent::NightStarted));
         assert!(g.clock.is_night());

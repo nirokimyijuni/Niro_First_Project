@@ -155,8 +155,8 @@ pub const ZOMBIE_HIT_FLASH_SECONDS: f32 = 0.2;
 
 /// US-040 플레이어 앞쪽으로 공격이 닿는 거리 (픽셀). 수산나가 정한 처음 값.
 pub const PLAYER_ATTACK_RANGE: f32 = 60.0;
-/// US-041 맞은 뒤 다시 맞지 않는 시간 (초)
-pub const PLAYER_HURT_INVINCIBLE_SECONDS: f32 = 1.0;
+/// US-041 맞은 뒤 다시 맞지 않는 시간 (초). 아이가 정한 임시 값이고 실제 시간이다. 시민의 펑도 같다.
+pub const PLAYER_HURT_INVINCIBLE_SECONDS: f32 = 5.0;
 
 // ---- M5 스켈레톤과 레벨업 (D35 말고는 수산나가 정한 처음 값. 해 보고 조절한다) ----
 
@@ -182,6 +182,8 @@ pub const SKELETON_FULL_MIN_LEVEL: u32 = 3;
 pub const SKELETON_NORMAL_ATTACK: u32 = 2;
 pub const SKELETON_HALF_ATTACK: u32 = 3;
 pub const SKELETON_FULL_ATTACK: u32 = 4;
+/// 절반 스켈레톤의 손이 몸 앞으로 닿는 거리 (픽셀). 부모님이 정한 임시 값.
+pub const SKELETON_HAND_RANGE: f32 = 60.0;
 /// M5 스켈레톤이 걷는 속도 (초당 픽셀). 플레이어보다 느려야 한다.
 pub const SKELETON_WALK_SPEED: f32 = 70.0;
 /// M5 활·총을 든 스켈레톤이 플레이어와 이만큼 가까워지면 걸음을 멈춘다 (픽셀, 몸 가운데끼리).
@@ -262,6 +264,8 @@ pub const MISS_WIDTH: f32 = 40.0;
 pub const MISS_HEIGHT: f32 = 56.0;
 /// US-051 찾았을 때 미스 대사. 아이가 정했다.
 pub const MISS_FOUND_TEXT: &str = "아이템을 줄게!";
+/// 찾은 미스가 다른 곳에 다시 숨을 때까지 (초). 아이가 정한 임시 값이고 실제 시간이다.
+pub const MISS_RETURN_SECONDS: f32 = 20.0;
 
 /// US-053 무기별 공격력. 아이가 정한 순서: 총 > 도끼 > 칼.
 pub const HANDS_ATTACK: u32 = 1;
@@ -279,13 +283,15 @@ pub const AXE_PICKED_TEXT: &str = "도끼를 주웠어요!";
 pub const GUN_PICKED_TEXT: &str = "총을 주웠어요!";
 /// US-052 땅에 놓인 무기 한 변 (픽셀). 수산나가 정한 처음 값.
 pub const WEAPON_SIZE: f32 = 32.0;
-/// US-052 무기가 미스 자리 왼쪽·오른쪽으로 떨어지는 거리 (픽셀)
-pub const WEAPON_DROP_SPREAD: f32 = 120.0;
+/// 미스를 찾을 때 총이 나올 확률. 임시 값이다. 이미 가졌으면 나오지 않는다.
+pub const GUN_DROP_CHANCE: f32 = 0.1;
+/// 땅에 닿은 무기를 줍지 않으면 사라질 때까지 (초). 임시 값이고 실제 시간이다.
+pub const WEAPON_GROUND_SECONDS: f32 = 15.0;
 /// US-052 떨어지는 속도 (초당 픽셀). 실제 시간이다 (빨리감기로 빨라지지 않는다).
 pub const WEAPON_FALL_SPEED: f32 = 300.0;
 
-/// 임시-9 시민 자리 (몸 가운데 x). 장소마다 1명.
-pub const CITIZEN_XS: [f32; 4] = [480.0, 1500.0, 2400.0, 3200.0];
+/// 폭발 시민 자리 (몸 가운데 x). 아이가 정한 임시 값: 화산과 집에 1명씩.
+pub const CITIZEN_XS: [f32; 2] = [1500.0, 3200.0];
 /// BUG-019 폭발 시민 몸 가운데에서 양옆으로 이만큼 안에는 상자를 놓지 않는다 (픽셀).
 /// 상자에서 내려와 달리다가 시민을 뛰어넘을 자리다. 달려 뛰면 약 163픽셀을 날아간다.
 pub const CITIZEN_RUN_UP_ROOM: f32 = 160.0;
@@ -300,6 +306,12 @@ pub const CITIZEN_BLAST_DAMAGE: u32 = 2;
 pub const CITIZEN_RESPAWN_SECONDS: f32 = 30.0;
 /// US-054 터질 때 문구
 pub const CITIZEN_POP_TEXT: &str = "펑!";
+/// 일반 시민이 멈췄을 때 말을 할 확률. 임시 값이다.
+pub const CITIZEN_TALK_SHARE: f32 = 0.5;
+/// 아이가 정한 문구. 화면이 쓴다.
+pub const ZOMBIE_APPEAR_TEXT: &str = "얍얍 공격하라";
+pub const SKELETON_DODGE_TEXT: &str = "만세";
+pub const CITIZEN_HELP_TEXT: &str = "도움이 필요해요";
 
 /// 임시 일반 시민: 장소마다 1명, 모두 `PLACE_NAMES` 수만큼. 크기는 미스와 같고, 걷는 속도는 초당 픽셀이다.
 pub const WALKING_CITIZEN_WIDTH: f32 = MISS_WIDTH;

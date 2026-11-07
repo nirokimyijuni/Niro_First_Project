@@ -39,19 +39,19 @@ pub fn any_key_pressed() -> bool {
     !get_keys_pressed().is_empty()
 }
 
-/// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프, X 공격.
+/// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프, Q 공격.
 pub fn player_input() -> PlayerInput {
     PlayerInput {
         left: is_key_down(KeyCode::Left),
         right: is_key_down(KeyCode::Right),
         jump_pressed: is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Up),
-        attack_pressed: is_key_pressed(KeyCode::X),
+        attack_pressed: is_key_pressed(KeyCode::Q),
     }
 }
 
-/// 무기 바꾸기(임시-8): Z를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
+/// 무기 바꾸기: W를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
 pub fn switch_weapon_pressed() -> bool {
-    is_key_pressed(KeyCode::Z)
+    is_key_pressed(KeyCode::W)
 }
 
 /// 메뉴 화면(타이틀·캐릭터 고르기)에서 쓰는 입력. 모두 "이번 프레임에 새로 누름" 기준.

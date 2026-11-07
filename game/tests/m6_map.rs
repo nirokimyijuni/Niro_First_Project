@@ -175,14 +175,11 @@ fn player_position_and_place_change_as_they_walk_without_touching_clock_or_coins
 // ---- 상자 ----
 
 #[test]
-fn places_with_room_have_boxes_and_never_more_than_ten() {
-    // 산은 나무, 시민 달릴 자리, 바위로 꽉 차서 상자가 없다 (BUG-019).
-    const MOUNTAIN: usize = 2;
+fn every_place_has_boxes_and_never_more_than_ten() {
     for (seed, w) in maps() {
         for place in 0..PLACE_NAMES.len() {
             let count = w.boxes().iter().filter(|b| w.place_index_at(b.x) == place).count();
-            let allowed = if place == MOUNTAIN { 0..=0 } else { 1..=BOX_COUNT_MAX };
-            assert!(allowed.contains(&count), "seed {seed}, {} 상자 {count}개", PLACE_NAMES[place]);
+            assert!((1..=BOX_COUNT_MAX).contains(&count), "seed {seed}, {} 상자 {count}개", PLACE_NAMES[place]);
         }
     }
 }

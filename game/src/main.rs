@@ -209,6 +209,7 @@ async fn main() {
                                 GameEvent::CitizenPopped { at } => effects.on_citizen_popped(at),
                             }
                         }
+                        effects.watch_citizens(game.citizens.walkers.iter().map(|w| w.is_walking()));
                         effects.update(dt);
                         None
                     }
