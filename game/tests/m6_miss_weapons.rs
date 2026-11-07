@@ -228,28 +228,24 @@ fn weapons_in_drop_order(seed: u32, drops: usize, w: &World) -> Vec<Weapon> {
 }
 
 #[test]
-fn drops_follow_the_seed_and_blades_come_new_ones_first_and_gun_only_once() {
+fn drops_follow_the_seed_and_sword_axe_come_first_and_gun_only_once() {
     let w = World::long_map(1);
-    let mut first_kinds = Vec::new();
+    let mut any_gun = false;
     for seed in 0..100 {
         let order = weapons_in_drop_order(seed, 12, &w);
         assert_eq!(order, weapons_in_drop_order(seed, 12, &w), "시드가 같으면 같다");
+        assert_eq!(order[..2], [Weapon::Sword, Weapon::Axe], "seed {seed}: 칼 다음 도끼");
+        any_gun |= order.contains(&Weapon::Gun);
         let mut owned = Vec::new();
         for kind in &order {
             assert_ne!(*kind, Weapon::Hands);
             if *kind == Weapon::Gun {
                 assert!(!owned.contains(&Weapon::Gun), "seed {seed}: 총을 가졌는데 또 나옴 {order:?}");
-            } else if owned.contains(kind) {
-                let other = if *kind == Weapon::Sword { Weapon::Axe } else { Weapon::Sword };
-                assert!(owned.contains(&other), "seed {seed}: 없는 칼·도끼가 먼저다 {order:?}");
             }
             owned.push(*kind);
         }
-        first_kinds.push(order[0]);
     }
-    for kind in [Weapon::Sword, Weapon::Axe, Weapon::Gun] {
-        assert!(first_kinds.contains(&kind), "첫 무기로 {kind:?}도 나온다");
-    }
+    assert!(any_gun, "칼·도끼 뒤에는 총도 나온다");
 }
 
 /// 시드마다 `owned`를 가진 뒤 한 번 떨어뜨려서 총이 나온 비율.
@@ -273,14 +269,32 @@ fn gun_share_with(owned: &[Weapon], w: &World) -> f32 {
 }
 
 #[test]
-fn gun_drops_about_10_percent_even_when_only_the_gun_is_missing() {
+fn gun_drops_about_10_percent_only_after_sword_and_axe() {
     let w = World::long_map(1);
     assert_eq!(GUN_DROP_CHANCE, 0.1);
-    for owned in [&[][..], &[Weapon::Sword], &[Weapon::Sword, Weapon::Axe]] {
-        let share = gun_share_with(owned, &w);
-        assert!((0.085..0.115).contains(&share), "{owned:?}: 총 {share}");
+    let share = gun_share_with(&[Weapon::Sword, Weapon::Axe], &w);
+    assert!((0.085..0.115).contains(&share), "총 {share}");
+    for owned in [&[][..], &[Weapon::Sword], &[Weapon::Axe]] {
+        assert_eq!(gun_share_with(owned, &w), 0.0, "{owned:?}: 칼·도끼가 먼저다");
     }
-    assert_eq!(gun_share_with(&[Weapon::Gun], &w), 0.0, "이미 있으면 안 나온다");
+    assert_eq!(gun_share_with(&[Weapon::Sword, Weapon::Axe, Weapon::Gun], &w), 0.0, "이미 있으면 안 나온다");
+}
+
+#[test]
+fn a_gun_lying_on_the_ground_is_not_dropped_again() {
+    let w = World::long_map(1);
+    for seed in 0..300 {
+        let mut weapons = logic::weapon::Weapons::new(seed);
+        for kind in [Weapon::Sword, Weapon::Axe] {
+            let drop = DroppedWeapon::above(kind, 100.0, &w);
+            let body = drop.rect;
+            weapons.dropped.push(drop);
+            weapons.update(0.0, body);
+        }
+        weapons.dropped.push(DroppedWeapon::above(Weapon::Gun, 300.0, &w));
+        weapons.drop_one(100.0, &w);
+        assert_ne!(weapons.dropped[1].kind, Weapon::Gun, "seed {seed}");
+    }
 }
 
 #[test]
@@ -296,10 +310,10 @@ fn blade_lying_on_the_ground_is_not_dropped_twice() {
 }
 
 #[test]
-fn weapon_falls_at_300_and_lands_on_the_surface_on_every_spot_and_map() {
+fn weapon_falls_at_300_to_the_ground_past_branches_on_every_spot_and_map() {
     for seed in 0..500 {
         let w = World::long_map(seed);
-        for (_, x, _) in HIDE_SPOTS {
+        for (name, x, _) in HIDE_SPOTS {
             let mut weapons = logic::weapon::Weapons::new(seed);
             weapons.drop_one(x, &w);
             let far = Rect::new(-999.0, -999.0, 1.0, 1.0);
@@ -309,7 +323,12 @@ fn weapon_falls_at_300_and_lands_on_the_surface_on_every_spot_and_map() {
             weapons.update(3.0, far);
             for d in &weapons.dropped {
                 assert!(!d.is_falling());
-                assert_eq!(d.rect.y + d.rect.h, w.surface_y_under(d.rect), "seed {seed}: {:?}", d.rect);
+                let expected = match name {
+                    "지하" => w.ground_y + HOLE_DEPTH,
+                    "산꼭대기" => w.ground_y - CLIMB_STEP * 3.0, // 바위가 땅까지 막혀 있다
+                    _ => w.ground_y,
+                };
+                assert_eq!(d.rect.y + d.rect.h, expected, "seed {seed}, {name}: {:?}", d.rect);
                 assert!(d.rect.x >= 0.0 && d.rect.x + d.rect.w <= w.width);
                 assert!(!w.obstacles.iter().any(|b| logic::world::really_overlaps(*b, d.rect)), "seed {seed}");
             }
@@ -501,6 +520,127 @@ fn sword_goes_3_to_1_to_down_and_gives_one_experience() {
     let second = g.update(&attack_input(), 0.0);
     assert!(second.iter().any(|e| matches!(e, GameEvent::Combat(CombatEvent::ZombieDefeated { .. }))));
     assert_eq!(g.combat.experience, EXPERIENCE_PER_DEFEAT);
+}
+
+#[test]
+fn weapon_from_the_tree_top_counts_15_seconds_only_after_reaching_the_ground() {
+    let w = World::long_map(1);
+    let (_, x, _) = HIDE_SPOTS[3];
+    let mut weapons = logic::weapon::Weapons::new(1);
+    weapons.dropped.push(DroppedWeapon::above(Weapon::Sword, x, &w));
+    let far = Rect::new(-999.0, -999.0, 1.0, 1.0);
+    let branch = w.tree_branches()[2];
+    weapons.update((branch.y + WEAPON_SIZE) / WEAPON_FALL_SPEED, far);
+    assert!(weapons.dropped[0].is_falling(), "나뭇가지 높이에서 멈추지 않는다");
+    assert_eq!(weapons.dropped[0].seconds_left(), WEAPON_GROUND_SECONDS);
+    weapons.update(3.0, far);
+    assert_eq!(weapons.dropped[0].rect.y + WEAPON_SIZE, w.ground_y);
+    weapons.update(1.0, far);
+    assert_eq!(weapons.dropped[0].seconds_left(), WEAPON_GROUND_SECONDS - 1.0, "땅에 닿은 뒤부터 센다");
+}
+
+#[test]
+fn weapon_over_a_box_sits_on_top_instead_of_being_buried() {
+    let top = GROUND_Y - BOX_SMALL_SIZE;
+    let w = World { width: MAP_WIDTH, ground_y: GROUND_Y, obstacles: vec![Rect::new(500.0, top, BOX_SMALL_SIZE, BOX_SMALL_SIZE)] };
+    assert_eq!(w.weapon_floor_y_under(Rect::new(508.0, -32.0, WEAPON_SIZE, WEAPON_SIZE)), top);
+}
+
+// ---- 총은 벽을 뚫지 못한다 ----
+
+fn flat_map_with(obstacles: Vec<Rect>) -> World {
+    World { width: MAP_WIDTH, ground_y: GROUND_Y, obstacles }
+}
+
+fn ground_box(x: f32, size: f32) -> Rect {
+    Rect::new(x, GROUND_Y - size, size, size)
+}
+
+fn on_ground(x: f32) -> Rect {
+    Rect::new(x, GROUND_Y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT)
+}
+
+#[test]
+fn clear_reach_stops_at_the_first_wall_either_way_small_boxes_too() {
+    for size in [BOX_SMALL_SIZE, BOX_BIG_SIZE] {
+        let w = flat_map_with(vec![ground_box(2600.0, size), ground_box(2700.0, size), ground_box(2300.0, size)]);
+        let body = on_ground(2500.0);
+        assert_eq!(w.clear_reach(body, Facing::Right, GUN_RANGE), 2600.0 - 2548.0);
+        assert_eq!(w.clear_reach(body, Facing::Left, GUN_RANGE), 2500.0 - 2300.0 - size);
+    }
+    let w = flat_map_with(vec![]);
+    assert_eq!(w.clear_reach(on_ground(2500.0), Facing::Right, GUN_RANGE), GUN_RANGE, "벽이 없으면 다 닿는다");
+    let w = flat_map_with(vec![ground_box(2548.0, BOX_BIG_SIZE)]);
+    assert_eq!(w.clear_reach(on_ground(2500.0), Facing::Right, GUN_RANGE), 0.0, "붙어 있으면 0");
+}
+
+#[test]
+fn clear_reach_ignores_the_box_underfoot_and_low_boxes_from_on_top() {
+    let under = ground_box(2500.0, BOX_BIG_SIZE);
+    let w = flat_map_with(vec![under, ground_box(2640.0, BOX_SMALL_SIZE)]);
+    let on_top = Rect::new(2510.0, under.y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+    assert_eq!(w.clear_reach(on_top, Facing::Right, GUN_RANGE), GUN_RANGE, "발밑과 낮은 상자 위로 쏜다");
+    assert_eq!(w.clear_reach(on_top, Facing::Left, GUN_RANGE), GUN_RANGE);
+}
+
+#[test]
+fn clear_reach_stops_at_the_hole_walls_only_from_inside() {
+    let w = flat_map_with(vec![]);
+    let hole = w.hole().unwrap();
+    let inside = Rect::new(hole.x + 50.0, GROUND_Y + HOLE_DEPTH - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+    assert_eq!(w.clear_reach(inside, Facing::Left, GUN_RANGE), 50.0);
+    assert_eq!(w.clear_reach(inside, Facing::Right, GUN_RANGE), hole.w - 50.0 - PLAYER_WIDTH);
+    assert_eq!(w.clear_reach(on_ground(hole.x - 100.0), Facing::Right, GUN_RANGE), GUN_RANGE, "구멍 위로는 날아간다");
+}
+
+#[test]
+fn clear_reach_sees_walls_across_the_seam() {
+    let w = flat_map_with(vec![ground_box(50.0, BOX_SMALL_SIZE)]);
+    assert_eq!(w.clear_reach(on_ground(MAP_WIDTH - 100.0), Facing::Right, GUN_RANGE), 100.0 - PLAYER_WIDTH + 50.0);
+    let w = flat_map_with(vec![ground_box(MAP_WIDTH - 100.0, BOX_SMALL_SIZE)]);
+    assert_eq!(w.clear_reach(on_ground(40.0), Facing::Left, GUN_RANGE), 40.0 + 100.0 - BOX_SMALL_SIZE);
+    // 몸이 이음매에 걸쳐 있을 때
+    let w = flat_map_with(vec![ground_box(100.0, BOX_SMALL_SIZE)]);
+    assert_eq!(w.clear_reach(on_ground(MAP_WIDTH - 20.0), Facing::Right, GUN_RANGE), 100.0 + 20.0 - PLAYER_WIDTH);
+}
+
+#[test]
+fn gun_cannot_hit_behind_a_box_but_blades_are_unchanged() {
+    for (kind, reach_behind) in [(Weapon::Gun, false), (Weapon::Sword, true), (Weapon::Axe, true)] {
+        let mut g = quiet_game(4);
+        give(&mut g, &[kind]);
+        g.world.obstacles = vec![ground_box(g.player.pos.x + PLAYER_WIDTH + 4.0, BOX_SMALL_SIZE)];
+        g.player.facing = Facing::Right;
+        let x = g.player.pos.x + PLAYER_WIDTH + 4.0 + BOX_SMALL_SIZE;
+        g.combat.zombies.list.push(Zombie::new(x, g.world.ground_y, false));
+        let hit = g.update(&attack_input(), 0.0).iter().any(|e| matches!(e, GameEvent::Combat(_)));
+        assert_eq!(hit, reach_behind && kind.range() >= 4.0 + BOX_SMALL_SIZE, "{kind:?}");
+    }
+}
+
+#[test]
+fn gun_hits_a_monster_in_front_of_the_wall_and_attack_reach_tells_the_length() {
+    let mut g = quiet_game(4);
+    give(&mut g, &[Weapon::Gun]);
+    let wall_x = g.player.pos.x + PLAYER_WIDTH + 200.0;
+    g.world.obstacles = vec![ground_box(wall_x, BOX_SMALL_SIZE)];
+    g.player.facing = Facing::Right;
+    assert_eq!(g.attack_reach(), 200.0);
+    g.combat.zombies.list.push(Zombie::new(wall_x - ZOMBIE_WIDTH - 5.0, g.world.ground_y, false));
+    assert!(g.update(&attack_input(), 0.0).iter().any(|e| matches!(e, GameEvent::Combat(_))));
+    g.switch_weapon();
+    assert_eq!(g.attack_reach(), g.weapons.held().range(), "맨손은 그대로");
+}
+
+#[test]
+fn gun_cannot_knock_down_a_citizen_behind_a_box() {
+    let mut g = citizen_game();
+    give(&mut g, &[Weapon::Gun]);
+    let citizen = g.citizens.list[0].rect;
+    g.world.obstacles = vec![ground_box(citizen.x - BOX_SMALL_SIZE - 2.0, BOX_SMALL_SIZE)];
+    let events = attack_citizen_from(&mut g, 150.0);
+    assert!(events.is_empty(), "{events:?}");
+    assert!(g.citizens.list[0].is_standing());
 }
 
 #[test]

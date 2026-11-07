@@ -146,6 +146,37 @@ fn how_often_monsters_cannot_reach_the_player_on_foot() {
 
 #[test]
 #[ignore]
+fn how_many_ground_spots_stay_unhurt_all_night() {
+    // 시민 없이 땅 위 자리에 가만히 서서 빨리감기 밤 하나를 보낸다.
+    const NIGHT_SEEDS: u32 = 20;
+    let (mut spots, mut unhurt) = (0, 0);
+    for seed in 0..NIGHT_SEEDS {
+        let world_seed = seed.wrapping_mul(7919);
+        let w = World::long_map(world_seed);
+        let hole = w.hole().unwrap();
+        for x in (0..(MAP_WIDTH - PLAYER_WIDTH) as usize).step_by(192) {
+            let body = Rect::new(x as f32, w.ground_y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+            let in_hole = body.x + body.w > hole.x && body.x < hole.x + hole.w;
+            if in_hole || w.obstacles.iter().any(|b| really_overlaps(*b, body)) {
+                continue;
+            }
+            spots += 1;
+            let mut g = Game::new(CharacterKind::Niro, world_seed);
+            g.citizens.list.clear();
+            g.clock.update(DAY_SECONDS);
+            g.player.pos.x = x as f32;
+            for _ in 0..(NIGHT_SECONDS / DEV_FAST_FORWARD_SCALE / FRAME) as usize {
+                g.update(&PlayerInput::default(), FRAME);
+            }
+            unhurt += u32::from(g.combat.health.hp() == PLAYER_START_HP);
+        }
+    }
+    println!("밤을 안 다치고 버티는 땅 자리: {unhurt}/{spots} ({:.1}%)", unhurt as f32 * 100.0 / spots as f32);
+    assert!(spots > 100);
+}
+
+#[test]
+#[ignore]
 fn how_often_a_normal_skeleton_is_defeated_by_its_own_arrow() {
     // REVIEW-007 5번: 큰 상자에 붙은 스켈레톤이 튕긴 화살에 맞는 일이 긴 맵에서 얼마나 나오는지.
     let (mut appeared, mut self_defeated) = (0, 0);
@@ -194,18 +225,13 @@ struct NightResult {
 fn play_first_night(seed: u32, plan: Plan, result: &mut NightResult) {
     let mut g = Game::new(CharacterKind::Niro, seed.wrapping_mul(7919));
     g.clock.update(DAY_SECONDS);
-    let mut going_right = true;
     let seconds = NIGHT_SECONDS / DEV_FAST_FORWARD_SCALE;
     let frames = (seconds / FRAME) as usize;
     for frame in 0..frames {
         let moving = plan == Plan::Walk || plan == Plan::WalkAndAttack;
-        let at_end = g.player.pos.x <= 0.0 || g.player.pos.x + PLAYER_WIDTH >= g.world.width;
-        if at_end {
-            going_right = g.player.pos.x <= 0.0;
-        }
         let mut input = PlayerInput {
-            left: moving && !going_right,
-            right: moving && going_right,
+            left: false,
+            right: moving, // 고리 맵이라 끝이 없어서 한쪽으로 계속 간다
             jump_pressed: moving && frame % 20 == 0,
             attack_pressed: plan != Plan::StandStill && plan != Plan::Walk && frame % 15 == 0,
         };
@@ -213,9 +239,9 @@ fn play_first_night(seed: u32, plan: Plan, result: &mut NightResult) {
             let me = g.player.rect().center().x;
             let zombies = g.combat.zombies.list.iter().map(|z| z.rect().center().x);
             let skeletons = g.combat.skeletons.list.iter().map(|s| s.rect().center().x);
-            if let Some(target) = zombies.chain(skeletons).min_by(|a, b| (a - me).abs().total_cmp(&(b - me).abs())) {
-                input.left = target < me;
-                input.right = target > me;
+            if let Some(target) = zombies.chain(skeletons).min_by(|a, b| shortest_dx(me, *a).abs().total_cmp(&shortest_dx(me, *b).abs())) {
+                input.left = shortest_dx(me, target) < 0.0;
+                input.right = shortest_dx(me, target) > 0.0;
             }
         }
         for event in g.update(&input, FRAME) {

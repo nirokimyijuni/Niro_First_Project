@@ -110,10 +110,11 @@ impl Game {
         let player_rect = self.player.rect();
         if input.attack_pressed {
             let held = self.weapons.held();
-            let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), held.range());
+            let reach = self.attack_reach();
+            let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), reach);
             events.extend(hits.into_iter().map(GameEvent::Combat));
             let facing = self.player.facing;
-            let knocked_down = self.citizens.knock_down_reached(|body| is_reached(player_rect, facing, held.range(), body));
+            let knocked_down = self.citizens.knock_down_reached(|body| is_reached(player_rect, facing, reach, body));
             events.extend(knocked_down.into_iter().map(|at| GameEvent::Combat(CombatEvent::CitizenDefeated { at })));
         }
         let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
@@ -133,6 +134,17 @@ impl Game {
         if !self.combat.health.is_down() && self.clock.nights_survived() >= DAYS_TO_CLEAR {
             self.cleared = true;
             events.push(GameEvent::GameCleared);
+        }
+    }
+
+    /// 지금 공격이 앞쪽으로 닿는 거리. 총은 첫 벽에서 막히고, 맨손·칼·도끼는 그대로다.
+    /// 화면은 `attack_box_with_range(몸, facing, 이 값)`으로 빛줄기 길이를 그린다.
+    pub fn attack_reach(&self) -> f32 {
+        let held = self.weapons.held();
+        if held == Weapon::Gun {
+            self.world.clear_reach(self.player.rect(), self.player.facing, held.range())
+        } else {
+            held.range()
         }
     }
 

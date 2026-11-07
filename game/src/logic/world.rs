@@ -2,6 +2,7 @@
 //! 좌표: 왼쪽 위가 (0, 0), 아래로 갈수록 y가 커진다.
 
 use super::monster::SeededRandom;
+use super::player::Facing;
 use crate::config::{
     BOX_AREA_LEFT, BOX_AREA_RIGHT, BOX_BIG_CHANCE, BOX_BIG_SIZE, BOX_COUNT_MAX, BOX_COUNT_MIN, BOX_GAP_CHANCE,
     BOX_MIN_GAP, BOX_SMALL_SIZE, CITIZEN_RUN_UP_ROOM, CITIZEN_XS, GROUND_Y, HIDE_SPOTS, HOLE_DEPTH, HOLE_LEFT, HOLE_WIDTH, MAP_WIDTH,
@@ -176,6 +177,39 @@ impl World {
             .map(|b| nearest_copy(*b, body.center().x))
             .filter(|b| b.x < body.x + body.w && body.x < b.x + b.w)
             .fold(self.floor_y_under(body), |top, b| top.min(b.y))
+    }
+
+    /// 하늘에서 떨어지는 무기가 멈추는 y. 나뭇가지와 상자를 지나 땅이나 구멍 바닥까지 떨어진다.
+    /// 그 자리가 바위처럼 땅까지 막혀 있으면 묻혀서 못 주우니 그 위에 놓인다.
+    pub fn weapon_floor_y_under(&self, body: Rect) -> f32 {
+        let floor_y = self.floor_y_under(body);
+        let on_floor = Rect { y: floor_y - body.h, ..body };
+        if self.obstacles.iter().any(|b| really_overlaps(*b, on_floor)) {
+            self.surface_y_under(body)
+        } else {
+            floor_y
+        }
+    }
+
+    /// `body` 앞쪽 `range` 안에서 벽에 막히기 전까지의 거리 (0 이상 `range` 이하).
+    /// 벽은 몸 높이에 걸린 상자·구조물이고, 구멍 안에서는 구멍 옆벽도 막는다. 발밑 상자는 막지 않는다.
+    pub fn clear_reach(&self, body: Rect, facing: Facing, range: f32) -> f32 {
+        let center = body.center().x;
+        let walls = self.obstacles.iter().map(|wall| nearest_copy(*wall, center));
+        let at_body_height = walls.filter(|wall| wall.y < body.y + body.h && body.y < wall.y + wall.h);
+        let in_hole = self.hole().filter(|_| body.y + body.h > self.ground_y);
+        let gap = match facing {
+            Facing::Right => {
+                let front = body.x + body.w;
+                let ahead = at_body_height.filter(|wall| wall.x + wall.w > front).map(|wall| wall.x - front);
+                ahead.chain(in_hole.map(|hole| hole.x + hole.w - front)).fold(range, f32::min)
+            }
+            Facing::Left => {
+                let ahead = at_body_height.filter(|wall| wall.x < body.x).map(|wall| body.x - (wall.x + wall.w));
+                ahead.chain(in_hole.map(|hole| body.x - hole.x)).fold(range, f32::min)
+            }
+        };
+        gap.max(0.0)
     }
 
     /// 카메라 왼쪽 끝 x. 주인공을 가운데에 둔다 (US-050).

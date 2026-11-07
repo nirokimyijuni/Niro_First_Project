@@ -436,7 +436,7 @@ pub fn draw_play(
     }
 
     game.combat.skeletons.projectiles.iter().for_each(|shot| draw_projectile(shot, view_x));
-    effects.draw(text, r, player.facing, &assets.m6, camera_x);
+    effects.draw(text, r, player.facing, &assets.m6, camera_x, game.attack_reach());
     if ended.is_none() {
         for (i, walker) in game.citizens.walkers.iter().enumerate() {
             let head = vec2(places::near_view(view_x, walker.rect.center().x), walker.rect.y - CITIZEN_BUBBLE_GAP);

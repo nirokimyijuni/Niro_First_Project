@@ -225,12 +225,13 @@ impl Effects {
 
     /// 맵 좌표로 그린다. `camera_left`는 화면 왼쪽 끝의 맵 x (말풍선을 화면 안에 두는 데 쓴다).
     /// 효과의 자리는 맵 좌표로 저장되어 있어서, 이음매 너머면 화면에 가까운 쪽으로 옮겨 그린다 (D61).
-    pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art, camera_left: f32) {
+    /// `attack_reach`는 logic이 준 공격 거리다. 총 빛줄기는 첫 벽에서 멈춘다 (US-073).
+    pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art, camera_left: f32, attack_reach: f32) {
         let view_x = camera_left + VIRTUAL_WIDTH / 2.0;
         if let Some(age) = self.swing_age {
             let t = age / SWING_SECONDS;
             match self.swing_weapon.unwrap_or(Weapon::Hands) {
-                Weapon::Gun => draw_gun_light(player, facing, t),
+                Weapon::Gun => draw_gun_light(player, facing, t, attack_reach),
                 weapon => draw_swing(player, facing, t, weapon, art),
             }
         }
@@ -287,9 +288,18 @@ fn draw_smoke(burst: &Burst) {
 }
 
 /// 총: 앞쪽으로 빛줄기가 쭉 나갔다가 사라진다. 닿는 거리는 logic의 공격 네모를 그대로 쓴다.
-fn draw_gun_light(player: Rect, facing: Facing, t: f32) {
-    let reach = attack_box_with_range(player, facing, Weapon::Gun.range());
-    let (from, to) = if facing == Facing::Right { (reach.x, reach.x + reach.w) } else { (reach.x + reach.w, reach.x) };
+/// 빛줄기가 시작하는 x와 끝나는 x. 벽에 바로 붙으면 둘이 같아서 줄은 없고 벽에 별만 남는다.
+fn gun_light_ends(player: Rect, facing: Facing, attack_reach: f32) -> (f32, f32) {
+    let reach = attack_box_with_range(player, facing, attack_reach);
+    if facing == Facing::Right {
+        (reach.x, reach.x + reach.w)
+    } else {
+        (reach.x + reach.w, reach.x)
+    }
+}
+
+fn draw_gun_light(player: Rect, facing: Facing, t: f32, attack_reach: f32) {
+    let (from, to) = gun_light_ends(player, facing, attack_reach);
     let y = player.center().y;
     let tip = lerp(from, to, (t * 2.0).min(1.0));
     let fade = 1.0 - t;
@@ -398,6 +408,15 @@ fn draw_burst(text: &TextPainter, burst: &Burst) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gun_light_stops_at_the_reach_logic_gives() {
+        let body = Rect::new(100.0, 300.0, 48.0, 64.0);
+        assert_eq!(gun_light_ends(body, Facing::Right, 30.0), (148.0, 178.0));
+        assert_eq!(gun_light_ends(body, Facing::Left, 30.0), (100.0, 70.0));
+        assert_eq!(gun_light_ends(body, Facing::Right, 0.0), (148.0, 148.0), "벽에 붙으면 길이 0");
+        assert_eq!(gun_light_ends(body, Facing::Left, 0.0), (100.0, 100.0));
+    }
 
     #[test]
     fn bursts_and_sparkle_come_from_events_and_go_away() {

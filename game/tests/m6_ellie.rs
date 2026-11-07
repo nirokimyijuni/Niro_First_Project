@@ -311,7 +311,7 @@ fn fast_frame(g: &mut Game, input: &PlayerInput) -> Vec<GameEvent> {
 /// D44: 시작부터 빨리감기로 30초에 밤, 6초마다 2마리, 모두 8마리·좀비 5마리까지, 90초에 모두 사라진다.
 /// 바위 꼭대기는 몬스터가 안 닿아서 체력을 건드리지 않고 잴 수 있다. 시민은 치운다 (펑으로 수가 줄지 않게).
 #[test]
-fn d44_monsters_arrive_two_every_six_seconds_up_to_eight() {
+fn d44_monsters_arrive_two_each_turn_up_to_the_limit() {
     for seed in 0..50 {
         let mut g = game(seed);
         g.citizens.list.clear();
@@ -344,7 +344,7 @@ fn d44_monsters_arrive_two_every_six_seconds_up_to_eight() {
         assert!((day_at.unwrap() - 90.0).abs() < 0.2, "시드 {seed} 아침 {day_at:?}");
         assert!(g.combat.health.hp() == g.combat.health.max_hp(), "시드 {seed}: 꼭대기에서 맞음");
         assert!(most <= MONSTER_MAX_ON_SCREEN && most_zombies <= ZOMBIE_MAX_ON_SCREEN, "시드 {seed}: {most}, {most_zombies}");
-        for (i, (t, n)) in rounds.iter().take(4).enumerate() {
+        for (i, (t, n)) in rounds.iter().take(MONSTER_MAX_ON_SCREEN / MONSTERS_PER_SPAWN).enumerate() {
             assert_eq!(*n, MONSTERS_PER_SPAWN as u32, "시드 {seed}: {rounds:?}");
             assert!((t - night - i as f32 * ZOMBIE_SPAWN_SECONDS).abs() < 0.2, "시드 {seed}: {rounds:?}");
         }
@@ -570,4 +570,81 @@ fn measure_d62_spawn_spots() {
         }
     }
     println!("땅 자리 {spots}: 아무도 못 나옴 {none}, 한쪽만 {one_side}, 화면 안에서 나온 경우 {on_screen}, 가장 가까이 {nearest:.0}");
+}
+
+/// US-073: 찾은 뒤 옆으로 비켰다가 진짜 걷기·점프로 돌아와 15초 안에 줍는다. 숨는 곳마다 시드 500개.
+#[test]
+fn every_hide_spot_weapon_can_be_walked_to_and_picked_up() {
+    let mut done = [0u32; 6];
+    let mut slowest = [0.0f32; 6];
+    let mut caught_falling = [0u32; 6];
+    let mut seed = 0;
+    while done.iter().any(|n| *n < 500) && seed < 12_000 {
+        seed += 1;
+        let mut g = game(seed);
+        g.citizens.list.clear();
+        let spot_rect = g.miss.as_ref().unwrap().rect(&g.world);
+        let spot = HIDE_SPOTS.iter().position(|s| s.1 == spot_rect.center().x).unwrap();
+        if done[spot] >= 500 {
+            continue;
+        }
+        done[spot] += 1;
+        g.player.pos = Vec2::new(spot_rect.x, spot_rect.y + spot_rect.h - PLAYER_HEIGHT);
+        g.player.vel = Vec2::ZERO;
+        g.update(&PlayerInput::default(), FRAME);
+        assert!(!g.miss.as_ref().unwrap().is_hiding(), "시드 {seed}: 못 찾음");
+        let (mut t, mut landed, mut step_off) = (0.0, None, false);
+        while g.weapons.owned().is_empty() {
+            let weapon = g.weapons.dropped.first().map(|w| (w.rect, w.is_falling()));
+            let Some((rect, falling)) = weapon else { panic!("시드 {seed} {}: 무기가 {t:.1}초에 사라짐, 자리 {:?}", HIDE_SPOTS[spot].0, g.player.pos) };
+            if !falling && landed.is_none() {
+                landed = Some(t);
+            }
+            let away = t < 1.0;
+            let dx = shortest_dx(g.player.rect().center().x, rect.center().x);
+            let above = g.player.pos.y + PLAYER_HEIGHT < rect.y + rect.h - 40.0;
+            step_off = (step_off || (above && dx.abs() < 40.0 && g.player.on_ground)) && above;
+            let right = away || step_off || dx > 2.0;
+            let left = !right && dx < -2.0;
+            let before = g.player.pos.x;
+            let walk = PlayerInput { left, right, ..Default::default() };
+            let was_empty = g.weapons.owned().is_empty();
+            g.update(&walk, FRAME);
+            if g.player.pos.x == before && (left || right) {
+                g.update(&PlayerInput { jump_pressed: true, ..walk }, FRAME);
+            }
+            t += FRAME;
+            if was_empty && !g.weapons.owned().is_empty() && landed.is_none() {
+                caught_falling[spot] += 1;
+            }
+            assert!(t < 25.0, "시드 {seed} {}: 못 주움 {:?} 무기 {rect:?}", HIDE_SPOTS[spot].0, g.player.pos);
+        }
+        slowest[spot] = slowest[spot].max(t);
+    }
+    assert_eq!(done, [500; 6]);
+    println!("숨는 곳별 가장 늦게 주운 초 {slowest:?}, 떨어지는 중 주움 {caught_falling:?}");
+}
+
+/// 미스를 몇 번 찾아야 총이 나오는지 재기 (칼, 도끼 뒤 10%).
+#[test]
+#[ignore]
+fn measure_finds_until_gun() {
+    use logic::weapon::Weapons;
+    let w = World::long_map(1);
+    let far = Rect::new(-999.0, -999.0, 1.0, 1.0);
+    let mut finds = Vec::new();
+    for seed in 0..2000 {
+        let mut weapons = Weapons::new(seed);
+        let mut n = 0;
+        while !weapons.owned().contains(&logic::weapon::Weapon::Gun) && n < 500 {
+            weapons.drop_one(100.0, &w);
+            n += 1;
+            let body = weapons.dropped[0].rect;
+            weapons.update(0.0, body);
+            weapons.update(0.0, far);
+        }
+        finds.push(n);
+    }
+    finds.sort();
+    println!("총까지 찾는 횟수 중앙값 {}, 90% {}, 최대 {}", finds[1000], finds[1800], finds[1999]);
 }

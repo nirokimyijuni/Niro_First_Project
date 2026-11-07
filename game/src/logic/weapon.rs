@@ -67,7 +67,7 @@ impl DroppedWeapon {
     pub fn above(kind: Weapon, center_x: f32, world: &World) -> DroppedWeapon {
         let x = world.keep_on_map(center_x - WEAPON_SIZE / 2.0, WEAPON_SIZE);
         let rect = Rect::new(x, -WEAPON_SIZE, WEAPON_SIZE, WEAPON_SIZE);
-        let landing_y = world.surface_y_under(rect) - WEAPON_SIZE;
+        let landing_y = world.weapon_floor_y_under(rect) - WEAPON_SIZE;
         DroppedWeapon { kind, rect, landing_y, seconds_left: WEAPON_GROUND_SECONDS }
     }
 
@@ -117,16 +117,25 @@ impl Weapons {
         Weapon::ORDER.into_iter().filter(|w| self.owned.contains(w)).collect()
     }
 
-    /// 무기 하나가 `center_x`에 떨어진다. `GUN_DROP_CHANCE`로 총이고 (이미 가졌으면 안 나온다),
-    /// 아니면 칼·도끼 중 아직 없는 것(땅에 놓인 것도 뺀다)이고, 그런 것이 없으면 둘 중 아무거나다.
+    /// 가졌거나 땅에 놓여 있으면 true. 그런 무기는 "없는 무기"로 치지 않는다.
+    fn is_around(&self, kind: Weapon) -> bool {
+        self.owned.contains(&kind) || self.dropped.iter().any(|d| d.kind == kind)
+    }
+
+    /// 무기 하나가 `center_x`에 떨어진다: 칼이 없으면 칼, 도끼가 없으면 도끼다.
+    /// 둘 다 있으면 총이 없을 때 `GUN_DROP_CHANCE`로 총이고, 아니면 칼·도끼 중 아무거나다.
     pub fn drop_one(&mut self, center_x: f32, world: &World) {
-        let wants_gun = self.random.next_unit() < GUN_DROP_CHANCE;
-        let blades = [Weapon::Sword, Weapon::Axe];
-        let is_new = |w: &&Weapon| !self.owned.contains(w) && !self.dropped.iter().any(|d| d.kind == **w);
-        let new_blades: Vec<Weapon> = blades.iter().filter(is_new).copied().collect();
-        let choices = if new_blades.is_empty() { blades.to_vec() } else { new_blades };
-        let blade = choices[(self.random.next_unit() * choices.len() as f32) as usize];
-        let kind = if wants_gun && !self.owned.contains(&Weapon::Gun) { Weapon::Gun } else { blade };
+        let kind = if !self.is_around(Weapon::Sword) {
+            Weapon::Sword
+        } else if !self.is_around(Weapon::Axe) {
+            Weapon::Axe
+        } else if !self.is_around(Weapon::Gun) && self.random.next_unit() < GUN_DROP_CHANCE {
+            Weapon::Gun
+        } else if self.random.next_unit() < 0.5 {
+            Weapon::Sword
+        } else {
+            Weapon::Axe
+        };
         self.dropped.push(DroppedWeapon::above(kind, center_x, world));
     }
 

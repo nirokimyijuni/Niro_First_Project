@@ -134,11 +134,11 @@ pub const ZOMBIE_HEIGHT: f32 = 64.0;
 /// US-039 좀비가 걷는 속도 (초당 픽셀). 플레이어보다 느려야 한다. 수산나가 정한 처음 값.
 pub const ZOMBIE_WALK_SPEED: f32 = 80.0;
 /// US-039 다음 몬스터가 나올 때까지 (초). 스켈레톤도 같이 쓴다. 화면이 꽉 차 있는 동안은 세지 않는다.
-pub const ZOMBIE_SPAWN_SECONDS: f32 = 6.0;
+pub const ZOMBIE_SPAWN_SECONDS: f32 = 10.0;
 /// 부모님 피드백의 임시 값: 한 차례에 나오는 몬스터 수. 첫 마리 쪽은 랜덤이고, 다음은 번갈아 반대쪽이다.
 pub const MONSTERS_PER_SPAWN: usize = 2;
 /// US-039 화면에 함께 있을 수 있는 좀비 수
-pub const ZOMBIE_MAX_ON_SCREEN: usize = 5;
+pub const ZOMBIE_MAX_ON_SCREEN: usize = 4;
 /// 몬스터가 왼쪽 끝에서 나올 확률. 나머지는 오른쪽 끝 (D36: 플레이어 위치와 상관없다).
 /// 플레이어가 그 끝 자리에 서 있을 때만 겹치지 않게 반대쪽 끝에서 나온다.
 pub const ZOMBIE_SPAWN_LEFT_CHANCE: f32 = 0.5;
@@ -166,7 +166,7 @@ pub const EXPERIENCE_PER_DEFEAT: u32 = 1;
 pub const EXPERIENCE_PER_LEVEL: u32 = 5;
 
 /// M5 좀비와 스켈레톤을 합쳐 화면에 함께 있을 수 있는 수. 좀비만은 `ZOMBIE_MAX_ON_SCREEN`까지.
-pub const MONSTER_MAX_ON_SCREEN: usize = 8;
+pub const MONSTER_MAX_ON_SCREEN: usize = 6;
 /// M5 나올 차례에 좀비 대신 스켈레톤이 나올 확률. 나오는 시간은 `ZOMBIE_SPAWN_SECONDS`를 같이 쓴다.
 pub const SKELETON_SPAWN_CHANCE: f32 = 0.5;
 
@@ -283,7 +283,7 @@ pub const AXE_PICKED_TEXT: &str = "도끼를 주웠어요!";
 pub const GUN_PICKED_TEXT: &str = "총을 주웠어요!";
 /// US-052 땅에 놓인 무기 한 변 (픽셀). 수산나가 정한 처음 값.
 pub const WEAPON_SIZE: f32 = 32.0;
-/// 미스를 찾을 때 총이 나올 확률. 임시 값이다. 이미 가졌으면 나오지 않는다.
+/// 칼과 도끼가 다 있을 때 미스에게서 총이 나올 확률. 임시 값이다. 이미 가졌으면 나오지 않는다.
 pub const GUN_DROP_CHANCE: f32 = 0.1;
 /// 땅에 닿은 무기를 줍지 않으면 사라질 때까지 (초). 임시 값이고 실제 시간이다.
 pub const WEAPON_GROUND_SECONDS: f32 = 15.0;
@@ -351,6 +351,7 @@ mod tests {
         assert_eq!(ZOMBIE_ATTACK, 2);
         assert_eq!(EXPERIENCE_PER_LEVEL, 5);
         assert_eq!(SKELETON_HP, 3);
+        assert_eq!((ZOMBIE_SPAWN_SECONDS, MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, ZOMBIE_MAX_ON_SCREEN), (10.0, 2, 6, 4));
         assert_eq!((SKELETON_HALF_MIN_LEVEL, SKELETON_FULL_MIN_LEVEL), (2, 3));
         assert_eq!((SKELETON_NORMAL_ATTACK, SKELETON_HALF_ATTACK, SKELETON_FULL_ATTACK), (2, 3, 4));
         assert_eq!(COIN_MAX, 5000);
