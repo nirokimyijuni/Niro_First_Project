@@ -199,6 +199,7 @@ async fn main() {
                                 key.apply(&mut game.math);
                             }
                         } else if craft_open {
+                            // "곡괭이를 만들었어요!"는 제작대 화면이 바로 보여 준다 (craft::draw_craft)
                             if let Some(tap) = menu.tap.and_then(craft_tap_at) {
                                 apply_craft_tap(game, &mut gathered.craft_pick, tap);
                             }
@@ -246,7 +247,7 @@ async fn main() {
                         }
                         for event in game.take_gather_events() {
                             match event {
-                                GatherEvent::Mined { what, .. } => gathered.on_mined(what),
+                                GatherEvent::Mined { what, .. } => gathered.on_mined(what, !game.gathering.bag.has_pickaxe && game.world.workbench().is_some()),
                                 GatherEvent::PushedOutOfCave => effects.show_message(config::CAVE_NIGHT_OUT_TEXT),
                                 GatherEvent::CaveClosed => effects.show_message(config::CAVE_CLOSED_TEXT),
                                 GatherEvent::CraftingOpened => gathered.craft_pick = logic::gathering::Material::Wood,

@@ -355,10 +355,23 @@ fn draw_joystick(j: &Joystick, fade: f32) {
     draw_circle_lines(k.x, k.y, KNOB_RADIUS, 3.0, faded(KNOB_LINE));
 }
 
+/// 반짝이 한 번(커졌다 작아짐)에 걸리는 초. 손 닿는 물건 빛(gather)도 같이 쓴다.
+pub const GLOW_SECONDS: f32 = 1.2;
+
+/// 0..=1로 천천히 오르내리는 반짝임 세기.
+pub fn glow_pulse(t: f32) -> f32 {
+    0.5 - 0.5 * (t * std::f32::consts::TAU / GLOW_SECONDS).cos()
+}
+
 fn draw_button(text: &TextPainter, b: &TouchButton, held: bool, mine_label: &str) {
     // 누르고 있으면 살짝 작아지고 주황빛
     let r = if held { b.radius * 0.94 } else { b.radius };
     let c = b.center;
+    if b.kind == ButtonKind::Mine {
+        // 쓸 것이 있을 때만 나오는 버튼이라 늘 살짝 반짝인다
+        let p = glow_pulse(get_time() as f32);
+        draw_circle_lines(c.x, c.y, r + 5.0 + 5.0 * p, 5.0, Color::new(1.0, 0.93, 0.45, 0.45 + 0.45 * p));
+    }
     draw_circle(c.x, c.y, r, if held { BUTTON_FILL_HELD } else { BUTTON_FILL });
     draw_circle_lines(c.x, c.y, r, LINE_WIDTH, BUTTON_LINE);
     match b.kind {

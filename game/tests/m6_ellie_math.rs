@@ -57,7 +57,7 @@ fn us074_add_ranges_and_carry_borrow_exist() {
         assert!(q.answer <= 999, "{}", q.text);
         match q.kind {
             MathKind::AddTwo => {
-                assert!(n.iter().all(|x| (100..=899).contains(x)) && q.answer <= 999, "{}", q.text);
+                assert!(n.iter().all(|x| (10..=99).contains(x)) && q.answer <= 999, "{}", q.text);
                 carry |= n[0] % 10 + n[1] % 10 >= 10;
             }
             MathKind::AddThree => assert!(n.len() == 3 && n.iter().all(|x| (1..=20).contains(x)), "{}", q.text),

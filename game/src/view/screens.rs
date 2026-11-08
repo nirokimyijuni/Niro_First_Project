@@ -406,6 +406,9 @@ pub fn draw_play(
     } else {
         gather::draw_cave(game, camera_x);
     }
+    if ended.is_none() {
+        gather::draw_usable_glow(game, view_x, time());
+    }
 
     let player = &game.player;
     let texture = assets.character(player.kind);
@@ -452,6 +455,7 @@ pub fn draw_play(
     effects.draw(text, r, player.facing, &assets.m6, camera_x, game.attack_reach());
     if ended.is_none() {
         gather::draw_mining_progress(r, game.mining_progress());
+        gather::draw_usable_tag(text, game, view_x, camera_x, touch_mode, time());
     }
     if ended.is_none() && on_map {
         for (i, walker) in game.citizens.walkers.iter().enumerate() {
@@ -473,7 +477,7 @@ pub fn draw_play(
         draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
         draw_level(text, game.combat.level, game.combat.experience);
         draw_weapons(&assets.m6, &owned, game.weapons.held());
-        gather::draw_bag(text, &game.gathering.bag);
+        gather::draw_bag(text, &game.gathering.bag, game.world.workbench().is_some() && !gathered.recipe_hint_showing());
     }
     if touch_mode && ended.is_none() {
         text.centered("조이스틱을 위로 밀면 점프", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);

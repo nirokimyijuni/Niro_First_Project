@@ -14,7 +14,7 @@ use crate::config::{
 pub enum MathKind {
     /// {a}개씩 {b}묶음 → a × b
     Multiply,
-    /// 세 자리 수 두 개 더하기 → a + b
+    /// 두 자리 수 두 개 더하기 → a + b
     AddTwo,
     /// 세 수 연속 더하기 → a + b + c
     AddThree,

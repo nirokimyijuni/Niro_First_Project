@@ -46,6 +46,10 @@
 - 감독은 기능마다 에이전트를 새로 시작한다. 긴 대화를 이어 쓰지 않는다.
 - 출시 기준은 바뀌지 않는다.
 
+## 파일 고치기
+- 파일은 Edit·Write 도구로 고친다. 이 PC의 `python`은 아무것도 하지 않는 윈도우 가짜 명령이라, 셸에서 `python`으로 쓴 수정은 조용히 사라진다. 꼭 필요하면 `/c/Users/SDS/AppData/Local/Programs/Python/Python313/python.exe`를 쓴다.
+- 고쳤다고 보고하기 전에 grep으로 파일에 실제로 들어갔는지 확인한다.
+
 ## 빌드 폴더
 - 빌드 결과물은 기본 위치인 `game/target`에 둔다. `CARGO_TARGET_DIR`을 임시 폴더(스크래치)나 C 드라이브로 지정하지 않는다. C 드라이브가 꽉 찬다.
 - 동시에 빌드해야 하면 `CARGO_TARGET_DIR=target-<이름>`으로 `game/target-<이름>`을 쓴다 (`.gitignore`에 이미 있다).

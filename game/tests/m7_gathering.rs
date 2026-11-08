@@ -132,25 +132,48 @@ fn fast_forward_does_not_speed_up_mining() {
 }
 
 #[test]
-fn does_not_mine_behind_the_back_or_out_of_reach() {
+fn mines_on_both_sides_of_the_body_but_not_out_of_reach() {
+    // 긴 맵 나무 옆은 구멍·발판·상자가 있어 몸이 밀린다. 평평한 동굴에 덩이 하나만 남기고 잰다.
+    let lump = 2;
+    let edge = PLAYER_WIDTH / 2.0 + MINE_REACH;
+    for facing in [Facing::Right, Facing::Left] {
+        let mut g = new_game();
+        go_into_cave(&mut g);
+        for (i, other) in g.gathering.ore_lumps.iter_mut().enumerate() {
+            if i != lump {
+                other.rect.x += SCREEN_WIDTH * 2.0;
+            }
+        }
+        let lump_left = g.gathering.ore_lumps[lump].rect.x;
+        let lump_right = lump_left + ORE_LUMP_WIDTH;
+        // 덩이가 오른쪽에 있을 때와 왼쪽에 있을 때, 어느 쪽을 봐도 같다 (등 뒤도 닿는다).
+        for center_x in [lump_left - edge + 1.0, lump_right + edge - 1.0, lump_left - PLAYER_WIDTH / 2.0 - 1.0] {
+            stand_at(&mut g, center_x, facing);
+            assert_eq!(g.usable_in_reach(), Some(Usable::OreLump(lump)), "닿는 거리 {center_x} {facing:?}");
+        }
+        for center_x in [lump_left - edge - 1.0, lump_right + edge + 1.0] {
+            stand_at(&mut g, center_x, facing);
+            assert_eq!(g.usable_in_reach(), None, "닿지 않는 거리 {center_x} {facing:?}");
+            press(&mut g);
+            assert_eq!(g.mining_progress(), None);
+            release(&mut g);
+        }
+        // 덩이가 왼쪽 끝에 닿는 자리: 오른쪽을 보면 등 뒤인데도 끝까지 캔다.
+        stand_at(&mut g, lump_right + edge - 1.0, facing);
+        mine_one(&mut g);
+        assert_eq!(ores(&g), 1, "{facing:?}을 보며 끝까지 캔다");
+    }
+}
+
+#[test]
+fn turning_around_while_mining_keeps_mining() {
     let mut g = new_game();
-    let tree_left = TREE_XS[0] - TREE_WIDTH / 2.0;
-    stand_at(&mut g, tree_left - PLAYER_WIDTH / 2.0 - 1.0, Facing::Left);
-    assert!(!g.usable_in_reach().is_some(), "등 뒤");
+    stand_by_first_tree(&mut g);
     press(&mut g);
-    assert_eq!(g.mining_progress(), None);
-    release(&mut g);
-
-    stand_at(&mut g, tree_left - PLAYER_WIDTH / 2.0 - MINE_REACH - 1.0, Facing::Right);
-    assert!(!g.usable_in_reach().is_some(), "닿지 않는 거리");
-    press(&mut g);
-    assert_eq!(g.mining_progress(), None);
-    release(&mut g);
-
-    stand_at(&mut g, tree_left - PLAYER_WIDTH / 2.0 - MINE_REACH + 1.0, Facing::Right);
-    assert!(g.usable_in_reach().is_some(), "닿는 거리");
-    press(&mut g);
-    assert!(g.mining_progress().is_some());
+    run(&mut g, idle(), 1.0);
+    g.player.facing = Facing::Left;
+    run(&mut g, idle(), MINE_SECONDS_BARE_HAND - 1.0 + A_LITTLE);
+    assert_eq!(wood(&g), 1, "등을 돌려도 닿는 거리면 계속 캔다");
 }
 
 #[test]
@@ -256,7 +279,14 @@ fn mine_button_shows_only_near_something_to_use() {
     assert!(g.usable_in_reach().is_some(), "출구");
     stand_by_lump(&mut g, 0);
     assert!(g.usable_in_reach().is_some(), "광석");
-    stand_at(&mut g, CAVE_EXIT_X + CAVE_ENTRANCE_WIDTH / 2.0 + MINE_REACH + PLAYER_WIDTH, Facing::Left);
+    // MINE_REACH 100이면 동굴(한 화면)에 빈자리가 없어서, 덩이를 화면 밖으로 치우고 출구 끝만 본다.
+    for lump in &mut g.gathering.ore_lumps {
+        lump.rect.x += SCREEN_WIDTH * 2.0;
+    }
+    let exit_right = CAVE_EXIT_X + CAVE_ENTRANCE_WIDTH / 2.0;
+    stand_at(&mut g, exit_right + MINE_REACH + PLAYER_WIDTH / 2.0 - 1.0, Facing::Right);
+    assert_eq!(g.usable_in_reach(), Some(Usable::CaveExit), "등 뒤 출구");
+    stand_at(&mut g, exit_right + MINE_REACH + PLAYER_WIDTH / 2.0 + 1.0, Facing::Left);
     assert!(!g.usable_in_reach().is_some(), "동굴의 빈자리");
 }
 
@@ -835,7 +865,7 @@ fn no_box_within_64_pixels_beside_trees_entrance_and_workbench() {
 }
 
 #[test]
-fn only_the_nearest_thing_in_front_is_used() {
+fn only_the_nearest_thing_is_used() {
     let mut g = new_game();
     // 둘째 나무를 첫 나무 바로 뒤로 옮겨 둘 다 닿게 한다.
     let first = g.gathering.trees[0].rect;
@@ -848,6 +878,52 @@ fn only_the_nearest_thing_in_front_is_used() {
     assert_eq!(wood(&g), 1);
     // 첫 나무가 그루터기면 다음으로 가까운 것을 쓴다.
     assert_eq!(g.usable_in_reach(), Some(Usable::Tree(1)));
+}
+
+/// 셋째 나무와 제작대 사이: 64픽셀 넘게 떨어져 있어도 MINE_REACH 100이면 둘 다 닿는다.
+#[test]
+fn between_a_tree_and_the_workbench_the_nearer_one_is_used_even_behind() {
+    let (tree_x, bench_x) = (TREE_XS[2], WORKBENCH_X);
+    assert!(bench_x - tree_x > APART, "임시-36 간격은 그대로");
+    let middle = (tree_x + bench_x) / 2.0;
+    let mut g = new_game();
+    for facing in [Facing::Right, Facing::Left] {
+        // 넷째 나무까지는 닿지 않는 자리라 둘만 닿는다. 가까운 쪽이 등 뒤여도 그쪽을 쓴다.
+        stand_at(&mut g, middle - 5.0, facing);
+        assert_eq!(g.usable_in_reach(), Some(Usable::Tree(2)), "나무가 가깝다 {facing:?}");
+        stand_at(&mut g, middle + 5.0, facing);
+        assert_eq!(g.usable_in_reach(), Some(Usable::Workbench), "제작대가 가깝다 {facing:?}");
+    }
+    // 거리가 같으면 바라보는 쪽을 쓴다.
+    stand_at(&mut g, middle, Facing::Right);
+    assert_eq!(g.usable_in_reach(), Some(Usable::Workbench));
+    stand_at(&mut g, middle, Facing::Left);
+    assert_eq!(g.usable_in_reach(), Some(Usable::Tree(2)));
+
+    // 캐면 가까운 나무 하나만 줄고, 제작대는 열리지 않는다.
+    stand_at(&mut g, middle - 5.0, Facing::Right);
+    mine_one(&mut g);
+    assert_eq!(wood(&g), 1);
+    assert!(!g.gathering.trees[2].is_ready());
+    assert!(g.gathering.trees.iter().enumerate().all(|(i, t)| i == 2 || t.is_ready()));
+    assert!(!g.crafting.is_open());
+    // 나무가 그루터기가 되면 등 뒤 제작대가 남는다.
+    assert_eq!(g.usable_in_reach(), Some(Usable::Workbench));
+}
+
+#[test]
+fn two_ore_lumps_behind_and_in_front_the_nearer_one_is_mined() {
+    let mut g = new_game();
+    go_into_cave(&mut g);
+    // 덩이 0과 1 사이, 덩이 0 쪽으로 조금 치우쳐 서서 덩이 1을 바라본다.
+    let middle = (ORE_LUMP_XS[0] + ORE_LUMP_XS[1]) / 2.0;
+    stand_at(&mut g, middle - 5.0, Facing::Right);
+    assert_eq!(g.usable_in_reach(), Some(Usable::OreLump(0)), "등 뒤 덩이 0이 더 가깝다");
+    mine_one(&mut g);
+    assert_eq!(ores(&g), 1);
+    assert!(!g.gathering.ore_lumps[0].is_ready());
+    assert!(g.gathering.ore_lumps[1].is_ready(), "덩이 1은 그대로");
+    assert_eq!(g.usable_in_reach(), Some(Usable::OreLump(1)));
 }
 
 #[test]
@@ -882,7 +958,8 @@ fn mining_and_the_pickaxe_are_not_math_items() {
     let mut g = new_game();
     g.gathering.bag.has_pickaxe = true;
     for x in TREE_XS {
-        stand_at(&mut g, x - TREE_WIDTH / 2.0 - PLAYER_WIDTH / 2.0 - MINE_REACH / 2.0, Facing::Right);
+        // 나무 바로 위에 서야 제작대처럼 더 가까운 것이 없다 (MINE_REACH 100).
+        stand_at(&mut g, x, Facing::Right);
         mine_one(&mut g);
     }
     go_into_cave(&mut g);

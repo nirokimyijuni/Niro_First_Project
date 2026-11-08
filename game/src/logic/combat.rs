@@ -132,6 +132,13 @@ pub fn is_reached(player_rect: Rect, facing: Facing, range: f32, target: Rect) -
     attack_box_with_range(player_rect, facing, range).overlaps(&target) && is_in_front(player_rect, facing, target)
 }
 
+/// 바라보는 쪽과 등 뒤 모두, 몸 양옆 `range` 안에 닿는지 (캐기·쓰기, 임시-16, 임시-36). 이음매 너머도 닿는다.
+pub fn is_reached_on_either_side(player_rect: Rect, range: f32, target: Rect) -> bool {
+    let target = nearest_copy(target, player_rect.center().x);
+    let both_sides = Rect::new(player_rect.x - range, player_rect.y, player_rect.w + range * 2.0, player_rect.h);
+    both_sides.overlaps(&target)
+}
+
 /// 한 판의 싸움 상태. 새 게임을 하면 새로 만든다.
 pub struct Combat {
     pub health: PlayerHealth,

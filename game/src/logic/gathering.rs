@@ -2,9 +2,8 @@
 //! 무엇을 캘지(가장 가까운 하나)와 언제 멈추는지는 `Game`이 정하고, 여기는 시간과 재료를 맡는다.
 //! 닿는지는 `is_reached`로 보아서 고리 맵 이음매 너머도 닿는다 (임시-21).
 
-use super::combat::is_reached;
+use super::combat::is_reached_on_either_side;
 use super::monster::SeededRandom;
-use super::player::Facing;
 use super::world::World;
 use crate::config::{
     COPPER_MINED_TEXT, COPPER_NAME, GOLD_MINED_TEXT, GOLD_NAME, IRON_MINED_TEXT, IRON_NAME, MINE_REACH, MINE_SECONDS_BARE_HAND,
@@ -172,13 +171,13 @@ impl Gathering {
     }
 
     /// `dt`초 캔다. 닿지 않게 되면 멈춘다. 다 캐면 재료를 가방에 넣고 무엇이 어디서 나왔는지 돌려준다.
-    pub fn keep_mining(&mut self, dt: f32, in_cave: bool, body: Rect, facing: Facing) -> Option<(Material, Vec2)> {
+    pub fn keep_mining(&mut self, dt: f32, in_cave: bool, body: Rect) -> Option<(Material, Vec2)> {
         let needed = self.bag.mine_seconds();
         let job = self.job.as_mut()?;
         job.seconds += dt.max(0.0);
         let (index, is_done) = (job.index, job.seconds >= needed);
         let target = self.list(in_cave)[index].rect;
-        if !is_reached(body, facing, MINE_REACH, target) {
+        if !is_reached_on_either_side(body, MINE_REACH, target) {
             self.job = None;
             return None;
         }

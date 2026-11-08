@@ -52,6 +52,25 @@ fn add_three_numbers_are_1_to_20_and_both_ends_show_up() {
     assert!(seen.contains(&1) && seen.contains(&20), "1과 20이 한 번은 나와야 해요");
 }
 
+/// 부모님 말(2026-11-08): 두 수 더하기는 두 자리 수끼리 (10~99). 값을 바꾸면 여기서 먼저 알린다.
+#[test]
+fn add_two_numbers_are_10_to_99_and_both_ends_show_up() {
+    assert_eq!(MATH_ADD_TWO_RANGE, (10, 99));
+    let mut seen = Vec::new();
+    for seed in 0..SEEDS {
+        let mut maker = MathQuestionMaker::new(seed);
+        for _ in 0..5 {
+            let q = maker.next().unwrap();
+            if q.kind == MathKind::AddTwo {
+                let n = numbers_in(&q.text);
+                assert!(n.iter().all(|x| (10..=99).contains(x)), "{}", q.text);
+                seen.extend(n);
+            }
+        }
+    }
+    assert!(seen.contains(&10) && seen.contains(&99), "10과 99가 한 번은 나와야 해요");
+}
+
 #[test]
 fn every_kind_shows_up_and_none_is_rare() {
     let questions = first_questions();

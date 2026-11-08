@@ -6,7 +6,7 @@ use super::character::CharacterKind;
 use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
-use super::combat::{is_reached, Combat, CombatEvent};
+use super::combat::{is_reached, is_reached_on_either_side, Combat, CombatEvent};
 use super::crafting::Crafting;
 use super::gathering::{Gathering, Material, Mineable};
 use super::math::{MathQuiz, MathResult};
@@ -327,7 +327,8 @@ impl Game {
         self.gathering.progress()
     }
 
-    /// 지금 E 키나 캐기 버튼을 누르면 쓸 것: 바라보는 쪽 `MINE_REACH` 안에서 가장 가까운 하나 (임시-36).
+    /// 지금 E 키나 캐기 버튼을 누르면 쓸 것: 몸 양쪽(등 뒤 포함) `MINE_REACH` 안에서 가장 가까운 하나 (임시-16, 임시-36).
+    /// 거리가 같으면 바라보는 쪽을 먼저 쓴다.
     /// 판이 끝났거나 수학 문제·제작대가 열려 있으면 None이다. 폰 버튼은 Some일 때만 보인다 (글은 `button_text`).
     pub fn usable_in_reach(&self) -> Option<Usable> {
         if self.is_over() || self.math.is_open() || self.crafting.is_open() {
@@ -346,11 +347,15 @@ impl Game {
             spots.extend(ready(&self.gathering.trees).into_iter().map(|(i, rect)| (Usable::Tree(i), rect)));
         }
         let body = self.player.rect();
-        let distance = |rect: &Rect| shortest_dx(body.center().x, rect.center().x).abs();
+        let dx = |rect: &Rect| shortest_dx(body.center().x, rect.center().x);
+        let is_behind = |rect: &Rect| match self.player.facing {
+            Facing::Right => dx(rect) < 0.0,
+            Facing::Left => dx(rect) > 0.0,
+        };
         spots
             .into_iter()
-            .filter(|(_, rect)| is_reached(body, self.player.facing, MINE_REACH, *rect))
-            .min_by(|(_, a), (_, b)| distance(a).total_cmp(&distance(b)))
+            .filter(|(_, rect)| is_reached_on_either_side(body, MINE_REACH, *rect))
+            .min_by(|(_, a), (_, b)| dx(a).abs().total_cmp(&dx(b).abs()).then(is_behind(a).cmp(&is_behind(b))))
             .map(|(thing, _)| thing)
     }
 
@@ -429,7 +434,7 @@ impl Game {
                 }
             }
         }
-        let mined = self.gathering.keep_mining(dt, self.in_cave, self.player.rect(), self.player.facing);
+        let mined = self.gathering.keep_mining(dt, self.in_cave, self.player.rect());
         if let Some((what, at)) = mined {
             self.gather_events.push(GatherEvent::Mined { what, at });
         }
