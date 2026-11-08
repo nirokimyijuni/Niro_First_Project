@@ -407,6 +407,82 @@ pub const MATH_SUBTRACT_STORIES: &[&str] = &[
     "{이름:이} 사탕 {a}개 중에서 {b}개를 친구에게 나눠 줬어요. 몇 개 남았을까요?",
 ];
 
+// ---- M7 제작과 동굴 (stories/backlog.md M7 맨 위 표. 임시-N은 아이·부모가 언제든 바꿀 수 있다) ----
+// x는 모두 몸 가운데다. 시간은 모두 실제 시간이라 빨리감기로 빨라지지 않는다.
+
+/// 임시-16, 임시-36 캐기와 입구·출구·제작대 쓰기가 앞쪽으로 닿는 거리 (픽셀). 닿는 것 중 가장 가까운 하나만 쓴다.
+pub const MINE_REACH: f32 = 60.0;
+
+/// 임시-14 나무 자리. 산의 나뭇가지 발판과는 다른 나무다. 줄을 더하면 그대로 새 나무가 된다.
+pub const TREE_XS: [f32; 4] = [900.0, 1850.0, 2840.0, 3040.0];
+/// M7 나무 크기 (가로, 세로). 수산나가 정한 처음 값.
+pub const TREE_WIDTH: f32 = 48.0;
+pub const TREE_HEIGHT: f32 = 96.0;
+/// 임시-14 캔 나무가 다시 자랄 때까지 (초)
+pub const TREE_REGROW_SECONDS: f32 = 30.0;
+
+/// 임시-11 화산의 동굴 입구 자리와 크기. 크기는 수산나가 정한 처음 값.
+pub const CAVE_ENTRANCE_X: f32 = 1060.0;
+pub const CAVE_ENTRANCE_WIDTH: f32 = 96.0;
+pub const CAVE_ENTRANCE_HEIGHT: f32 = 96.0;
+/// 임시-12 동굴 안 출구 자리. 크기는 입구와 같다.
+pub const CAVE_EXIT_X: f32 = 60.0;
+/// 임시-12 동굴 안 광석 덩이 자리. 줄을 더하면 그대로 새 덩이가 된다.
+pub const ORE_LUMP_XS: [f32; 6] = [300.0, 400.0, 500.0, 620.0, 740.0, 860.0];
+/// M7 광석 덩이 크기 (가로, 세로). 수산나가 정한 처음 값.
+pub const ORE_LUMP_WIDTH: f32 = 48.0;
+pub const ORE_LUMP_HEIGHT: f32 = 48.0;
+/// 임시-15 캔 덩이가 다시 생길 때까지 (초)
+pub const ORE_REGROW_SECONDS: f32 = 30.0;
+/// 임시-15 광석이 나올 확률. 넷을 더하면 1이어야 한다.
+pub const ORE_IRON_CHANCE: f32 = 0.70;
+pub const ORE_COPPER_CHANCE: f32 = 0.15;
+pub const ORE_SILVER_CHANCE: f32 = 0.10;
+pub const ORE_GOLD_CHANCE: f32 = 0.05;
+/// 임시-13 밤에도 동굴에 들어갈지. false면 18:00에 입구 앞으로 나온다.
+/// true면 밤에도 있을 수 있고, 몬스터는 입구 앞에서 기다린다.
+pub const CAVE_OPEN_AT_NIGHT: bool = false;
+/// 동굴에 있는 동안 맵이 보는 주인공 몸의 y. 입구 위 먼 하늘이라서 코인·미스·시민·몬스터에 닿지 않는다.
+pub const CAVE_AWAY_Y: f32 = -10000.0;
+
+/// 임시-18 집의 제작대 자리와 크기. 크기는 수산나가 정한 처음 값.
+pub const WORKBENCH_X: f32 = 2930.0;
+pub const WORKBENCH_WIDTH: f32 = 64.0;
+pub const WORKBENCH_HEIGHT: f32 = 64.0;
+/// 임시-18 제작대를 여는 동안 시계·몬스터·코인이 멈추는지.
+/// false면 게임은 흐르고 주인공만 서 있다.
+pub const CRAFTING_PAUSES_GAME: bool = true;
+/// 임시-19 곡괭이 모양. D5 그림이고 아이 그림이 오면 바꾼다 (D53). 칸이 어긋나도 안 나온다.
+pub const CRAFT_WOOD_MARK: char = '나';
+pub const CRAFT_IRON_MARK: char = '철';
+pub const PICKAXE_SHAPE: [[char; CRAFT_GRID_WIDTH]; CRAFT_GRID_HEIGHT] = [
+    ['철', '나', '철', ' '],
+    [' ', '나', ' ', ' '],
+    [' ', '나', '나', ' '],
+];
+
+/// M7 재료 이름. 정보판이 쓴다.
+pub const WOOD_NAME: &str = "나무";
+pub const IRON_NAME: &str = "철광석";
+pub const COPPER_NAME: &str = "동";
+pub const SILVER_NAME: &str = "은";
+pub const GOLD_NAME: &str = "금";
+/// US-065 캤을 때 문구
+pub const WOOD_MINED_TEXT: &str = "나무를 캤어요!";
+pub const IRON_MINED_TEXT: &str = "철광석을 캤어요!";
+pub const COPPER_MINED_TEXT: &str = "동을 캤어요!";
+pub const SILVER_MINED_TEXT: &str = "은을 캤어요!";
+pub const GOLD_MINED_TEXT: &str = "금을 캤어요!";
+/// US-064 동굴 문구와 장소 이름
+pub const CAVE_NAME: &str = "동굴";
+pub const CAVE_NIGHT_OUT_TEXT: &str = "밤이 왔어요! 밖으로 나왔어요";
+pub const CAVE_CLOSED_TEXT: &str = "동굴은 낮에 열려요";
+/// 임시-36 폰 버튼 글. 그때 쓸 것에 맞게 바뀐다 (`Usable::button_text`).
+pub const MINE_BUTTON_TEXT: &str = "캐기";
+pub const CAVE_ENTER_BUTTON_TEXT: &str = "들어가기";
+pub const CAVE_EXIT_BUTTON_TEXT: &str = "나가기";
+pub const WORKBENCH_BUTTON_TEXT: &str = "만들기";
+
 #[cfg(test)]
 mod tests {
     use super::*;

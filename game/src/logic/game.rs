@@ -7,16 +7,19 @@ use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
 use super::combat::{is_reached, Combat, CombatEvent};
+use super::crafting::Crafting;
+use super::gathering::{Gathering, Material, Mineable};
 use super::math::{MathQuiz, MathResult};
 use super::miss::Miss;
-use super::player::{Player, PlayerInput};
+use super::player::{Facing, Player, PlayerInput};
 use super::weapon::{Weapon, Weapons};
-use super::world::{really_overlaps, World};
+use super::world::{really_overlaps, shortest_dx, World};
 use crate::config::{
-    DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MATH_WRONG_HP_LOSS, PLAYER_HEIGHT, PLAYER_SPAWN_X, SCORE_PER_COIN, SCORE_PER_LEVEL_UP,
-    SCORE_PER_MONSTER,
+    CAVE_AWAY_Y, CAVE_ENTER_BUTTON_TEXT, CAVE_ENTRANCE_X, CAVE_EXIT_BUTTON_TEXT, CAVE_NAME, CAVE_OPEN_AT_NIGHT, CRAFTING_PAUSES_GAME,
+    DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MATH_WRONG_HP_LOSS, MINE_BUTTON_TEXT, MINE_REACH, PLAYER_HEIGHT, PLAYER_SPAWN_X,
+    PLAYER_WIDTH, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT,
 };
-use macroquad::math::Vec2;
+use macroquad::math::{Rect, Vec2};
 
 /// 화면(로건)이 보고 팝업·소리를 낼 일.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,6 +42,45 @@ pub enum GameEvent {
     GameCleared,
 }
 
+/// 캐기·동굴·제작대에서 생긴 일. `GameEvent`와 따로 `Game::take_gather_events`로 받는다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GatherEvent {
+    /// 다 캤다 (`Material::mined_text`). `at`은 캔 것의 가운데다. 동굴 안이면 동굴 좌표다.
+    Mined { what: Material, at: Vec2 },
+    /// 동굴에 들어갔다.
+    CaveEntered,
+    /// 출구로 나왔다.
+    CaveLeft,
+    /// 밤이 되어 입구 앞으로 나왔다 (`CAVE_NIGHT_OUT_TEXT`).
+    PushedOutOfCave,
+    /// 밤이라 들어가지 못했다 (`CAVE_CLOSED_TEXT`).
+    CaveClosed,
+    /// 제작대를 열었다.
+    CraftingOpened,
+}
+
+/// E 키와 캐기 버튼으로 쓰는 것 (임시-17, 임시-36). 번호는 `gathering.trees`·`gathering.ore_lumps` 순서다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Usable {
+    Tree(usize),
+    OreLump(usize),
+    CaveEntrance,
+    CaveExit,
+    Workbench,
+}
+
+impl Usable {
+    /// 폰 버튼에 쓰는 글 (임시-36).
+    pub fn button_text(self) -> &'static str {
+        match self {
+            Usable::Tree(_) | Usable::OreLump(_) => MINE_BUTTON_TEXT,
+            Usable::CaveEntrance => CAVE_ENTER_BUTTON_TEXT,
+            Usable::CaveExit => CAVE_EXIT_BUTTON_TEXT,
+            Usable::Workbench => WORKBENCH_BUTTON_TEXT,
+        }
+    }
+}
+
 pub struct Game {
     pub player: Player,
     pub world: World,
@@ -53,6 +95,16 @@ pub struct Game {
     /// 미스의 수학 문제 (US-074~076). 열려 있는 동안 게임 속 시간이 모두 멈춘다.
     pub math: MathQuiz,
     cleared: bool,
+    /// 나무, 광석 덩이, 재료와 곡괭이 (`gathering.bag`).
+    pub gathering: Gathering,
+    pub crafting: Crafting,
+    /// 주인공이 동굴 안이면 true. 이때 `player`는 `cave_world` 좌표다.
+    pub in_cave: bool,
+    pub cave_world: World,
+    /// E 키나 캐기 버튼을 누르고 있으면 true. 화면이 `update` 전에 프레임마다 채운다.
+    pub mine_held: bool,
+    mine_was_held: bool,
+    gather_events: Vec<GatherEvent>,
 }
 
 impl Game {
@@ -65,7 +117,15 @@ impl Game {
     /// 정해진 맵으로 새 게임. 테스트는 `World::m1()`을 넣어 상자 자리를 고정한다.
     pub fn on_world(kind: CharacterKind, seed: u32, world: World) -> Game {
         let spawn = Vec2::new(PLAYER_SPAWN_X, world.ground_y - PLAYER_HEIGHT);
+        let cave_world = World::cave();
         Game {
+            gathering: Gathering::on_world(&world, &cave_world, seed),
+            crafting: Crafting::default(),
+            in_cave: false,
+            cave_world,
+            mine_held: false,
+            mine_was_held: false,
+            gather_events: Vec::new(),
             player: Player::new(kind, spawn),
             coins: Coins::on_boxes(&world),
             miss: world.is_long_map().then(|| Miss::new(seed)),
@@ -88,18 +148,24 @@ impl Game {
 
     /// 빨리감기 한 프레임: 걷기·점프·몬스터는 진짜 시간 `dt`, 시계와 코인은 `dt × time_scale`로 흘린다 (D13).
     /// 수학 문제가 열려 있으면 결과 글 시간만 흐르고 나머지는 모두 멈춘다 (임시-31). 빨리감기여도 같다.
+    /// 제작대가 열려 있으면 모두 멈춘다 (임시-18, 임시-37: 18:00도 오지 않는다).
     pub fn update_with_time_scale(&mut self, input: &PlayerInput, dt: f32, time_scale: f32) -> Vec<GameEvent> {
         let mut events = Vec::new();
-        if self.is_over() {
+        let crafting = self.crafting.is_open();
+        if self.is_over() || (crafting && CRAFTING_PAUSES_GAME) {
+            self.forget_mining();
             return events;
         }
         if self.math.is_open() {
+            self.forget_mining();
             self.update_combat(input, dt, &mut events);
             return events;
         }
         let world_dt = dt * time_scale;
+        let stand_still = PlayerInput::default();
+        let input = if crafting { &stand_still } else { input };
 
-        self.player.update(input, dt, &self.world);
+        self.player.update(input, dt, if self.in_cave { &self.cave_world } else { &self.world });
 
         for clock_event in self.clock.update(world_dt) {
             events.push(match clock_event {
@@ -108,13 +174,20 @@ impl Game {
             });
         }
 
-        let picked = self.coins.update(world_dt, self.player.rect());
+        // 밤 문제(update_combat)보다 먼저 입구 앞으로 나온다 (임시-37).
+        if self.in_cave && !self.cave_is_open() {
+            self.leave_cave();
+            self.gather_events.push(GatherEvent::PushedOutOfCave);
+        }
+
+        let picked = self.coins.update(world_dt, self.body_on_map());
         if picked > 0 {
             self.wallet.add(picked);
             events.push(GameEvent::CoinsPicked { count: picked });
         }
 
         self.update_combat(input, dt, &mut events);
+        self.update_gathering(dt, &events);
         events
     }
 
@@ -137,7 +210,7 @@ impl Game {
                 return;
             }
         }
-        let player_rect = self.player.rect();
+        let player_rect = self.body_on_map();
         if input.attack_pressed {
             let held = self.weapons.held();
             let reach = self.attack_reach();
@@ -166,8 +239,8 @@ impl Game {
             events.push(GameEvent::GameCleared);
         }
 
-        // 판이 끝난 순간(쓰러짐·클리어)에는 문제를 내지 않는다.
-        if !self.is_over() {
+        // 판이 끝난 순간(쓰러짐·클리어)과 동굴 안에서는 문제를 내지 않는다 (임시-37).
+        if !self.is_over() && !self.in_cave {
             self.math.open_next_waiting();
         }
     }
@@ -193,7 +266,7 @@ impl Game {
     pub fn attack_reach(&self) -> f32 {
         let held = self.weapons.held();
         if held == Weapon::Gun {
-            self.world.clear_reach(self.player.rect(), self.player.facing, held.range())
+            self.here().clear_reach(self.player.rect(), self.player.facing, held.range())
         } else {
             held.range()
         }
@@ -217,13 +290,26 @@ impl Game {
     }
 
     /// 카메라 왼쪽 끝 x. 로건은 그릴 때 월드 x에서 이 값을 뺀다.
+    /// 동굴 안이면 동굴 화면이라 늘 0이다.
     pub fn camera_left(&self) -> f32 {
-        self.world.camera_left(self.player.rect().center().x)
+        self.here().camera_left(self.player.rect().center().x)
     }
 
     /// 주인공이 있는 장소 이름.
     pub fn place_name(&self) -> &'static str {
+        if self.in_cave {
+            return CAVE_NAME;
+        }
         self.world.place_name_at(self.player.rect().center().x)
+    }
+
+    /// 주인공이 지금 걷는 곳: 동굴 안이면 `cave_world`, 아니면 `world`.
+    pub fn here(&self) -> &World {
+        if self.in_cave {
+            &self.cave_world
+        } else {
+            &self.world
+        }
     }
 
     /// W 키나 바꾸기 버튼을 "새로" 눌렀을 때 부른다 (US-053).
@@ -231,8 +317,126 @@ impl Game {
         self.weapons.switch();
     }
 
+    /// 지난번 뒤로 생긴 캐기·동굴·제작대 일을 모두 받는다. 화면이 `update` 뒤에 부른다.
+    pub fn take_gather_events(&mut self) -> Vec<GatherEvent> {
+        std::mem::take(&mut self.gather_events)
+    }
+
+    /// 캐는 중이면 0~1. 머리 위 표시에 쓴다. 캐지 않으면 None이다.
+    pub fn mining_progress(&self) -> Option<f32> {
+        self.gathering.progress()
+    }
+
+    /// 지금 E 키나 캐기 버튼을 누르면 쓸 것: 바라보는 쪽 `MINE_REACH` 안에서 가장 가까운 하나 (임시-36).
+    /// 판이 끝났거나 수학 문제·제작대가 열려 있으면 None이다. 폰 버튼은 Some일 때만 보인다 (글은 `button_text`).
+    pub fn usable_in_reach(&self) -> Option<Usable> {
+        if self.is_over() || self.math.is_open() || self.crafting.is_open() {
+            return None;
+        }
+        let ready = |list: &[Mineable]| -> Vec<(usize, Rect)> {
+            list.iter().enumerate().filter(|(_, m)| m.is_ready()).map(|(index, m)| (index, m.rect)).collect()
+        };
+        let mut spots: Vec<(Usable, Rect)> = Vec::new();
+        if self.in_cave {
+            spots.push((Usable::CaveExit, self.cave_world.cave_exit()));
+            spots.extend(ready(&self.gathering.ore_lumps).into_iter().map(|(i, rect)| (Usable::OreLump(i), rect)));
+        } else {
+            spots.extend(self.world.cave_entrance().map(|rect| (Usable::CaveEntrance, rect)));
+            spots.extend(self.world.workbench().map(|rect| (Usable::Workbench, rect)));
+            spots.extend(ready(&self.gathering.trees).into_iter().map(|(i, rect)| (Usable::Tree(i), rect)));
+        }
+        let body = self.player.rect();
+        let distance = |rect: &Rect| shortest_dx(body.center().x, rect.center().x).abs();
+        spots
+            .into_iter()
+            .filter(|(_, rect)| is_reached(body, self.player.facing, MINE_REACH, *rect))
+            .min_by(|(_, a), (_, b)| distance(a).total_cmp(&distance(b)))
+            .map(|(thing, _)| thing)
+    }
+
+    /// 동굴에 있어도 되는 때인지 (임시-13).
+    fn cave_is_open(&self) -> bool {
+        CAVE_OPEN_AT_NIGHT || !self.clock.is_night()
+    }
+
+    /// 맵의 코인·미스·시민·몬스터가 보는 주인공 몸. 동굴에 있으면 입구 위 먼 하늘이라 아무것도 닿지 않는다.
+    fn body_on_map(&self) -> Rect {
+        if self.in_cave {
+            Rect::new(CAVE_ENTRANCE_X, CAVE_AWAY_Y, PLAYER_WIDTH, PLAYER_HEIGHT)
+        } else {
+            self.player.rect()
+        }
+    }
+
+    fn use_thing(&mut self, thing: Usable) {
+        match thing {
+            Usable::Tree(index) | Usable::OreLump(index) => self.gathering.start_mining(index),
+            Usable::CaveEntrance if self.cave_is_open() => {
+                self.in_cave = true;
+                let exit_x = self.cave_world.cave_exit().center().x;
+                self.put_player_on_ground(exit_x);
+                self.player.facing = Facing::Right;
+                self.gather_events.push(GatherEvent::CaveEntered);
+            }
+            Usable::CaveEntrance => self.gather_events.push(GatherEvent::CaveClosed),
+            Usable::CaveExit => {
+                self.leave_cave();
+                self.gather_events.push(GatherEvent::CaveLeft);
+            }
+            Usable::Workbench => {
+                self.crafting.open();
+                self.gather_events.push(GatherEvent::CraftingOpened);
+            }
+        }
+    }
+
+    fn leave_cave(&mut self) {
+        self.in_cave = false;
+        self.gathering.stop_mining();
+        self.put_player_on_ground(CAVE_ENTRANCE_X);
+    }
+
+    /// 몸 가운데가 `center_x`이도록 땅에 세운다. 동굴과 맵의 땅 높이는 같다.
+    fn put_player_on_ground(&mut self, center_x: f32) {
+        self.player.pos = Vec2::new(center_x - self.player.size.x / 2.0, self.world.ground_y - self.player.size.y);
+        self.player.vel = Vec2::ZERO;
+    }
+
+    /// 멈춘 동안: 캐던 것은 멈추고, 그동안 누르고 있던 버튼은 "새로 누름"으로 치지 않는다.
+    fn forget_mining(&mut self) {
+        self.gathering.stop_mining();
+        self.mine_was_held = self.mine_held;
+    }
+
+    /// 캐기 버튼을 처리하고 나무와 덩이 시간(실제 시간)을 흘린다. 싸움이 끝난 뒤에 불러야 이번 프레임에 맞은 것을 본다.
+    /// 시작은 "새로" 눌렀을 때뿐이라 꾹 누르고 있으면 다음 것을 캐지 않는다.
+    /// 캐기와 곡괭이는 수학 문제 "아이템"으로 세지 않는다 (임시-37).
+    fn update_gathering(&mut self, dt: f32, happened: &[GameEvent]) {
+        self.gathering.grow_back(dt);
+        let newly_pressed = self.mine_held && !self.mine_was_held;
+        self.mine_was_held = self.mine_held;
+
+        let got_hurt = happened.iter().any(|e| matches!(e, GameEvent::Combat(CombatEvent::PlayerHurt { .. })));
+        if !self.mine_held || got_hurt || self.is_over() || self.math.is_open() {
+            self.gathering.stop_mining();
+            return;
+        }
+        if newly_pressed {
+            if let Some(thing) = self.usable_in_reach() {
+                self.use_thing(thing);
+                if !matches!(thing, Usable::Tree(_) | Usable::OreLump(_)) {
+                    return;
+                }
+            }
+        }
+        let mined = self.gathering.keep_mining(dt, self.in_cave, self.player.rect(), self.player.facing);
+        if let Some((what, at)) = mined {
+            self.gather_events.push(GatherEvent::Mined { what, at });
+        }
+    }
+
     fn update_miss_and_weapons(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
-        let player_rect = self.player.rect();
+        let player_rect = self.body_on_map();
         if let Some(miss) = &mut self.miss {
             miss.wait_to_come_back(dt, player_rect, &self.world);
             if miss.is_hiding() && really_overlaps(miss.rect(&self.world), player_rect) {
@@ -254,7 +458,7 @@ impl Game {
     }
 
     fn update_citizens(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
-        let player_rect = self.player.rect();
+        let player_rect = self.body_on_map();
         for citizen in &mut self.citizens.list {
             let touched = really_overlaps(citizen.rect, player_rect) || self.combat.any_monster_touches(citizen.rect);
             if citizen.update(dt, touched) {

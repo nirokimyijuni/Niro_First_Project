@@ -50,6 +50,11 @@ pub fn player_input() -> PlayerInput {
     }
 }
 
+/// 캐기·들어가기·만들기 (임시-16): E를 누르고 있는 동안 true. 새로 누름은 logic이 가린다.
+pub fn mine_key_down() -> bool {
+    is_key_down(KeyCode::E)
+}
+
 /// 무기 바꾸기: W를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
 pub fn switch_weapon_pressed() -> bool {
     is_key_pressed(KeyCode::W)

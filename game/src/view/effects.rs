@@ -145,6 +145,11 @@ impl Effects {
         self.swing_age.is_some() && matches!(self.swing_weapon, Some(Weapon::Sword | Weapon::Axe))
     }
 
+    #[cfg(test)]
+    pub fn message(&self) -> Option<&'static str> {
+        self.message.map(|(m, _)| m)
+    }
+
     /// 화면 가운데에 큰 문구를 잠깐 보여 준다. 새 문구가 오면 바뀐다.
     pub fn show_message(&mut self, message: &'static str) {
         self.message = Some((message, 0.0));

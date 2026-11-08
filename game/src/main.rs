@@ -8,18 +8,23 @@ mod view;
 
 use logic::character::CharacterKind;
 use logic::combat::CombatEvent;
-use logic::game::{Game, GameEvent};
+use logic::game::{Game, GameEvent, GatherEvent};
 use logic::player::PlayerInput;
 use macroquad::prelude::*;
 use view::assets::Assets;
+use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
 use view::effects::Effects;
 use view::gameover::{EndScreen, RETRY_BUTTON};
 use view::input::{
-    any_key_pressed, fast_forward_pressed, fingers, hold_walk_until_released, math_keys_pressed, menu_input, merge_touch, player_input,
+    any_key_pressed, fast_forward_pressed, fingers, hold_walk_until_released, math_keys_pressed, menu_input, merge_touch, mine_key_down, player_input,
     switch_weapon_pressed, MenuInput,
 };
+use view::gather::GatherView;
 use view::math::{draw_math, pad_key_at};
-use view::touch::{draw_back_button, draw_rotate_hint, draw_touch_controls, BACK_BUTTON, next_touch_mode, play_buttons, show_rotate_hint, TouchControls, TouchFrame};
+use view::touch::{
+    draw_back_button, draw_rotate_hint, draw_touch_controls, next_touch_mode, play_buttons_with_mine, show_rotate_hint, ButtonKind, TouchControls,
+    TouchFrame, BACK_BUTTON,
+};
 use view::screen::Letterbox;
 use view::screens;
 use view::text::TextPainter;
@@ -36,15 +41,17 @@ enum Scene {
         effects: Effects,
         /// 쓰러졌으면 그 화면 상태 (US-043)
         ended: Option<EndScreen>,
-        /// 수학 문제 창이 열려 있던 동안 누르던 ←/→는 뗄 때까지 걷기가 되지 않는다 (US-076)
+        /// 수학 문제 창이 열려 있던 동안 누르던 ←/→는 뗄 때까지 걷기가 되지 않는다 (US-076). 제작대 화면도 같다.
         walk_lock: bool,
+        /// 캔 것 팝업과 제작대에서 고른 재료 (M7, 화면 전용)
+        gathered: GatherView,
     },
 }
 
 fn start_play(kind: CharacterKind) -> Scene {
     // 판마다 좀비가 다르게 나오도록 지금 시각(밀리초)을 시드로 쓴다.
     let seed = (macroquad::miniquad::date::now() * 1000.0) as u64 as u32;
-    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false }
+    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new() }
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
@@ -63,6 +70,14 @@ fn update_with_time_scale(game: &mut Game, input: &PlayerInput, dt: f32, time_sc
 }
 
 /// 버틴 날이 최고 기록보다 크면 기록을 올리고 저장한다 (US-044, D35: 쓰러질 때도, 나갈 때도).
+/// 수학 창·제작대가 열린 동안 글·말풍선·팝업·연기 시간을 멈춘다. 창 뒤에 깔린 글이 창을 닫은 뒤 보이게 (BUG-027)
+fn update_screen_effects(effects: &mut Effects, gathered: &mut GatherView, dt: f32, window_open: bool) {
+    if !window_open {
+        effects.update(dt);
+        gathered.update(dt);
+    }
+}
+
 fn keep_record(days: u32, best_days: &mut u32) {
     if days > *best_days {
         *best_days = days;
@@ -117,9 +132,11 @@ async fn main() {
         // (메뉴에서 누른 손가락, 안내 전에 대고 있던 손가락이 플레이에서 저절로 걷기·점프가 되지 않게)
         // 수학 문제 창도 같다: 숫자판을 누르던 손가락이 창이 닫힌 뒤 조이스틱·버튼이 되지 않는다 (US-076).
         let quiz_open = matches!(&scene, Scene::Play { game, ended: None, .. } if game.math.is_open());
+        // 제작대 화면도 같다: 칸을 누르던 손가락이 조이스틱·버튼이 되지 않고, 걷기·공격이 게임에 들어가지 않는다 (US-021).
+        let craft_open = !quiz_open && matches!(&scene, Scene::Play { game, ended: None, .. } if game.crafting.is_open());
         // 글자 줄은 장면과 상관없이 매 프레임 꺼낸다 (닫혀 있으면 버린다)
         let quiz_keys = math_keys_pressed(quiz_open && !rotate_hint);
-        if rotate_hint || quiz_open || !matches!(scene, Scene::Play { ended: None, .. }) {
+        if rotate_hint || quiz_open || craft_open || !matches!(scene, Scene::Play { ended: None, .. }) {
             let tap = touch.idle(&fingers);
             if !rotate_hint {
                 menu.tap = menu.tap.or(tap);
@@ -156,17 +173,21 @@ async fn main() {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, effects, ended, walk_lock } => {
+                Scene::Play { game, fast_forward, effects, ended, walk_lock, gathered } => {
                     // 플레이 중 터치는 조이스틱·버튼으로만. 쓰러진 화면의 터치는 위 idle이 메뉴 탭으로 준다.
-                    let buttons = play_buttons(!game.weapons.owned().is_empty());
-                    let touched = if ended.is_none() && !quiz_open { touch.update(&fingers, buttons, touch_mode) } else { TouchFrame::default() };
+                    let buttons = play_buttons_with_mine(!game.weapons.owned().is_empty(), game.usable_in_reach().is_some());
+                    let touched = if ended.is_none() && !quiz_open && !craft_open { touch.update(&fingers, &buttons, touch_mode) } else { TouchFrame::default() };
                     let retry = ended.as_mut().is_some_and(|screen| {
                         screen.seconds += dt;
                         screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
                     });
                     // 문제 창에서는 터치 "◀ 고르기"가 위 idle의 탭으로 온다 (D35: 창이 열려도 나가기)
                     let quiz_back = quiz_open && touch_mode && menu.tap.is_some_and(|p| BACK_BUTTON.contains(p));
-                    if menu.back || touched.back_pressed || retry || quiz_back {
+                    if craft_open && menu.back {
+                        // 제작대 화면의 Esc는 고르기로 나가지 않고 제작대만 닫는다 (US-021)
+                        game.crafting.close();
+                        None
+                    } else if menu.back || touched.back_pressed || retry || quiz_back {
                         keep_record(game.clock.nights_survived(), &mut best_days);
                         keep_score(game.score(), &mut best_score);
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
@@ -177,6 +198,10 @@ async fn main() {
                             for key in quiz_keys.iter().copied().chain(tapped) {
                                 key.apply(&mut game.math);
                             }
+                        } else if craft_open {
+                            if let Some(tap) = menu.tap.and_then(craft_tap_at) {
+                                apply_craft_tap(game, &mut gathered.craft_pick, tap);
+                            }
                         } else {
                             if fast_forward_pressed() {
                                 *fast_forward = !*fast_forward;
@@ -185,9 +210,12 @@ async fn main() {
                                 game.switch_weapon();
                             }
                         }
-                        let (keys, lock) = hold_walk_until_released(*walk_lock || quiz_open, merge_touch(player_input(), &touched));
+                        let (keys, lock) = hold_walk_until_released(*walk_lock || quiz_open || craft_open, merge_touch(player_input(), &touched));
                         *walk_lock = lock;
-                        let input = if quiz_open { PlayerInput::default() } else { keys };
+                        let input = if quiz_open || craft_open { PlayerInput::default() } else { keys };
+                        // 캐기·들어가기·만들기: E 키나 캐기 버튼을 누르고 있는 동안 (임시-16, 임시-17)
+                        // 창이 열린 동안에도 실제 누름을 넘긴다: 멈춘 동안은 logic의 forget_mining이 막고, 닫은 뒤 꾹 누른 E를 새 누름으로 보지 않는다 (REVIEW-017 1번)
+                        game.mine_held = mine_key_down() || touch.is_held(ButtonKind::Mine) || touched.mine_pressed;
                         if input.attack_pressed && ended.is_none() {
                             effects.start_swing(game.weapons.held());
                         }
@@ -216,8 +244,17 @@ async fn main() {
                                 GameEvent::CitizenPopped { at } => effects.on_citizen_popped(at),
                             }
                         }
+                        for event in game.take_gather_events() {
+                            match event {
+                                GatherEvent::Mined { what, .. } => gathered.on_mined(what),
+                                GatherEvent::PushedOutOfCave => effects.show_message(config::CAVE_NIGHT_OUT_TEXT),
+                                GatherEvent::CaveClosed => effects.show_message(config::CAVE_CLOSED_TEXT),
+                                GatherEvent::CraftingOpened => gathered.craft_pick = logic::gathering::Material::Wood,
+                                GatherEvent::CaveEntered | GatherEvent::CaveLeft => {}
+                            }
+                        }
                         effects.watch_citizens(game.citizens.walkers.iter().map(|w| w.is_walking()));
-                        effects.update(dt);
+                        update_screen_effects(effects, gathered, dt, quiz_open || craft_open);
                         None
                     }
                 }
@@ -233,15 +270,19 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, effects, ended, .. } => {
-                screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode);
+            Scene::Play { game, fast_forward, effects, ended, gathered, .. } => {
+                screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode, gathered);
                 if ended.is_none() && game.math.is_open() {
                     draw_math(&text, &game.math, &assets.m6.miss);
                     if touch_mode {
                         draw_back_button(&text);
                     }
+                } else if ended.is_none() && game.crafting.is_open() {
+                    draw_craft(&text, game, gathered.craft_pick);
                 } else if touch_mode && ended.is_none() {
-                    draw_touch_controls(&text, &touch, play_buttons(!game.weapons.owned().is_empty()));
+                    let usable = game.usable_in_reach();
+                    let buttons = play_buttons_with_mine(!game.weapons.owned().is_empty(), usable.is_some());
+                    draw_touch_controls(&text, &touch, &buttons, usable.map_or("", |u| u.button_text()));
                 }
             }
         }
@@ -277,6 +318,25 @@ mod tests {
     /// 상자 위로 올라가 코인을 줍고, 걷고, 점프하는 입력 묶음 (몇 초 동안).
     fn script(frame: usize) -> PlayerInput {
         PlayerInput { left: frame % 400 > 300, right: frame % 400 < 250, jump_pressed: frame % 90 == 0, attack_pressed: frame % 40 == 0 }
+    }
+
+    #[test]
+    fn message_behind_a_window_waits_until_the_window_closes() {
+        let mut effects = Effects::new();
+        let mut gathered = GatherView::new();
+        effects.show_message(config::CAVE_NIGHT_OUT_TEXT);
+        for _ in 0..600 {
+            update_screen_effects(&mut effects, &mut gathered, FRAME, true);
+        }
+        assert_eq!(effects.message(), Some(config::CAVE_NIGHT_OUT_TEXT), "창이 열린 10초 동안 글이 그대로");
+        for _ in 0..60 {
+            update_screen_effects(&mut effects, &mut gathered, FRAME, false);
+        }
+        assert!(effects.message().is_some(), "창을 닫은 뒤 1초에도 보인다");
+        for _ in 0..180 {
+            update_screen_effects(&mut effects, &mut gathered, FRAME, false);
+        }
+        assert!(effects.message().is_none(), "그 뒤에는 사라진다");
     }
 
     #[test]

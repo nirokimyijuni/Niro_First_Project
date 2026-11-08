@@ -2,8 +2,10 @@
 
 pub mod assets;
 pub mod coin;
+pub mod craft;
 pub mod effects;
 pub mod gameover;
+pub mod gather;
 pub mod hud;
 pub mod input;
 pub mod math;

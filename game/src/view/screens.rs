@@ -7,6 +7,7 @@ use super::assets::{height_with_antenna, Assets};
 use super::coin::draw_coins;
 use super::effects::{draw_bubble, Effects};
 use super::gameover::{draw_end_panel, draw_fallen_player, EndScreen};
+use super::gather::{self, GatherView};
 use super::hud::{draw_health, draw_hud, draw_level, draw_weapons};
 use super::places;
 use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
@@ -381,22 +382,30 @@ pub fn draw_play(
     effects: &Effects,
     ended: Option<&EndScreen>,
     touch_mode: bool,
+    gathered: &GatherView,
 ) {
     let d = game.clock.sky_darkness();
     let (camera_x, view_x) = (game.camera_left(), view_center(game));
     // 여기부터 맵 좌표: 아래 `look_at(0.0)`까지는 카메라를 따라 움직인다.
     // 움직이는 것은 화면에 가장 가까운 한 자리(`nearest_copy`)에만 그려서 두 번 보이지 않는다 (D61).
-    draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y, camera_x);
-    places::on_ring_cameras(camera_x, |_| places::draw_structures(&game.world, d));
-    // 미스 → 가리는 앞그림 → 상자. 상자가 먼저면 집 앞 상자가 집에 묻힌다.
-    if let Some(miss) = game.miss.as_ref().filter(|m| m.is_hiding()) {
-        draw_miss_like(&assets.m6.miss, nearest_copy(miss.rect(&game.world), view_x), time(), WHITE);
+    // 동굴 안(임시-12)은 따로 된 한 화면: 맵의 미스·상자·코인·시민·무기·몬스터를 그리지 않는다.
+    let on_map = !game.in_cave;
+    if on_map {
+        draw_background(assets, &SkyLook::play(d, game.clock.time_of_day_minutes(), time()), game.world.ground_y, camera_x);
+        places::on_ring_cameras(camera_x, |_| places::draw_structures(&game.world, d));
+        // 미스 → 가리는 앞그림 → 상자. 상자가 먼저면 집 앞 상자가 집에 묻힌다.
+        if let Some(miss) = game.miss.as_ref().filter(|m| m.is_hiding()) {
+            draw_miss_like(&assets.m6.miss, nearest_copy(miss.rect(&game.world), view_x), time(), WHITE);
+        }
+        places::on_ring_cameras(camera_x, |_| places::draw_covers(&game.world, d));
+        gather::draw_map_things(game, view_x, d);
+        for b in game.world.boxes() {
+            draw_wood_box(nearest_copy(b, view_x), d);
+        }
+        draw_coins(&game.coins, d, time(), view_x);
+    } else {
+        gather::draw_cave(game, camera_x);
     }
-    places::on_ring_cameras(camera_x, |_| places::draw_covers(&game.world, d));
-    for b in game.world.boxes() {
-        draw_wood_box(nearest_copy(b, view_x), d);
-    }
-    draw_coins(&game.coins, d, time(), view_x);
 
     let player = &game.player;
     let texture = assets.character(player.kind);
@@ -404,12 +413,12 @@ pub fn draw_play(
     let height = height_with_antenna(player.kind, PLAY_SPRITE_HEIGHT);
     let feet = vec2(r.center().x, r.y + r.h);
     let tint = mix(WHITE, CHARACTER_NIGHT_TINT, d);
-    for (i, citizen) in game.citizens.list.iter().enumerate() {
+    for (i, citizen) in game.citizens.list.iter().enumerate().filter(|_| on_map) {
         if citizen.is_standing() {
             draw_miss_like(&assets.m6.miss_citizen_bomb, nearest_copy(citizen.rect, view_x), time() + i as f32 * 0.37, tint);
         }
     }
-    for (i, walker) in game.citizens.walkers.iter().enumerate() {
+    for (i, walker) in game.citizens.walkers.iter().enumerate().filter(|_| on_map) {
         let r = nearest_copy(walker.rect, view_x);
         let motion = if walker.is_walking() { Motion::Walk } else { Motion::Idle };
         // 쓰러진 화면에서는 시간을 멈춰서 숨쉬기 흔들림도 멈춘다
@@ -418,9 +427,11 @@ pub fn draw_play(
         let facing = if !walker.is_walking() && ended.is_none() { looking_around(t) } else { walker.facing };
         draw_character(&assets.m6.miss, vec2(r.center().x, r.y + r.h), r.h * MISS_SPRITE_SCALE, facing, pose, tint);
     }
-    draw_dropped_weapons(assets, game);
-    draw_zombies(assets, game, tint);
-    draw_skeletons(assets, game, tint);
+    if on_map {
+        draw_dropped_weapons(assets, game);
+        draw_zombies(assets, game, tint);
+        draw_skeletons(assets, game, tint);
+    }
     if let Some(fallen) = ended.filter(|e| !e.cleared) {
         draw_fallen_player(texture, player, &game.world, feet.x, height, tint, fallen.seconds);
     } else {
@@ -435,9 +446,14 @@ pub fn draw_play(
         }
     }
 
-    game.combat.skeletons.projectiles.iter().for_each(|shot| draw_projectile(shot, view_x));
+    if on_map {
+        game.combat.skeletons.projectiles.iter().for_each(|shot| draw_projectile(shot, view_x));
+    }
     effects.draw(text, r, player.facing, &assets.m6, camera_x, game.attack_reach());
     if ended.is_none() {
+        gather::draw_mining_progress(r, game.mining_progress());
+    }
+    if ended.is_none() && on_map {
         for (i, walker) in game.citizens.walkers.iter().enumerate() {
             let head = vec2(places::near_view(view_x, walker.rect.center().x), walker.rect.y - CITIZEN_BUBBLE_GAP);
             if !walker.is_walking() && effects.citizen_talks(i) && game.world.is_on_screen(head.x, r.center().x) {
@@ -449,6 +465,7 @@ pub fn draw_play(
     // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다.
     Letterbox::current().look_at(0.0);
     effects.draw_on_screen(text);
+    gathered.draw_popup(text);
     let owned = game.weapons.owned();
     // 끝난 화면은 큰 글이 맨 위에 온다 (BUG-024). 쓰러질 때는 움직임이 끝난 뒤에 숨긴다
     if !game.is_cleared() && !ended.is_some_and(EndScreen::ready) {
@@ -456,12 +473,13 @@ pub fn draw_play(
         draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
         draw_level(text, game.combat.level, game.combat.experience);
         draw_weapons(&assets.m6, &owned, game.weapons.held());
+        gather::draw_bag(text, &game.gathering.bag);
     }
     if touch_mode && ended.is_none() {
         text.centered("조이스틱을 위로 밀면 점프", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
     if !touch_mode && ended.is_none() {
-        let hint = if owned.is_empty() { "화살표: 걷기   Space: 점프   Q: 공격   Esc: 캐릭터 고르기" } else { "화살표: 걷기   Space: 점프   Q: 공격   W: 바꾸기   Esc: 고르기" };
+        let hint = if owned.is_empty() { "화살표: 걷기  Space: 점프  Q: 공격  E: 캐기  Esc: 고르기" } else { "화살표: 걷기  Space: 점프  Q: 공격  W: 바꾸기  E: 캐기  Esc: 고르기" };
         text.centered(hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
     if let Some(ended) = ended {

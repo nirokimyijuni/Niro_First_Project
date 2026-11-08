@@ -5,8 +5,9 @@ use super::monster::SeededRandom;
 use super::player::Facing;
 use crate::config::{
     BOX_AREA_LEFT, BOX_AREA_RIGHT, BOX_BIG_CHANCE, BOX_BIG_SIZE, BOX_COUNT_MAX, BOX_COUNT_MIN, BOX_GAP_CHANCE,
-    BOX_MIN_GAP, BOX_SMALL_SIZE, CITIZEN_RUN_UP_ROOM, CITIZEN_XS, GROUND_Y, HIDE_SPOTS, HOLE_DEPTH, HOLE_LEFT, HOLE_WIDTH, MAP_WIDTH,
-    NO_BOX_MARGIN, PLACE_NAMES, ROCK_STEPS, SCREEN_WIDTH, TREE_BRANCHES,
+    BOX_MIN_GAP, BOX_SMALL_SIZE, CAVE_ENTRANCE_HEIGHT, CAVE_ENTRANCE_WIDTH, CAVE_ENTRANCE_X, CAVE_EXIT_X, CITIZEN_RUN_UP_ROOM, CITIZEN_XS,
+    GROUND_Y, HIDE_SPOTS, HOLE_DEPTH, HOLE_LEFT, HOLE_WIDTH, MAP_WIDTH, NO_BOX_MARGIN, PLACE_NAMES, ROCK_STEPS, SCREEN_WIDTH,
+    TREE_BRANCHES, TREE_HEIGHT, TREE_WIDTH, TREE_XS, WORKBENCH_HEIGHT, WORKBENCH_WIDTH, WORKBENCH_X,
 };
 #[cfg(test)]
 use crate::config::WORLD_WIDTH;
@@ -97,6 +98,39 @@ impl World {
         let structures = [world.tree_branches(), world.rock_steps()].concat();
         world.obstacles.extend(structures);
         world
+    }
+
+    /// 임시-12 동굴 안: 한 화면이고 상자가 없다. 긴 맵과 좌표가 따로이고, 고리가 아니라 끝에서 멈춘다.
+    pub fn cave() -> World {
+        World { width: SCREEN_WIDTH, ground_y: GROUND_Y, obstacles: Vec::new() }
+    }
+
+    /// 가운데가 `center_x`이고 땅 위에 선 네모.
+    pub fn thing_on_ground(&self, center_x: f32, width: f32, height: f32) -> Rect {
+        Rect::new(center_x - width / 2.0, self.ground_y - height, width, height)
+    }
+
+    /// 임시-14 캐는 나무들 (산의 나뭇가지 발판과 다른 나무). 캐릭터를 막지 않는다. 긴 맵에만 있다.
+    pub fn trees(&self) -> Vec<Rect> {
+        if !self.is_long_map() {
+            return Vec::new();
+        }
+        TREE_XS.iter().map(|x| self.thing_on_ground(*x, TREE_WIDTH, TREE_HEIGHT)).collect()
+    }
+
+    /// 임시-11 화산의 동굴 입구. 캐릭터를 막지 않는다.
+    pub fn cave_entrance(&self) -> Option<Rect> {
+        self.is_long_map().then(|| self.thing_on_ground(CAVE_ENTRANCE_X, CAVE_ENTRANCE_WIDTH, CAVE_ENTRANCE_HEIGHT))
+    }
+
+    /// 임시-12 동굴 출구. `World::cave()`에 묻는다.
+    pub fn cave_exit(&self) -> Rect {
+        self.thing_on_ground(CAVE_EXIT_X, CAVE_ENTRANCE_WIDTH, CAVE_ENTRANCE_HEIGHT)
+    }
+
+    /// 임시-18 집의 제작대. 캐릭터를 막지 않는다.
+    pub fn workbench(&self) -> Option<Rect> {
+        self.is_long_map().then(|| self.thing_on_ground(WORKBENCH_X, WORKBENCH_WIDTH, WORKBENCH_HEIGHT))
     }
 
     /// 구멍·구조물·미스·시민과 고리(D61)는 긴 맵에만 있다. M1 연습 맵은 옛 규칙 그대로다.
@@ -246,6 +280,8 @@ impl World {
     fn no_box_zones(&self) -> Vec<(f32, f32)> {
         let spots = HIDE_SPOTS.iter().map(|spot| (spot.1, spot.1));
         let solids = self.tree_branches().into_iter().chain(self.rock_steps()).chain(self.hole());
+        // M7 쓸 것: 양옆 `NO_BOX_MARGIN` 안에 상자가 없다 (임시-14, 임시-11, 임시-18).
+        let solids = solids.chain(self.trees()).chain(self.cave_entrance()).chain(self.workbench());
         let citizens = CITIZEN_XS.iter().map(|x| (x - CITIZEN_RUN_UP_ROOM, x + CITIZEN_RUN_UP_ROOM));
         spots
             .chain(solids.map(|r| (r.x, r.x + r.w)))

@@ -60,6 +60,8 @@ pub enum ButtonKind {
     Attack,
     /// 무기 바꾸기 (US-053). 무기가 있을 때만 보인다.
     Switch,
+    /// 캐기·들어가기·나가기·만들기 (임시-16, 임시-36). 쓸 것이 가까이 있을 때만 보이고, 글은 그때 쓸 것을 따른다.
+    Mine,
 }
 
 impl ButtonKind {
@@ -67,6 +69,7 @@ impl ButtonKind {
         match self {
             ButtonKind::Attack => "공격",
             ButtonKind::Switch => "바꾸기",
+            ButtonKind::Mine => crate::config::MINE_BUTTON_TEXT,
         }
     }
 }
@@ -100,6 +103,18 @@ pub fn play_buttons(has_weapon: bool) -> &'static [TouchButton] {
     } else {
         &PLAY_BUTTONS
     }
+}
+
+/// 임시-16 캐기 버튼: 공격 버튼 왼쪽 (722, 470), 반지름 56.
+pub const MINE_BUTTON: TouchButton = TouchButton { kind: ButtonKind::Mine, center: Vec2::new(722.0, 470.0), radius: 56.0 };
+
+/// 캐기 버튼까지 더한 버튼 목록. `can_use`는 `Game::usable_in_reach().is_some()`이다.
+pub fn play_buttons_with_mine(has_weapon: bool, can_use: bool) -> Vec<TouchButton> {
+    let mut buttons = play_buttons(has_weapon).to_vec();
+    if can_use {
+        buttons.push(MINE_BUTTON);
+    }
+    buttons
 }
 
 /// 누른 곳(가상 좌표)이 어느 버튼인지. 겹치면 앞쪽 버튼.
@@ -186,6 +201,8 @@ pub struct TouchFrame {
     pub jump_pressed: bool,
     pub attack_pressed: bool,
     pub switch_pressed: bool,
+    /// 캐기 버튼을 새로 눌렀다. 누르고 있는지는 `TouchControls::is_held(ButtonKind::Mine)`로 본다.
+    pub mine_pressed: bool,
     pub back_pressed: bool,
 }
 
@@ -241,6 +258,7 @@ impl TouchControls {
                     match kind {
                         ButtonKind::Attack => out.attack_pressed = true,
                         ButtonKind::Switch => out.switch_pressed = true,
+                        ButtonKind::Mine => out.mine_pressed = true,
                     }
                     if !f.lifted() {
                         self.held.push((f.id, kind));
@@ -293,6 +311,17 @@ pub fn draw_star(c: Vec2, r: f32, turn: f32, color: Color) {
     }
 }
 
+/// 곡괭이 모양 (캐기 버튼, 재료 판, 제작대가 함께 쓴다): 비스듬한 손잡이 + 끝을 가로지르는 굽은 머리.
+pub fn draw_pickaxe_shape(c: Vec2, size: f32, handle: Color, head: Color) {
+    draw_line(c.x - size * 0.38, c.y + size * 0.38, c.x + size * 0.18, c.y - size * 0.18, size * 0.13, handle);
+    let top = c + vec2(size * 0.18, -size * 0.18);
+    let (a, b) = (top + vec2(-size * 0.42, -size * 0.06), top + vec2(size * 0.06, size * 0.42));
+    let bend = top + vec2(size * 0.06, -size * 0.06);
+    draw_line(a.x, a.y, bend.x, bend.y, size * 0.15, head);
+    draw_line(bend.x, bend.y, b.x, b.y, size * 0.15, head);
+    draw_circle(bend.x, bend.y, size * 0.075, head);
+}
+
 /// 받침 위쪽 부채꼴: 여기로 밀면 뛴다는 표시. 판정과 같은 각도·거리로 그린다.
 fn draw_jump_zone(center: Vec2, color: Color) {
     const STEPS: usize = 12;
@@ -326,7 +355,7 @@ fn draw_joystick(j: &Joystick, fade: f32) {
     draw_circle_lines(k.x, k.y, KNOB_RADIUS, 3.0, faded(KNOB_LINE));
 }
 
-fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
+fn draw_button(text: &TextPainter, b: &TouchButton, held: bool, mine_label: &str) {
     // 누르고 있으면 살짝 작아지고 주황빛
     let r = if held { b.radius * 0.94 } else { b.radius };
     let c = b.center;
@@ -339,8 +368,10 @@ fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
                 draw_arrow_head(c + vec2(side * r * 0.5, -r * 0.3), vec2(side, 0.0), r * 0.36, BUTTON_ICON);
             }
         }
+        ButtonKind::Mine => draw_pickaxe_shape(c + vec2(0.0, -r * 0.3), r * 0.8, BUTTON_ICON, BUTTON_ICON),
     }
-    text.centered(b.kind.label(), c.x, c.y + r * 0.42, 32.0, BUTTON_ICON);
+    let label = if b.kind == ButtonKind::Mine { mine_label } else { b.kind.label() };
+    text.centered(label, c.x, c.y + r * 0.42, if label.chars().count() > 3 { 26.0 } else { 32.0 }, BUTTON_ICON);
 }
 
 pub fn draw_back_button(text: &TextPainter) {
@@ -352,7 +383,8 @@ pub fn draw_back_button(text: &TextPainter) {
 }
 
 /// 플레이 화면 위에 조이스틱·버튼·"고르기" 버튼 (터치 모드일 때만 부른다).
-pub fn draw_touch_controls(text: &TextPainter, controls: &TouchControls, buttons: &[TouchButton]) {
+/// `mine_label`은 캐기 버튼 글 (`Usable::button_text`). 버튼이 없으면 쓰지 않는다.
+pub fn draw_touch_controls(text: &TextPainter, controls: &TouchControls, buttons: &[TouchButton], mine_label: &str) {
     match &controls.joystick {
         Some(j) => draw_joystick(j, 1.0),
         None => {
@@ -361,7 +393,7 @@ pub fn draw_touch_controls(text: &TextPainter, controls: &TouchControls, buttons
         }
     }
     for b in buttons {
-        draw_button(text, b, controls.is_held(b.kind));
+        draw_button(text, b, controls.is_held(b.kind), mine_label);
     }
     draw_back_button(text);
 }
@@ -444,6 +476,27 @@ mod tests {
         let o = t.update(&[finger(1, TouchPhase::Started, switch.center.x, switch.center.y)], play_buttons(false), true);
         assert_eq!(o, TouchFrame::default());
         assert!(t.joystick.is_none());
+    }
+
+    #[test]
+    fn mine_button_only_when_usable_and_does_not_jump() {
+        assert!(play_buttons_with_mine(true, false).iter().all(|b| b.kind != ButtonKind::Mine));
+        let buttons = play_buttons_with_mine(true, true);
+        let mine = MINE_BUTTON;
+        assert!(mine.center.x - mine.radius >= JOYSTICK_AREA_RIGHT);
+        assert!(mine.center.y + mine.radius <= VIRTUAL_HEIGHT);
+        for other in buttons.iter().filter(|b| b.kind != ButtonKind::Mine) {
+            assert!(mine.center.distance(other.center) > mine.radius + other.radius + BUTTON_TOUCH_SLOP * 2.0, "{:?}와 겹친다", other.kind);
+        }
+        // 왼손으로 걸으면서 눌러도 조이스틱이 끊기지 않고, 누르고 있는 동안 내내 눌림이다
+        let mut t = TouchControls::new();
+        t.update(&[finger(1, TouchPhase::Started, 150.0, 400.0)], &buttons, true);
+        let o = t.update(&[finger(1, TouchPhase::Moved, 220.0, 400.0), finger(2, TouchPhase::Started, mine.center.x, mine.center.y)], &buttons, true);
+        assert!(o.mine_pressed && o.right && !o.jump_pressed && !o.attack_pressed);
+        let o = t.update(&[finger(1, TouchPhase::Stationary, 220.0, 400.0), finger(2, TouchPhase::Stationary, mine.center.x, mine.center.y)], &buttons, true);
+        assert!(!o.mine_pressed && o.right && t.is_held(ButtonKind::Mine));
+        t.update(&[finger(1, TouchPhase::Stationary, 220.0, 400.0), finger(2, TouchPhase::Ended, mine.center.x, mine.center.y)], &buttons, true);
+        assert!(!t.is_held(ButtonKind::Mine));
     }
 
     #[test]
