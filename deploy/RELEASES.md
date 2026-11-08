@@ -18,6 +18,7 @@
 | 세 수 더하기 쉽게 | 2026-11-08 | 세 수 더하기 문제에 나오는 수가 모두 20보다 크지 않아요. 더 쉽게 풀 수 있어요! | https://nirokimyijuni.github.io/Niro_First_Project/ |
 | M7 제작과 동굴 탐험 | 2026-11-08 | 나무와 광석을 캘 수 있어요! PC에서는 E 키, 폰에서는 캐기 버튼을 눌러요. 화산에 동굴이 생겨서 들어가 광석을 찾을 수 있어요. 철광석, 동, 은, 금이 나와요. 제작대에서 곡괭이를 만들 수 있어요. | https://nirokimyijuni.github.io/Niro_First_Project/ |
 | 캐기 쉽게와 제작대 가이드 | 2026-11-08 | 덧셈 문제는 두 자리 수끼리 더해요. 캐는 범위가 넓어지고, 캘 수 있는 것은 반짝여요. 제작대에서 곡괭이 모양과 만드는 순서를 알려 줘요. | https://nirokimyijuni.github.io/Niro_First_Project/ |
+| 캐기 표시 고침 | 2026-11-08 | 캐는 동안 게이지와 캐기 표시가 겹치지 않아요. | https://nirokimyijuni.github.io/Niro_First_Project/ |
 
 ## 부모 결정 기록
 

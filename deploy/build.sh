@@ -4,7 +4,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export PATH="$HOME/.cargo/bin:$PATH"
 
 cd "$ROOT/game"
 cargo test

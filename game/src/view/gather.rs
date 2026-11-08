@@ -292,8 +292,16 @@ pub fn draw_usable_glow(game: &Game, view_x: f32, t: f32) {
     }
 }
 
+/// 캐는 동안은 머리 위 진행 막대와 겹치니 물건 위 표시(말풍선·E)를 숨긴다 (부모님 버그).
+fn shows_usable_tag(mining_progress: Option<f32>) -> bool {
+    mining_progress.is_none()
+}
+
 /// 손 닿는 물건 위에 통통 튀는 표시: PC는 "E" 키, 폰은 캐기 버튼 글 (맵 좌표).
 pub fn draw_usable_tag(text: &TextPainter, game: &Game, view_x: f32, camera_left: f32, touch_mode: bool, t: f32) {
+    if !shows_usable_tag(game.mining_progress()) {
+        return;
+    }
     let Some(usable) = game.usable_in_reach() else { return };
     let Some(r) = usable_rect(game, usable, view_x) else { return };
     let bottom = r.y - TAG_GAP - tag_bounce(t);
@@ -559,6 +567,16 @@ mod tests {
             assert!((0.0..=TAG_BOB).contains(&tag_bounce(t)), "튀기 {t}");
         }
         assert!(GLOW_SECONDS >= 1.0, "너무 빨리 깜빡이지 않는다");
+    }
+
+    #[test]
+    fn usable_tag_hides_while_mining_and_progress_bar_clears_hud() {
+        assert!(shows_usable_tag(None), "안 캘 때는 보인다");
+        assert!(!shows_usable_tag(Some(0.0)) && !shows_usable_tag(Some(0.5)), "캐는 중에는 숨긴다");
+        // 땅(맵·동굴 모두 GROUND_Y)에 서서 캘 때 진행 막대 위 끝이 팝업·안내 상자보다 아래
+        let head = crate::config::GROUND_Y - crate::config::PLAYER_HEIGHT;
+        let bar_top = head - PROGRESS_ABOVE - PROGRESS_HEIGHT - 3.0;
+        assert!(bar_top > POPUP_TOP + POPUP_HEIGHT && bar_top > RECIPE_HINT_TOP + RECIPE_HINT_HEIGHT);
     }
 
     #[test]

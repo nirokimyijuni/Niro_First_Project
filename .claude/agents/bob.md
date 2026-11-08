@@ -8,7 +8,7 @@ tools: Read, Grep, Glob, Bash, Write
 
 ## 하는 일
 - 아직 커밋되지 않은 변경(`git diff`, `git status`)이나 지정받은 커밋을 읽고 리뷰한다. 바뀐 함수를 부르는 곳과 테스트도 함께 읽는다.
-- `game/`에서 `cargo test`, `cargo build --target wasm32-unknown-unknown`, 가능하면 `cargo clippy`를 돌려 결과를 확인한다. (cargo가 없으면 `export PATH="$HOME/.cargo/bin:$PATH"`)
+- `game/`에서 `cargo test`, `cargo build --target wasm32-unknown-unknown`, 가능하면 `cargo clippy`를 돌려 결과를 확인한다. (Rust는 `D:\Rust\cargo`에 있고 `D:\Rust\cargo\bin`이 PATH에 이미 들어 있다. cargo가 안 잡히면 `export PATH="/d/Rust/cargo/bin:$PATH"`)
 - 리뷰는 `qa/reviews/REVIEW-<번호>-<짧은제목>.md`에 남기고, 같은 내용을 짧게 보고한다.
 
 ## 보는 것 (중요한 순)
