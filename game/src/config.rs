@@ -348,8 +348,8 @@ pub const MATH_TIMES_TABLES: [u32; 8] = [2, 3, 4, 5, 6, 7, 8, 9];
 pub const MATH_TIMES_MAX: u32 = 9;
 /// 세 자리 수 더하기: 두 수 모두 이 범위 (합이 `MATH_ANSWER_MAX`를 넘지 않게)
 pub const MATH_ADD_TWO_RANGE: (u32, u32) = (100, 499);
-/// 세 수 연속 더하기: 세 수 모두 이 범위 (예: 23 + 45 + 12)
-pub const MATH_ADD_THREE_RANGE: (u32, u32) = (10, 99);
+/// 세 수 연속 더하기: 세 수 모두 이 범위 (예: 7 + 15 + 3). 부모님 말(2026-11-08): 20 이하, 가장 작은 수 1은 임시.
+pub const MATH_ADD_THREE_RANGE: (u32, u32) = (1, 20);
 /// 뺄셈 (US-074 표): 빼지는 수는 이 범위, 빼는 수는 `MATH_SUBTRACT_TAKE_MIN` ~ (빼지는 수 - 1). 답은 1 이상이다.
 pub const MATH_SUBTRACT_RANGE: (u32, u32) = (100, 999);
 pub const MATH_SUBTRACT_TAKE_MIN: u32 = 10;

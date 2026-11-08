@@ -33,6 +33,25 @@ fn first_questions() -> Vec<MathQuestion> {
 
 // ---- 문제 만들기 ----
 
+/// 부모님 말(2026-11-08): 세 수 더하기는 각 수 1~20. 값을 바꾸면 여기서 먼저 알린다.
+#[test]
+fn add_three_numbers_are_1_to_20_and_both_ends_show_up() {
+    assert_eq!(MATH_ADD_THREE_RANGE, (1, 20));
+    let mut seen = Vec::new();
+    for seed in 0..SEEDS {
+        let mut maker = MathQuestionMaker::new(seed);
+        for _ in 0..5 {
+            let q = maker.next().unwrap();
+            if q.kind == MathKind::AddThree {
+                let n = numbers_in(&q.text);
+                assert!(n.iter().all(|x| (1..=20).contains(x)), "{}", q.text);
+                seen.extend(n);
+            }
+        }
+    }
+    assert!(seen.contains(&1) && seen.contains(&20), "1과 20이 한 번은 나와야 해요");
+}
+
 #[test]
 fn every_kind_shows_up_and_none_is_rare() {
     let questions = first_questions();
