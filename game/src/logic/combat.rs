@@ -86,6 +86,11 @@ impl PlayerHealth {
         !self.is_invincible() && !self.is_down()
     }
 
+    /// 수학 문제를 틀렸을 때: `amount`만큼 준다. 0이면 쓰러진다. 무적 시간은 생기지 않는다 (D67, 부모님 답).
+    pub fn lose_from_quiz(&mut self, amount: u32) {
+        self.hp = self.hp.saturating_sub(amount);
+    }
+
     /// `amount`만큼 맞는다. `can_be_hit`일 때만 부른다.
     fn take_hit(&mut self, amount: u32) {
         self.hp = self.hp.saturating_sub(amount);

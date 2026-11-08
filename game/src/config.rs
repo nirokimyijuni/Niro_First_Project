@@ -337,6 +337,76 @@ pub const SCORE_PER_MONSTER: u32 = 1;
 /// 임시-3, 임시-4 주인공에게서 이만큼 넘게 멀어진 몬스터와 화살·총알은 사라진다 (픽셀, 몸 가운데끼리)
 pub const FORGET_DISTANCE: f32 = 1200.0;
 
+/// D67 수학 문제 (US-074~076). 부모님 답(2026-11-08)으로 바꾼 임시 값이다. 부모님이 바꿀 수 있다.
+/// 종류마다 켜고 끈다. false면 그 종류는 나오지 않는다.
+pub const MATH_MULTIPLY_ON: bool = true;
+pub const MATH_ADD_TWO_ON: bool = true;
+pub const MATH_ADD_THREE_ON: bool = true;
+pub const MATH_SUBTRACT_ON: bool = true;
+/// 곱셈: 이 단들에 1 ~ `MATH_TIMES_MAX`를 곱한다 (한 자리 곱하기 전부)
+pub const MATH_TIMES_TABLES: [u32; 8] = [2, 3, 4, 5, 6, 7, 8, 9];
+pub const MATH_TIMES_MAX: u32 = 9;
+/// 세 자리 수 더하기: 두 수 모두 이 범위 (합이 `MATH_ANSWER_MAX`를 넘지 않게)
+pub const MATH_ADD_TWO_RANGE: (u32, u32) = (100, 499);
+/// 세 수 연속 더하기: 세 수 모두 이 범위 (예: 23 + 45 + 12)
+pub const MATH_ADD_THREE_RANGE: (u32, u32) = (10, 99);
+/// 뺄셈 (US-074 표): 빼지는 수는 이 범위, 빼는 수는 `MATH_SUBTRACT_TAKE_MIN` ~ (빼지는 수 - 1). 답은 1 이상이다.
+pub const MATH_SUBTRACT_RANGE: (u32, u32) = (100, 999);
+pub const MATH_SUBTRACT_TAKE_MIN: u32 = 10;
+/// 답은 0 ~ 이 값. 숫자판으로 넣는 자리 수는 `MATH_ANSWER_DIGITS`까지다.
+pub const MATH_ANSWER_MAX: u32 = 999;
+pub const MATH_ANSWER_DIGITS: usize = 3;
+/// 문제 주사위를 상자·무기 뽑기와 따로 굴리려고 게임 시드에 섞는 값
+pub const MATH_SEED_MIX: u32 = 0x5EED_0067;
+/// 아이템(지금은 미스가 준 무기)을 이만큼 얻을 때마다 한 번 문제가 나온다. 밤이 될 때(18:00)도 한 번 나온다.
+pub const MATH_ITEMS_PER_QUESTION: u32 = 2;
+/// 한 문제에 답할 기회. 다 틀리면 정답을 보여 주고 체력이 준다.
+pub const MATH_TRIES: u32 = 3;
+/// 결과를 보여 주는 시간 (실제 초). 이 동안도 게임은 멈춰 있다.
+pub const MATH_RIGHT_SHOW_SECONDS: f32 = 2.0;
+pub const MATH_WRONG_SHOW_SECONDS: f32 = 3.0;
+/// 기회를 다 쓰고 틀리면 줄어드는 체력. 0이 되면 보통 쓰러짐과 같다. 무적 시간은 생기지 않는다.
+pub const MATH_WRONG_HP_LOSS: u32 = 2;
+/// 문제 창 글. 틀림 글의 "□이야"는 정답에 맞춰 "13이야", "2야"가 된다.
+pub const MATH_TITLE_TEXT: &str = "잠깐 퀴즈!";
+/// 미스가 문제를 낼 때 하는 말 (감독이 정한 임시 말)
+pub const MATH_MISS_ASK_TEXT: &str = "나랑 같이 풀어 볼래?";
+pub const MATH_RIGHT_TEXT: &str = "넌 최고야!";
+pub const MATH_TRY_AGAIN_TEXT: &str = "너무 아쉽다! 다시 해 볼까?";
+pub const MATH_WRONG_TEXT: &str = "너무 아쉽다! 정답은 □이야";
+/// 틀린 뒤 남은 기회 글. □ 자리에 남은 기회 수가 들어간다 (예: "기회가 2번 남았어").
+pub const MATH_TRIES_LEFT_TEXT: &str = "기회가 □번 남았어";
+/// 문제 이야기에 나오는 이름 (부모님 답: 우리 팀과 미스, 카스테라). 아무거나 하나가 이름 자리에 들어간다.
+pub const MATH_STORY_NAMES: &[&str] = &["니로", "엘리", "로건", "수산나", "헤일리", "밥", "케빈", "미스", "카스테라"];
+/// 상황 문제 문장 틀. {a}, {b}, {c} 자리에 수가, {이름:이}·{이름:은}·{이름:을} 자리에 이름과
+/// 받침에 맞는 말(이/가, 은/는, 을/를)이 들어간다. 수는 늘 a, b, c 순서로 쓴다.
+/// 종류마다 3개 이상 둔다 (같은 문장이 연달아 나오지 않게).
+/// 곱셈: {a}개씩 {b}묶음
+pub const MATH_MULTIPLY_STORIES: &[&str] = &[
+    "{이름:이} 보니 좀비 카스테라가 한 줄에 {a}마리씩 {b}줄 있어요. 모두 몇 마리일까요?",
+    "{이름:이} 상자마다 코인을 {a}개씩 넣었어요. 상자가 {b}개예요. 코인은 모두 몇 개일까요?",
+    "{이름:은} 하루에 코인을 {a}개씩 주웠어요. {b}일 동안 주우면 모두 몇 개일까요?",
+    "{이름:이} 사탕을 {a}개씩 친구 {b}명에게 줬어요. 사탕은 모두 몇 개일까요?",
+];
+/// 두 수 더하기: {a} + {b}
+pub const MATH_ADD_TWO_STORIES: &[&str] = &[
+    "{이름:이} 코인 {a}개를 모았어요. 오늘 {b}개를 더 주웠어요. 모두 몇 개일까요?",
+    "{이름:은} 어제 좀비 카스테라를 {a}마리, 오늘 {b}마리 만났어요. 모두 몇 마리일까요?",
+    "가게에 사탕이 {a}개 있었어요. {이름:이} {b}개를 더 가져왔어요. 사탕은 모두 몇 개일까요?",
+];
+/// 세 수 더하기: {a} + {b} + {c}
+pub const MATH_ADD_THREE_STORIES: &[&str] = &[
+    "{이름:이} 첫째 날 코인 {a}개, 둘째 날 {b}개, 셋째 날 {c}개를 주웠어요. 모두 몇 개일까요?",
+    "{이름:은} 꽃을 {a}송이, {b}송이, {c}송이 땄어요. 꽃은 모두 몇 송이일까요?",
+    "{이름:을} 도우려고 친구들이 별을 {a}개, {b}개, {c}개 모았어요. 별은 모두 몇 개일까요?",
+];
+/// 뺄셈: {a} - {b}
+pub const MATH_SUBTRACT_STORIES: &[&str] = &[
+    "{이름:은} 화살을 {a}개 가지고 있었는데 {b}개를 쐈어요. 몇 개 남았을까요?",
+    "{이름:이} 코인 {a}개를 가지고 있었어요. 가게에서 {b}개를 썼어요. 몇 개 남았을까요?",
+    "{이름:이} 사탕 {a}개 중에서 {b}개를 친구에게 나눠 줬어요. 몇 개 남았을까요?",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

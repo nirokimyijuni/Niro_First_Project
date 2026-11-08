@@ -7,7 +7,6 @@ mod logic;
 mod view;
 
 use logic::character::CharacterKind;
-use logic::clock::ClockEvent;
 use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent};
 use logic::player::PlayerInput;
@@ -15,8 +14,12 @@ use macroquad::prelude::*;
 use view::assets::Assets;
 use view::effects::Effects;
 use view::gameover::{EndScreen, RETRY_BUTTON};
-use view::input::{any_key_pressed, fast_forward_pressed, fingers, menu_input, merge_touch, player_input, switch_weapon_pressed, MenuInput};
-use view::touch::{draw_rotate_hint, draw_touch_controls, next_touch_mode, play_buttons, show_rotate_hint, TouchControls, TouchFrame};
+use view::input::{
+    any_key_pressed, fast_forward_pressed, fingers, hold_walk_until_released, math_keys_pressed, menu_input, merge_touch, player_input,
+    switch_weapon_pressed, MenuInput,
+};
+use view::math::{draw_math, pad_key_at};
+use view::touch::{draw_back_button, draw_rotate_hint, draw_touch_controls, BACK_BUTTON, next_touch_mode, play_buttons, show_rotate_hint, TouchControls, TouchFrame};
 use view::screen::Letterbox;
 use view::screens;
 use view::text::TextPainter;
@@ -33,13 +36,15 @@ enum Scene {
         effects: Effects,
         /// 쓰러졌으면 그 화면 상태 (US-043)
         ended: Option<EndScreen>,
+        /// 수학 문제 창이 열려 있던 동안 누르던 ←/→는 뗄 때까지 걷기가 되지 않는다 (US-076)
+        walk_lock: bool,
     },
 }
 
 fn start_play(kind: CharacterKind) -> Scene {
     // 판마다 좀비가 다르게 나오도록 지금 시각(밀리초)을 시드로 쓴다.
     let seed = (macroquad::miniquad::date::now() * 1000.0) as u64 as u32;
-    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None }
+    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false }
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
@@ -51,34 +56,10 @@ fn cap_frame_seconds(frame_time: f32) -> f32 {
     frame_time.clamp(0.0, config::MAX_FRAME_SECONDS)
 }
 
-/// 빨리감기 중 한 프레임: `Game::update`와 같은 순서(플레이어 → 시계 → 코인 → 지갑 → 싸움)로 부르되,
-/// 걷기·점프·좀비는 진짜 시간 `dt`, 시계와 코인은 `dt × time_scale`로 흘린다 (D13).
-/// 규칙은 새로 만들지 않고 logic 함수를 부르는 순서만 따라 한다.
-/// `time_scale`이 1이면 `Game::update`와 결과가 똑같다 (아래 테스트).
+/// 빨리감기 중 한 프레임: 걷기·점프·몬스터는 진짜 시간 `dt`, 시계와 코인은 `dt × time_scale` (D13).
+/// 규칙(수학 문제가 열리면 멈추기 포함)은 `Game::update_with_time_scale`에 있다.
 fn update_with_time_scale(game: &mut Game, input: &PlayerInput, dt: f32, time_scale: f32) -> Vec<GameEvent> {
-    let mut events = Vec::new();
-    if game.is_over() {
-        return events;
-    }
-    let world_dt = dt * time_scale;
-
-    game.player.update(input, dt, &game.world);
-
-    for clock_event in game.clock.update(world_dt) {
-        events.push(match clock_event {
-            ClockEvent::NightStarted => GameEvent::NightStarted,
-            ClockEvent::DayStarted { day_number } => GameEvent::DayStarted { day_number },
-        });
-    }
-
-    let picked = game.coins.update(world_dt, game.player.rect());
-    if picked > 0 {
-        game.wallet.add(picked);
-        events.push(GameEvent::CoinsPicked { count: picked });
-    }
-
-    game.update_combat(input, dt, &mut events);
-    events
+    game.update_with_time_scale(input, dt, time_scale)
 }
 
 /// 버틴 날이 최고 기록보다 크면 기록을 올리고 저장한다 (US-044, D35: 쓰러질 때도, 나갈 때도).
@@ -134,7 +115,11 @@ async fn main() {
         let dt = cap_frame_seconds(get_frame_time());
         // 플레이 중이 아니거나(쓰러진 화면 포함) 안내 중이면 조이스틱·버튼을 놓고, 지금 닿아 있는 손가락만 기억한다.
         // (메뉴에서 누른 손가락, 안내 전에 대고 있던 손가락이 플레이에서 저절로 걷기·점프가 되지 않게)
-        if rotate_hint || !matches!(scene, Scene::Play { ended: None, .. }) {
+        // 수학 문제 창도 같다: 숫자판을 누르던 손가락이 창이 닫힌 뒤 조이스틱·버튼이 되지 않는다 (US-076).
+        let quiz_open = matches!(&scene, Scene::Play { game, ended: None, .. } if game.math.is_open());
+        // 글자 줄은 장면과 상관없이 매 프레임 꺼낸다 (닫혀 있으면 버린다)
+        let quiz_keys = math_keys_pressed(quiz_open && !rotate_hint);
+        if rotate_hint || quiz_open || !matches!(scene, Scene::Play { ended: None, .. }) {
             let tap = touch.idle(&fingers);
             if !rotate_hint {
                 menu.tap = menu.tap.or(tap);
@@ -171,26 +156,38 @@ async fn main() {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, effects, ended } => {
+                Scene::Play { game, fast_forward, effects, ended, walk_lock } => {
                     // 플레이 중 터치는 조이스틱·버튼으로만. 쓰러진 화면의 터치는 위 idle이 메뉴 탭으로 준다.
                     let buttons = play_buttons(!game.weapons.owned().is_empty());
-                    let touched = if ended.is_none() { touch.update(&fingers, buttons, touch_mode) } else { TouchFrame::default() };
+                    let touched = if ended.is_none() && !quiz_open { touch.update(&fingers, buttons, touch_mode) } else { TouchFrame::default() };
                     let retry = ended.as_mut().is_some_and(|screen| {
                         screen.seconds += dt;
                         screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
                     });
-                    if menu.back || touched.back_pressed || retry {
+                    // 문제 창에서는 터치 "◀ 고르기"가 위 idle의 탭으로 온다 (D35: 창이 열려도 나가기)
+                    let quiz_back = quiz_open && touch_mode && menu.tap.is_some_and(|p| BACK_BUTTON.contains(p));
+                    if menu.back || touched.back_pressed || retry || quiz_back {
                         keep_record(game.clock.nights_survived(), &mut best_days);
                         keep_score(game.score(), &mut best_score);
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
                     } else {
-                        if fast_forward_pressed() {
-                            *fast_forward = !*fast_forward;
+                        // 문제 창이 열린 동안: 숫자 키·숫자판만 받고, 걷기·점프·공격·바꾸기·빨리감기는 게임에 넣지 않는다.
+                        if quiz_open {
+                            let tapped = menu.tap.and_then(pad_key_at);
+                            for key in quiz_keys.iter().copied().chain(tapped) {
+                                key.apply(&mut game.math);
+                            }
+                        } else {
+                            if fast_forward_pressed() {
+                                *fast_forward = !*fast_forward;
+                            }
+                            if ended.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
+                                game.switch_weapon();
+                            }
                         }
-                        if ended.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
-                            game.switch_weapon();
-                        }
-                        let input = merge_touch(player_input(), &touched);
+                        let (keys, lock) = hold_walk_until_released(*walk_lock || quiz_open, merge_touch(player_input(), &touched));
+                        *walk_lock = lock;
+                        let input = if quiz_open { PlayerInput::default() } else { keys };
                         if input.attack_pressed && ended.is_none() {
                             effects.start_swing(game.weapons.held());
                         }
@@ -236,9 +233,14 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, effects, ended } => {
+            Scene::Play { game, fast_forward, effects, ended, .. } => {
                 screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode);
-                if touch_mode && ended.is_none() {
+                if ended.is_none() && game.math.is_open() {
+                    draw_math(&text, &game.math, &assets.m6.miss);
+                    if touch_mode {
+                        draw_back_button(&text);
+                    }
+                } else if touch_mode && ended.is_none() {
                     draw_touch_controls(&text, &touch, play_buttons(!game.weapons.owned().is_empty()));
                 }
             }

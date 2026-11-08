@@ -343,7 +343,7 @@ fn draw_button(text: &TextPainter, b: &TouchButton, held: bool) {
     text.centered(b.kind.label(), c.x, c.y + r * 0.42, 32.0, BUTTON_ICON);
 }
 
-fn draw_back_button(text: &TextPainter) {
+pub fn draw_back_button(text: &TextPainter) {
     let r = BACK_BUTTON;
     draw_pill(r.x, r.y, r.w, r.h, BACK_FILL);
     let mid_y = r.y + r.h / 2.0;

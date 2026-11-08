@@ -549,8 +549,14 @@ fn zombie_appears_in_the_same_frame_night_starts() {
     g.combat.skeleton_chance = 0.0;
     g.clock.update(DAY_SECONDS - FRAME / 2.0);
     let events = g.update(&PlayerInput::default(), FRAME);
-    assert_eq!(events[0], GameEvent::NightStarted);
-    assert!(matches!(events[1], GameEvent::Combat(CombatEvent::ZombieAppeared { .. })));
+    assert_eq!(events, vec![GameEvent::NightStarted]);
+    // US-075·BUG-025: 18:00 프레임에는 밤 문제가 먼저 열린다. 닫힌 바로 다음 프레임에 첫 좀비가 나온다.
+    let answer = g.math.question().expect("밤 문제").answer;
+    g.math.type_and_submit(answer);
+    assert!(g.update(&PlayerInput::default(), MATH_RIGHT_SHOW_SECONDS).is_empty());
+    assert!(!g.math.is_open());
+    let events = g.update(&PlayerInput::default(), FRAME);
+    assert!(matches!(events[0], GameEvent::Combat(CombatEvent::ZombieAppeared { .. })));
 }
 
 #[test]

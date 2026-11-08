@@ -97,6 +97,8 @@ pub struct Weapons {
     owned: Vec<Weapon>,
     held: Weapon,
     random: SeededRandom,
+    /// 이번 판에 땅에서 주운 무기 수. 이미 가진 무기를 또 주워도 1개로 센다 (US-075 아이템 세기).
+    pub picked_up_count: u32,
 }
 
 impl Weapons {
@@ -104,7 +106,7 @@ impl Weapons {
     pub fn new(seed: u32) -> Weapons {
         // 맵·싸움·미스와 같은 seed를 쓰므로 섞어야 서로 따라가지 않는다.
         let random = SeededRandom::new(seed.wrapping_mul(41).wrapping_add(53));
-        Weapons { dropped: Vec::new(), owned: Vec::new(), held: Weapon::Hands, random }
+        Weapons { dropped: Vec::new(), owned: Vec::new(), held: Weapon::Hands, random, picked_up_count: 0 }
     }
 
     /// 지금 손에 든 것.
@@ -146,9 +148,12 @@ impl Weapons {
         for weapon in &mut self.dropped {
             weapon.update(dt.max(0.0));
         }
-        let (owned, held) = (&mut self.owned, &mut self.held);
+        let (owned, held, count) = (&mut self.owned, &mut self.held, &mut self.picked_up_count);
         self.dropped.retain(|weapon| {
             let touched = really_overlaps(weapon.rect, player_rect);
+            if touched {
+                *count += 1;
+            }
             if touched && !owned.contains(&weapon.kind) {
                 owned.push(weapon.kind);
                 *held = weapon.kind;

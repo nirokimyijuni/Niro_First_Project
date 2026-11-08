@@ -1,5 +1,5 @@
 //! 게임 클리어(US-068, D63)와 점수 시험 (수산나).
-//! 빨리감기 경로는 main.rs가 `Game`의 조각을 같은 순서로 부른다. `fast_frame`이 그 순서를 따라 한다.
+//! 빨리감기 경로는 `Game::update_with_time_scale`이다. `fast_frame`이 그것을 부른다.
 
 #[path = "../src/config.rs"]
 mod config;
@@ -9,7 +9,6 @@ mod logic;
 
 use config::*;
 use logic::character::CharacterKind;
-use logic::clock::ClockEvent;
 use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent};
 use logic::monster::Zombie;
@@ -53,24 +52,10 @@ fn run_to_morning(g: &mut Game) -> Vec<GameEvent> {
     events
 }
 
-/// main.rs `update_with_time_scale`과 같은 순서의 빨리감기 한 프레임.
+/// 빨리감기 한 프레임. 수학 문제로 멈추는 것까지 logic의 `Game::update_with_time_scale`이 맡는다
+/// (main.rs도 이 함수를 부르도록 로건이 바꾼다).
 fn fast_frame(g: &mut Game, input: &PlayerInput) -> Vec<GameEvent> {
-    let mut events = Vec::new();
-    if g.is_over() {
-        return events;
-    }
-    let world_dt = FRAME * DEV_FAST_FORWARD_SCALE;
-    g.player.update(input, FRAME, &g.world);
-    for clock_event in g.clock.update(world_dt) {
-        events.push(match clock_event {
-            ClockEvent::NightStarted => GameEvent::NightStarted,
-            ClockEvent::DayStarted { day_number } => GameEvent::DayStarted { day_number },
-        });
-    }
-    let picked = g.coins.update(world_dt, g.player.rect());
-    g.wallet.add(picked);
-    g.update_combat(input, FRAME, &mut events);
-    events
+    g.update_with_time_scale(input, FRAME, DEV_FAST_FORWARD_SCALE)
 }
 
 // ---- 클리어 ----
@@ -150,12 +135,17 @@ fn fast_forward_clears_after_about_630_seconds() {
     for frame in 0..limit as usize {
         g.combat.zombies.list.clear();
         g.combat.skeletons.clear();
+        // 밤마다 나오는 수학 문제는 바로 맞힌다. 칭찬 글 2초 동안은 게임이 멈춘다.
+        if let Some(answer) = g.math.question().filter(|_| g.math.result().is_none()).map(|q| q.answer) {
+            g.math.type_and_submit(answer);
+        }
         if fast_frame(&mut g, &idle()).contains(&GameEvent::GameCleared) {
             cleared_at = Some(frame as f32 * FRAME);
             break;
         }
     }
-    let expected = (DAY_SECONDS + NIGHT_SECONDS) * DAYS_TO_CLEAR as f32 / DEV_FAST_FORWARD_SCALE;
+    let expected = (DAY_SECONDS + NIGHT_SECONDS) * DAYS_TO_CLEAR as f32 / DEV_FAST_FORWARD_SCALE
+        + DAYS_TO_CLEAR as f32 * MATH_RIGHT_SHOW_SECONDS;
     let seconds = cleared_at.expect("빨리감기로도 클리어된다");
     assert!((seconds - expected).abs() < 1.0, "{seconds}초");
 }

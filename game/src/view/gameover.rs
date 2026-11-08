@@ -206,17 +206,17 @@ pub fn draw_fallen_player(texture: &Texture2D, player: &Player, world: &World, f
 
 /// 미스의 한 순간.
 #[derive(Debug, PartialEq)]
-struct MissDance {
+pub(super) struct MissDance {
     /// 땅에서 뜬 높이
-    lift: f32,
+    pub(super) lift: f32,
     /// 돈 각도 (라디안)
     spin: f32,
     /// 세로로 눌린 양 (0 ~ `LANDING_SQUASH`)
-    squash: f32,
+    pub(super) squash: f32,
 }
 
 /// `t`초의 춤: 통통 뛰며 좌우로 뒤뚱거리고, 세 번째마다 높이 뛰어 한 바퀴 돈다.
-fn miss_dance(t: f32) -> MissDance {
+pub(super) fn miss_dance(t: f32) -> MissDance {
     let hop = t / HOP_SECONDS;
     let phase = hop.fract();
     let big = hop as u32 % BIG_HOP_EVERY == BIG_HOP_EVERY - 1;
@@ -238,7 +238,7 @@ fn draw_dancing_miss(texture: &Texture2D, seconds: f32) {
 }
 
 /// 천천히 떨어지는 색 별. 맨 위 줄에서 맨 아래 줄까지 되풀이한다.
-fn draw_confetti(seconds: f32) {
+pub(super) fn draw_confetti(seconds: f32) {
     for i in 0..CONFETTI {
         let x = hash(i * 2) * VIRTUAL_WIDTH;
         let y = (hash(i * 2 + 1) * VIRTUAL_HEIGHT + seconds * CONFETTI_FALL) % VIRTUAL_HEIGHT;

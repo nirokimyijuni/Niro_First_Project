@@ -7,11 +7,15 @@ use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
 use super::combat::{is_reached, Combat, CombatEvent};
+use super::math::{MathQuiz, MathResult};
 use super::miss::Miss;
 use super::player::{Player, PlayerInput};
 use super::weapon::{Weapon, Weapons};
 use super::world::{really_overlaps, World};
-use crate::config::{DAYS_TO_CLEAR, PLAYER_HEIGHT, PLAYER_SPAWN_X, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER};
+use crate::config::{
+    DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MATH_WRONG_HP_LOSS, PLAYER_HEIGHT, PLAYER_SPAWN_X, SCORE_PER_COIN, SCORE_PER_LEVEL_UP,
+    SCORE_PER_MONSTER,
+};
 use macroquad::math::Vec2;
 
 /// 화면(로건)이 보고 팝업·소리를 낼 일.
@@ -46,6 +50,8 @@ pub struct Game {
     pub miss: Option<Miss>,
     pub weapons: Weapons,
     pub citizens: Citizens,
+    /// 미스의 수학 문제 (US-074~076). 열려 있는 동안 게임 속 시간이 모두 멈춘다.
+    pub math: MathQuiz,
     cleared: bool,
 }
 
@@ -65,6 +71,7 @@ impl Game {
             miss: world.is_long_map().then(|| Miss::new(seed)),
             weapons: Weapons::new(seed),
             citizens: Citizens::on_world(&world, seed),
+            math: MathQuiz::new(seed),
             cleared: false,
             world,
             clock: Clock::new(),
@@ -73,24 +80,35 @@ impl Game {
         }
     }
 
-    /// 한 프레임 진행. 빨리감기는 main.rs `update_with_time_scale`이 같은 순서로 맡는다.
+    /// 한 프레임 진행. 빨리감기와 같은 길을 `time_scale` 1로 지난다.
     /// 쓰러지거나 클리어한 뒤에는 시계·플레이어·코인·좀비 모두 멈춘다 (US-043, US-068).
     pub fn update(&mut self, input: &PlayerInput, dt: f32) -> Vec<GameEvent> {
+        self.update_with_time_scale(input, dt, 1.0)
+    }
+
+    /// 빨리감기 한 프레임: 걷기·점프·몬스터는 진짜 시간 `dt`, 시계와 코인은 `dt × time_scale`로 흘린다 (D13).
+    /// 수학 문제가 열려 있으면 결과 글 시간만 흐르고 나머지는 모두 멈춘다 (임시-31). 빨리감기여도 같다.
+    pub fn update_with_time_scale(&mut self, input: &PlayerInput, dt: f32, time_scale: f32) -> Vec<GameEvent> {
         let mut events = Vec::new();
         if self.is_over() {
             return events;
         }
+        if self.math.is_open() {
+            self.update_combat(input, dt, &mut events);
+            return events;
+        }
+        let world_dt = dt * time_scale;
 
         self.player.update(input, dt, &self.world);
 
-        for clock_event in self.clock.update(dt) {
+        for clock_event in self.clock.update(world_dt) {
             events.push(match clock_event {
                 ClockEvent::NightStarted => GameEvent::NightStarted,
                 ClockEvent::DayStarted { day_number } => GameEvent::DayStarted { day_number },
             });
         }
 
-        let picked = self.coins.update(dt, self.player.rect());
+        let picked = self.coins.update(world_dt, self.player.rect());
         if picked > 0 {
             self.wallet.add(picked);
             events.push(GameEvent::CoinsPicked { count: picked });
@@ -102,10 +120,22 @@ impl Game {
 
     /// 공격 버튼을 처리하고 몬스터·미스·무기·시민 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
     /// 이번 프레임의 낮/밤을 본다. 빨리감기여도 `dt`는 진짜 시간이다 (D13: 빨라지는 건 시계·코인뿐).
-    /// 빨리감기도 이 함수를 지나서, 클리어도 여기서 본다.
+    /// 빨리감기도 이 함수를 지나서, 클리어와 수학 문제 열기도 여기서 본다.
     pub fn update_combat(&mut self, input: &PlayerInput, dt: f32, events: &mut Vec<GameEvent>) {
         if self.cleared {
             return;
+        }
+        if self.math.is_open() {
+            self.wait_after_math_answer(dt, events);
+            return;
+        }
+        // 밤 문제는 첫 몬스터보다 먼저 연다 (BUG-025): 18:00 프레임에는 몬스터를 움직이지 않는다.
+        if events.contains(&GameEvent::NightStarted) {
+            self.math.add_waiting();
+            self.math.open_next_waiting();
+            if self.math.is_open() {
+                return;
+            }
         }
         let player_rect = self.player.rect();
         if input.attack_pressed {
@@ -134,6 +164,27 @@ impl Game {
         if !self.combat.health.is_down() && self.clock.nights_survived() >= DAYS_TO_CLEAR {
             self.cleared = true;
             events.push(GameEvent::GameCleared);
+        }
+
+        // 판이 끝난 순간(쓰러짐·클리어)에는 문제를 내지 않는다.
+        if !self.is_over() {
+            self.math.open_next_waiting();
+        }
+    }
+
+    /// 결과 글 시간을 흘린다. 틀린 문제가 닫히는 순간 체력이 준다. 0이면 보통 쓰러짐과 같다 (부모님 답).
+    /// 무적 시간은 생기지 않는다. 기다리는 문제가 있으면 다음 프레임에 연다.
+    fn wait_after_math_answer(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
+        if self.math.wait_after_answer(dt) != Some(MathResult::Wrong) {
+            return;
+        }
+        let before = self.combat.health.hp();
+        self.combat.health.lose_from_quiz(MATH_WRONG_HP_LOSS);
+        let hp_left = self.combat.health.hp();
+        events.push(GameEvent::Combat(CombatEvent::PlayerHurt { amount: before - hp_left, hp_left }));
+        if self.combat.health.is_down() {
+            self.citizens.stop_walkers();
+            events.push(GameEvent::Combat(CombatEvent::PlayerDown));
         }
     }
 
@@ -191,7 +242,14 @@ impl Game {
                 self.weapons.drop_one(at.x, &self.world);
             }
         }
+        let count_before = self.weapons.picked_up_count;
         let picked = self.weapons.update(dt, player_rect);
+        // 이미 가진 무기를 또 주워도 아이템 1개다. `MATH_ITEMS_PER_QUESTION`번째마다 문제가 나온다.
+        for count in count_before + 1..=self.weapons.picked_up_count {
+            if count % MATH_ITEMS_PER_QUESTION == 0 {
+                self.math.add_waiting();
+            }
+        }
         events.extend(picked.into_iter().map(|kind| GameEvent::WeaponPicked { kind }));
     }
 
@@ -303,6 +361,11 @@ mod tests {
         let events = g.update(&no_input(), DAY_SECONDS);
         assert!(events.contains(&GameEvent::NightStarted));
         assert!(g.clock.is_night());
+        // 밤이 되면 수학 문제가 열린다 (부모님 답). 맞히고 닫은 뒤에 밤을 보낸다.
+        let answer = g.math.question().expect("밤 문제").answer;
+        g.math.type_and_submit(answer);
+        g.update(&no_input(), crate::config::MATH_RIGHT_SHOW_SECONDS);
+        assert!(!g.math.is_open());
         let events = g.update(&no_input(), NIGHT_SECONDS);
         assert!(events.contains(&GameEvent::DayStarted { day_number: 2 }));
         assert_eq!(g.clock.nights_survived(), 1);

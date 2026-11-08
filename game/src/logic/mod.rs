@@ -7,6 +7,7 @@ pub mod clock;
 pub mod coins;
 pub mod combat;
 pub mod game;
+pub mod math;
 pub mod miss;
 pub mod monster;
 pub mod player;
