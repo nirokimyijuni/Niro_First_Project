@@ -116,6 +116,76 @@ fn answers_are_right_and_in_range_for_1000_seeds() {
     }
 }
 
+/// 부모님 요청 2026-11-14: 아이가 "843 + 538"(답 1381)을 봤다. 답이 네 자리인 문제는 없어야 한다.
+/// 진짜 게임 길(`Game` → 문제 창 열기 → 3번 틀려 닫기)로 시드마다 문제 20개를 본다.
+#[test]
+fn no_four_digit_answer_through_the_real_game_for_1000_seeds() {
+    let in_range = |x: u32, (low, high): (u32, u32)| (low..=high).contains(&x);
+    for seed in 0..SEEDS {
+        let mut g = Game::on_world(CharacterKind::Niro, seed, World::m1());
+        for _ in 0..20 {
+            g.math.add_waiting();
+            g.math.open_next_waiting();
+            let q = g.math.question().expect("문제가 열린다").clone();
+            let n = numbers_in(&q.text);
+            assert!(q.answer <= MATH_ANSWER_MAX, "seed {seed}: {}", q.text);
+            assert!(q.answer.to_string().len() <= MATH_ANSWER_DIGITS, "seed {seed}: {}", q.text);
+            match q.kind {
+                MathKind::AddTwo => assert!(n.iter().all(|x| in_range(*x, MATH_ADD_TWO_RANGE)), "seed {seed}: {}", q.text),
+                MathKind::AddThree => assert!(n.iter().all(|x| in_range(*x, MATH_ADD_THREE_RANGE)), "seed {seed}: {}", q.text),
+                MathKind::Subtract => assert!(in_range(n[0], MATH_SUBTRACT_RANGE) && n[1] < n[0], "seed {seed}: {}", q.text),
+                MathKind::Multiply => assert!(MATH_TIMES_TABLES.contains(&n[0]) && n[1] <= MATH_TIMES_MAX, "seed {seed}: {}", q.text),
+            }
+            let wrong = if q.answer == 1 { 2 } else { 1 };
+            for _ in 0..MATH_TRIES {
+                g.math.type_and_submit(wrong);
+            }
+            assert_eq!(g.math.wait_after_answer(MATH_WRONG_SHOW_SECONDS + 1.0), Some(MathResult::Wrong));
+            assert!(!g.math.is_open());
+        }
+    }
+}
+
+/// 어떤 문제 문장에도 세 자리 수가 나오지 않는다 (부모님 결정 2026-11-14: 빼기도 두 자리 수끼리).
+#[test]
+fn no_three_digit_numbers_in_any_story() {
+    for seed in 0..SEEDS {
+        let mut maker = MathQuestionMaker::new(seed);
+        for _ in 0..20 {
+            let q = maker.next().unwrap();
+            assert!(numbers_in(&q.text).iter().all(|x| *x < 100), "seed {seed}: {}", q.text);
+        }
+    }
+}
+
+/// 빼기는 두 자리에서 두 자리를 뺀다: 두 수 모두 10~99, 답 1 이상 (D88).
+#[test]
+fn subtract_uses_only_two_digit_numbers() {
+    assert_eq!(MATH_SUBTRACT_RANGE, (11, 99));
+    assert_eq!(MATH_SUBTRACT_TAKE_MIN, 10);
+    for seed in 0..SEEDS {
+        let mut maker = MathQuestionMaker::new(seed);
+        for _ in 0..20 {
+            let q = maker.next().unwrap();
+            if q.kind == MathKind::Subtract {
+                let n = numbers_in(&q.text);
+                assert!((10..=99).contains(&n[0]) && (10..=99).contains(&n[1]) && q.answer >= 1, "seed {seed}: {}", q.text);
+            }
+        }
+    }
+}
+
+/// config 범위로 나올 수 있는 가장 큰 답도 `MATH_ANSWER_MAX` 이하다 (math.rs에서 빌드할 때도 막는다).
+#[test]
+fn biggest_possible_answers_fit_in_three_digits() {
+    let biggest_table = *MATH_TIMES_TABLES.iter().max().unwrap();
+    assert!(MATH_ADD_TWO_RANGE.1 * 2 <= MATH_ANSWER_MAX);
+    assert!(MATH_ADD_THREE_RANGE.1 * 3 <= MATH_ANSWER_MAX);
+    assert!(MATH_SUBTRACT_RANGE.1 <= MATH_ANSWER_MAX);
+    assert!(biggest_table * MATH_TIMES_MAX <= MATH_ANSWER_MAX);
+    assert_eq!(MATH_ANSWER_MAX.to_string().len(), MATH_ANSWER_DIGITS);
+}
+
 #[test]
 fn no_blank_left_in_any_sentence_for_1000_seeds() {
     for seed in 0..SEEDS {

@@ -125,7 +125,7 @@ fn draw_fast_icon(x: f32, mid_y: f32, h: f32, color: Color) {
 }
 
 /// 하트 하나: 동그라미 두 개 + 아래로 뾰족한 세모. `size`는 폭.
-fn draw_heart(c: Vec2, size: f32, color: Color) {
+pub(super) fn draw_heart(c: Vec2, size: f32, color: Color) {
     let bump = size * 0.27;
     draw_circle(c.x - size * 0.24, c.y - size * 0.12, bump, color);
     draw_circle(c.x + size * 0.24, c.y - size * 0.12, bump, color);
@@ -173,6 +173,16 @@ pub fn draw_level(text: &TextPainter, level: u32, experience: u32) {
     for i in 0..EXPERIENCE_PER_LEVEL {
         let color = if i < experience { EXPERIENCE_FULL } else { HEART_EMPTY };
         draw_circle(first + EXPERIENCE_STEP * i as f32, mid_y, EXPERIENCE_RADIUS, color);
+    }
+}
+
+/// 위 정보판(시계·장소·코인, 체력·레벨, 무기 판)의 아래 끝. 큰 알림 글은 그 아래에 놓인다 (BUG-031).
+pub fn hud_bottom(has_weapons: bool) -> f32 {
+    let row = FAST_PANEL_TOP + FAST_PANEL_HEIGHT;
+    if has_weapons {
+        row + 8.0 + WEAPON_SLOT + 8.0
+    } else {
+        row
     }
 }
 

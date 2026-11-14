@@ -4,10 +4,20 @@
 use super::monster::SeededRandom;
 use crate::config::{
     MATH_ADD_THREE_ON, MATH_ADD_THREE_RANGE, MATH_ADD_THREE_STORIES, MATH_ADD_TWO_ON, MATH_ADD_TWO_RANGE,
-    MATH_ADD_TWO_STORIES, MATH_ANSWER_DIGITS, MATH_MULTIPLY_ON, MATH_MULTIPLY_STORIES, MATH_RIGHT_SHOW_SECONDS,
+    MATH_ADD_TWO_STORIES, MATH_ANSWER_DIGITS, MATH_ANSWER_MAX, MATH_MULTIPLY_ON, MATH_MULTIPLY_STORIES, MATH_RIGHT_SHOW_SECONDS,
     MATH_RIGHT_TEXT, MATH_SEED_MIX, MATH_STORY_NAMES, MATH_SUBTRACT_ON, MATH_SUBTRACT_RANGE, MATH_SUBTRACT_STORIES, MATH_SUBTRACT_TAKE_MIN, MATH_TIMES_MAX,
     MATH_TIMES_TABLES, MATH_TRIES, MATH_TRIES_LEFT_TEXT, MATH_TRY_AGAIN_TEXT, MATH_WRONG_SHOW_SECONDS, MATH_WRONG_TEXT,
 };
+
+// 답이 네 자리가 되는 문제는 내지 않는다 (부모님 요청 2026-11-14).
+// config 범위를 바꿔서 가장 큰 답이 `MATH_ANSWER_MAX`를 넘으면 빌드가 멈춘다.
+const _: () = assert!(MATH_ADD_TWO_RANGE.1 * 2 <= MATH_ANSWER_MAX, "두 수 더하기 답이 너무 커요");
+const _: () = assert!(MATH_ADD_THREE_RANGE.1 * 3 <= MATH_ANSWER_MAX, "세 수 더하기 답이 너무 커요");
+const _: () = assert!(MATH_SUBTRACT_RANGE.1 <= MATH_ANSWER_MAX, "빼기 답이 너무 커요");
+const _: () = assert!(MATH_SUBTRACT_TAKE_MIN < MATH_SUBTRACT_RANGE.0, "빼기 답은 1 이상이어야 해요");
+// 구구단 표는 작은 단부터 적혀 있어서 맨 끝이 가장 큰 단이다.
+const _: () =
+    assert!(MATH_TIMES_MAX * MATH_TIMES_TABLES[MATH_TIMES_TABLES.len() - 1] <= MATH_ANSWER_MAX, "곱하기 답이 너무 커요");
 
 /// 문제 종류 (부모님 답).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

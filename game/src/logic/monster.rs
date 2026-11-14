@@ -6,7 +6,7 @@
 use super::combat::CombatEvent;
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
-    MONSTER_SPAWN_MIN_DISTANCE, SCREEN_WIDTH, SKELETON_HEIGHT, ZOMBIE_FLOAT_RISE_SPEED, ZOMBIE_FLOAT_SECONDS, ZOMBIE_FLOAT_START_SECONDS,
+    MONSTER_SPAWN_MIN_DISTANCE, POISON_TICK_SECONDS, SCREEN_WIDTH, SKELETON_HEIGHT, ZOMBIE_FLOAT_RISE_SPEED, ZOMBIE_FLOAT_SECONDS, ZOMBIE_FLOAT_START_SECONDS,
     ZOMBIE_HEIGHT, ZOMBIE_HIT_FLASH_SECONDS, ZOMBIE_HP, ZOMBIE_SPAWN_LEFT_CHANCE, ZOMBIE_WALK_SPEED, ZOMBIE_WIDTH,
 };
 use macroquad::math::{Rect, Vec2};
@@ -30,9 +30,23 @@ pub struct Zombie {
     /// 지금 상태가 시작된 뒤 흐른 초.
     seconds_in_state: f32,
     hit_flash_seconds_left: f32,
+    /// 독약 포션의 독 (US-071).
+    pub poison: Poison,
+    /// 상자에서 나와 가만히 있을 남은 초 (임시-69). 이동안 움직이지도 공격하지도 않는다.
+    wait_seconds_left: f32,
 }
 
 impl Zombie {
+    /// 상자에서 막 나온 좀비: `wait_seconds`초 가만히 있다가 움직인다.
+    pub fn waiting(x: f32, ground_y: f32, will_float: bool, wait_seconds: f32) -> Zombie {
+        Zombie { wait_seconds_left: wait_seconds, ..Zombie::new(x, ground_y, will_float) }
+    }
+
+    /// 상자에서 나와 가만히 있는 중이면 true. 화면은 이동안 머리 위에 "공격!"을 보여 줄 수 있다.
+    pub fn is_waiting(&self) -> bool {
+        self.wait_seconds_left > 0.0
+    }
+
     /// 땅 위 `x`에 서 있는 좀비.
     pub fn new(x: f32, ground_y: f32, will_float: bool) -> Zombie {
         Zombie {
@@ -42,6 +56,8 @@ impl Zombie {
             will_float,
             seconds_in_state: 0.0,
             hit_flash_seconds_left: 0.0,
+            poison: Poison::default(),
+            wait_seconds_left: 0.0,
         }
     }
 
@@ -63,8 +79,12 @@ impl Zombie {
 
     /// 짧은 시간 `step` 동안 움직이기.
     fn step(&mut self, step: f32, target_x: f32, world: &World) {
-        self.seconds_in_state += step;
         self.hit_flash_seconds_left = (self.hit_flash_seconds_left - step).max(0.0);
+        if self.is_waiting() {
+            self.wait_seconds_left = (self.wait_seconds_left - step).max(0.0);
+            return;
+        }
+        self.seconds_in_state += step;
 
         match self.state {
             ZombieState::Walking if self.will_float && self.seconds_in_state >= ZOMBIE_FLOAT_START_SECONDS => {
@@ -192,6 +212,37 @@ fn free_ground_x(mut x: f32, away: f32, width: f32, world: &World) -> f32 {
     world.keep_on_map(x, width)
 }
 
+/// 몬스터에 걸린 독 (US-071, 임시-28). `POISON_TICK_SECONDS`(실제 초)마다 한 번씩 독이 든다.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Poison {
+    /// 다음 독까지 남은 초. 걸리지 않았으면 None.
+    seconds_to_next: Option<f32>,
+}
+
+impl Poison {
+    pub fn is_on(&self) -> bool {
+        self.seconds_to_next.is_some()
+    }
+
+    /// 독에 걸린다. 이미 걸렸으면 그대로다.
+    pub fn start(&mut self) {
+        self.seconds_to_next.get_or_insert(POISON_TICK_SECONDS);
+    }
+
+    /// 독 시간을 `step`초 흘린다. 이번에 독이 들 차례면 true.
+    pub fn tick(&mut self, step: f32) -> bool {
+        let Some(left) = &mut self.seconds_to_next else {
+            return false;
+        };
+        *left -= step;
+        if *left > 0.0 {
+            return false;
+        }
+        *left += POISON_TICK_SECONDS;
+        true
+    }
+}
+
 /// 시드를 넣으면 늘 같은 순서로 나오는 작은 난수. 테스트에서 결과를 고정할 수 있다.
 /// 비슷한 시드(1, 2, 3 …)에서도 결과가 고르게 섞이도록 murmur3의 섞기 단계를 쓴다.
 pub struct SeededRandom {
@@ -239,9 +290,11 @@ impl Zombies {
         });
     }
 
-    /// 걷고 있는 좀비가 플레이어 몸에 닿았는지. 떠 있는 좀비는 공격하지 않는다.
+    /// 걷고 있는 좀비가 플레이어 몸에 닿았는지. 떠 있는 좀비와 상자에서 나와 가만히 있는 좀비는 공격하지 않는다.
     /// 선으로만 닿은 건 빼야 상자 위 발이 좀비 머리에 맞지 않는다 (REVIEW-006 2번).
     pub fn any_walking_zombie_touches(&self, player_rect: Rect) -> bool {
-        self.list.iter().any(|z| z.state == ZombieState::Walking && really_overlaps(z.rect(), player_rect))
+        self.list
+            .iter()
+            .any(|z| z.state == ZombieState::Walking && !z.is_waiting() && really_overlaps(z.rect(), player_rect))
     }
 }

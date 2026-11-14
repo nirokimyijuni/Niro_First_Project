@@ -75,6 +75,13 @@ impl DroppedWeapon {
         self.rect.y < self.landing_y
     }
 
+    /// 맵이 바뀌었을 때(상자가 부서지거나 돌아올 때, D87) 멈출 곳을 다시 정한다.
+    /// 밑의 상자가 없어졌으면 다시 떨어지고, 상자가 돌아오면 그 위로 올라간다.
+    pub fn land_again(&mut self, world: &World) {
+        self.landing_y = world.weapon_floor_y_under(self.rect) - WEAPON_SIZE;
+        self.rect.y = self.rect.y.min(self.landing_y);
+    }
+
     /// 사라질 때까지 남은 초. 땅에 닿은 때부터 줄어든다. 화면은 끝이 가까우면 깜빡이게 할 수 있다.
     pub fn seconds_left(&self) -> f32 {
         self.seconds_left
@@ -117,6 +124,27 @@ impl Weapons {
     /// 가진 무기를 바꾸기 순서로. 비었으면 바꾸기 버튼을 숨긴다.
     pub fn owned(&self) -> Vec<Weapon> {
         Weapon::ORDER.into_iter().filter(|w| self.owned.contains(w)).collect()
+    }
+
+    /// 가진 무기면 true. 맨손은 늘 가졌다.
+    pub fn has(&self, kind: Weapon) -> bool {
+        kind == Weapon::Hands || self.owned.contains(&kind)
+    }
+
+    /// 무기를 바로 가진 무기로 넣고 손에 든다. 수학 문제 "아이템"으로는 세지 않는다.
+    /// 상점은 무기를 팔지 않는다 (부모님 결정 2026-11-14). 시험에서 무기를 줄 때 쓴다.
+    pub fn add_bought(&mut self, kind: Weapon) {
+        if !self.has(kind) {
+            self.owned.push(kind);
+        }
+        self.held = kind;
+    }
+
+    /// 가진 무기(또는 맨손)를 손에 든다. 없는 무기면 그대로다.
+    pub fn hold(&mut self, kind: Weapon) {
+        if self.has(kind) {
+            self.held = kind;
+        }
     }
 
     /// 가졌거나 땅에 놓여 있으면 true. 그런 무기는 "없는 무기"로 치지 않는다.
@@ -162,12 +190,5 @@ impl Weapons {
             !touched && weapon.seconds_left > 0.0
         });
         picked
-    }
-
-    /// 맨손 → 칼 → 도끼 → 총 → 맨손 순서로 다음 것을 든다. 없는 무기는 건너뛴다 (임시-8).
-    pub fn switch(&mut self) {
-        let now = Weapon::ORDER.iter().position(|w| *w == self.held).unwrap_or(0);
-        let mut next_in_order = (1..Weapon::ORDER.len()).map(|step| Weapon::ORDER[(now + step) % Weapon::ORDER.len()]);
-        self.held = next_in_order.find(|w| *w == Weapon::Hands || self.owned.contains(w)).unwrap_or(self.held);
     }
 }

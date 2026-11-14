@@ -15,6 +15,8 @@ extern "C" {
     /// localStorage의 최고 점수. 없거나 못 읽으면 0.
     fn best_score_load() -> i32;
     fn best_score_save(score: u32);
+    /// 주소에 `?qa`가 있으면 1, 아니면 0 (시험용 단축).
+    fn qa_mode_on() -> i32;
 }
 
 /// "불러오는 중..." 글자를 치운다. 게임이 첫 화면을 그린 뒤에 한 번 부른다.
@@ -88,5 +90,17 @@ pub fn game_version() -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         None
+    }
+}
+
+/// 시험용 단축을 켤지 (view::qa). 브라우저는 주소에 `?qa`가 있을 때만, PC 실행은 `cargo run -- qa`일 때만 true.
+pub fn qa_mode() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        unsafe { qa_mode_on() == 1 }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::args().skip(1).any(|a| a == "qa")
     }
 }

@@ -5,8 +5,10 @@
 
 use super::math::MathKey;
 use super::screen::Letterbox;
+use super::shop::Pocket;
 use super::touch::{Finger, TouchFrame};
 use crate::logic::player::PlayerInput;
+use crate::logic::shop::Potion;
 use macroquad::prelude::*;
 
 /// 키보드 입력에 터치 입력을 더한다 (둘 중 하나라도 누르면 누른 것).
@@ -58,6 +60,30 @@ pub fn mine_key_down() -> bool {
 /// 무기 바꾸기: W를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
 pub fn switch_weapon_pressed() -> bool {
     is_key_pressed(KeyCode::W)
+}
+
+/// 바로 쓰는 물건 키 (부모님 결정): R = 체력 포션, T = 독약, Y = 주사기총 쏘기, G = 엔더열매 먹기.
+/// F는 개발용 빨리감기라 쓰지 않는다. (키, 물건, 화면에 쓰는 글자)
+pub const POCKET_KEYS: [(KeyCode, Pocket, &str); 4] = [
+    (KeyCode::R, Pocket::Potion(Potion::Health), "R"),
+    (KeyCode::T, Pocket::Potion(Potion::Poison), "T"),
+    (KeyCode::Y, Pocket::SyringeGun, "Y"),
+    (KeyCode::G, Pocket::EnderFruit, "G"),
+];
+
+/// 키 하나가 어느 물건인지.
+pub fn pocket_for_key(key: KeyCode) -> Option<Pocket> {
+    POCKET_KEYS.iter().find(|(k, ..)| *k == key).map(|(_, p, _)| *p)
+}
+
+/// 화면에 쓰는 키 글자 ("R", "T", "Y", "G").
+pub fn pocket_key_label(pocket: Pocket) -> &'static str {
+    POCKET_KEYS.iter().find(|(_, p, _)| *p == pocket).map_or("", |(.., label)| label)
+}
+
+/// 이번 프레임에 "새로" 누른 물건 키들 (꾹 눌러도 한 번).
+pub fn pocket_keys_pressed() -> Vec<Pocket> {
+    get_keys_pressed().into_iter().filter_map(pocket_for_key).collect()
 }
 
 /// 메뉴 화면(타이틀·캐릭터 고르기)에서 쓰는 입력. 모두 "이번 프레임에 새로 누름" 기준.
@@ -155,6 +181,19 @@ mod tests {
         for other in [KeyCode::Q, KeyCode::Space, KeyCode::Left, KeyCode::W, KeyCode::F, KeyCode::Escape] {
             assert_eq!(math_key(other), None);
         }
+    }
+
+    #[test]
+    fn r_t_y_g_use_potions_syringe_gun_and_ender_fruit() {
+        assert_eq!(pocket_for_key(KeyCode::R), Some(Pocket::Potion(Potion::Health)));
+        assert_eq!(pocket_for_key(KeyCode::T), Some(Pocket::Potion(Potion::Poison)));
+        assert_eq!(pocket_for_key(KeyCode::Y), Some(Pocket::SyringeGun));
+        assert_eq!(pocket_for_key(KeyCode::G), Some(Pocket::EnderFruit));
+        for other in [KeyCode::Q, KeyCode::W, KeyCode::E, KeyCode::F, KeyCode::Space, KeyCode::Escape] {
+            assert_eq!(pocket_for_key(other), None, "{other:?}는 다른 일을 한다 (F는 빨리감기)");
+        }
+        let labels: Vec<&str> = Pocket::ALL.iter().map(|p| pocket_key_label(*p)).collect();
+        assert_eq!(labels, ["R", "T", "Y", "G"], "물건마다 키가 하나씩 있다");
     }
 
     #[test]

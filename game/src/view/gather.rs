@@ -2,13 +2,16 @@
 //! 머리 위 캐기 표시, 캔 것 팝업, 재료 판. 그림은 모두 코드로 그린 임시 그림이다 ([임시-20]).
 //! 무엇이 어디 있고 언제 다시 생기는지는 logic(gathering, game, world)이 정하고, 여기는 보여 주기만 한다.
 
+use super::assets::{ItemPicture, M6Art};
+use super::craft::CraftView;
 use super::hud::draw_pill;
+use super::items::draw_item_picture;
 use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::night;
 use super::text::TextPainter;
 use super::touch::{draw_pickaxe_shape, draw_star, glow_pulse};
 use crate::logic::game::{Game, Usable};
-use crate::config::{CRAFT_IRON_MARK, CRAFT_WOOD_MARK, PICKAXE_SHAPE};
+use crate::config::{CRAFT_IRON_MARK, CRAFT_WOOD_MARK, PICKAXE_SHAPE, SLAM_BUTTON_TEXT};
 use crate::logic::gathering::{Bag, Material};
 use crate::logic::world::nearest_copy;
 use macroquad::prelude::*;
@@ -109,12 +112,16 @@ pub fn material_color(material: Material) -> Color {
         Material::Copper => Color::new(0.95, 0.55, 0.22, 1.0),
         Material::Silver => Color::new(0.88, 0.90, 0.95, 1.0),
         Material::Gold => Color::new(1.0, 0.82, 0.18, 1.0),
+        // D75 새 광물 (US-079): 아이가 확정한 색 (루비 빨강, 에메랄드 초록, 다이아몬드 하늘)
+        Material::Ruby => Color::new(0.92, 0.20, 0.35, 1.0),
+        Material::Emerald => Color::new(0.20, 0.80, 0.45, 1.0),
+        Material::Diamond => Color::new(0.60, 0.92, 1.0, 1.0),
     }
 }
 
-/// 금·은은 팝업에서 더 반짝인다 (US-065).
+/// 금·은과 보석은 팝업에서 더 반짝인다 (US-065, US-079). 무엇이 귀한지는 logic(`Material::is_precious`)이 정한다.
 pub fn sparkles(material: Material) -> bool {
-    matches!(material, Material::Silver | Material::Gold)
+    material.is_precious()
 }
 
 /// 재료 그림 하나. 나무는 통나무, 광석은 반짝이는 덩이.
@@ -257,6 +264,9 @@ const TAG_GAP: f32 = 14.0;
 const TAG_BOB: f32 = 10.0;
 const TAG_BOUNCES_PER_SECOND: f32 = 2.0;
 const KEY_SIZE: f32 = 46.0;
+/// 쿵 표시를 주인공 몸 네모 위로 더 띄우는 높이 (그림 머리가 몸 네모보다 위로 나온다), 자동차를 타면 더
+const PLAYER_HEAD_ROOM: f32 = 34.0;
+const CAR_SEAT_ROOM: f32 = 36.0;
 const KEY_FILL: Color = Color::new(1.0, 1.0, 1.0, 0.95);
 const KEY_TEXT: Color = Color::new(0.20, 0.22, 0.45, 1.0);
 
@@ -273,6 +283,7 @@ fn usable_rect(game: &Game, usable: Usable, view_x: f32) -> Option<Rect> {
         Usable::CaveExit => return Some(game.cave_world.cave_exit()),
         Usable::CaveEntrance => game.world.cave_entrance()?,
         Usable::Workbench => game.world.workbench()?,
+        Usable::HouseDoor => game.world.house_door()?,
     };
     Some(nearest_copy(r, view_x))
 }
@@ -298,16 +309,48 @@ fn shows_usable_tag(mining_progress: Option<f32>) -> bool {
 }
 
 /// 손 닿는 물건 위에 통통 튀는 표시: PC는 "E" 키, 폰은 캐기 버튼 글 (맵 좌표).
-pub fn draw_usable_tag(text: &TextPainter, game: &Game, view_x: f32, camera_left: f32, touch_mode: bool, t: f32) {
+/// 머리 위 표시가 떠 있는 물건 자리(맵 좌표)와 글. 표시가 없으면 None.
+fn usable_tag_anchor(game: &Game, view_x: f32) -> Option<(Rect, &'static str)> {
     if !shows_usable_tag(game.mining_progress()) {
-        return;
+        return None;
     }
-    let Some(usable) = game.usable_in_reach() else { return };
-    let Some(r) = usable_rect(game, usable, view_x) else { return };
+    // 해변에서 쿵 할 수 있으면 (US-081/082): 주인공 머리 위에 E (폰은 "쿵!" 말풍선, 버튼은 캐기 자리)
+    match game.usable_in_reach() {
+        Some(usable) => usable_rect(game, usable, view_x).map(|r| (r, usable.button_text())),
+        None if game.slam_power_here().is_some() => {
+            // 머리(안테나·모자)와 자동차 자리 위로 띄운다
+            let lift = PLAYER_HEAD_ROOM + if game.gathering.bag.riding_car { CAR_SEAT_ROOM } else { 0.0 };
+            let body = nearest_copy(game.player.rect(), view_x);
+            Some((Rect { y: body.y - lift, ..body }, SLAM_BUTTON_TEXT))
+        }
+        None => None,
+    }
+}
+
+/// 머리 위 표시가 통통 튀며 차지할 수 있는 칸 전체 (화면 좌표). 큰 문구가 이 칸을 피한다 (BUG-030).
+pub fn usable_tag_screen_rect(game: &Game, view_x: f32, camera_left: f32) -> Option<Rect> {
+    let (r, _) = usable_tag_anchor(game, view_x)?;
+    Some(tag_space(r, camera_left))
+}
+
+/// 물건 자리 `r`(맵 좌표) 위의 표시 칸 (화면 좌표). E 키·말풍선 중 큰 쪽과 튀는 높이까지 넣는다.
+fn tag_space(r: Rect, camera_left: f32) -> Rect {
+    const TALL: f32 = KEY_SIZE + 5.0;
+    const WIDE: f32 = 150.0;
+    let bottom = r.y - TAG_GAP + 5.0;
+    let top = r.y - TAG_GAP - TAG_BOB - TALL;
+    Rect::new(r.center().x - camera_left - WIDE / 2.0, top, WIDE, bottom - top)
+}
+
+pub fn draw_usable_tag(text: &TextPainter, game: &Game, view_x: f32, camera_left: f32, touch_mode: bool, t: f32) {
+    let Some((r, label)) = usable_tag_anchor(game, view_x) else { return };
     let bottom = r.y - TAG_GAP - tag_bounce(t);
     if touch_mode {
-        super::effects::draw_bubble(text, usable.button_text(), r.center().x, bottom, camera_left, 1.0);
+        super::effects::draw_bubble(text, label, r.center().x, bottom, camera_left, 1.0);
         return;
+    }
+    if label == SLAM_BUTTON_TEXT {
+        text.left(SLAM_BUTTON_TEXT, r.center().x + KEY_SIZE / 2.0 + 8.0, bottom - 10.0, 34.0, SPARKLE);
     }
     let key = Rect::new(r.center().x - KEY_SIZE / 2.0, bottom - KEY_SIZE, KEY_SIZE, KEY_SIZE);
     draw_rectangle(key.x, key.y + 5.0, key.w, key.h, KEY_TEXT); // 키 옆면
@@ -372,19 +415,34 @@ pub fn bag_items(bag: &Bag) -> Vec<(Material, u32)> {
     Material::ALL.iter().map(|m| (*m, bag.count(*m))).filter(|(_, n)| *n > 0).collect()
 }
 
+/// 재료 판 끝에 붙는 연장 그림 수: 곡괭이, 다이아래더라이트 곡괭이.
+fn tool_count(bag: &Bag) -> usize {
+    bag.has_pickaxe as usize + bag.has_diamond_pickaxe as usize
+}
+
 /// 재료 판의 폭. 보일 것이 없으면 0 (판도 없다).
 pub fn bag_width(text: &TextPainter, bag: &Bag) -> f32 {
     let items = bag_items(bag);
-    if items.is_empty() && !bag.has_pickaxe {
+    let tools = tool_count(bag);
+    if items.is_empty() && tools == 0 {
         return 0.0;
     }
     let item_w: f32 = items.iter().map(|(_, n)| BAG_ICON + 4.0 + text.width(&n.to_string(), BAG_TEXT) + BAG_GAP).sum();
-    BAG_PAD * 2.0 + item_w + if bag.has_pickaxe { BAG_ICON + BAG_GAP } else { 0.0 } - BAG_GAP
+    BAG_PAD * 2.0 + item_w + tools as f32 * (BAG_ICON + BAG_GAP) - BAG_GAP
 }
 
-/// 정보판 아래 왼쪽: 가진 재료 개수와 곡괭이 (US-020, US-021). 화면 좌표.
+/// 재료 줄(과 만드는 법 줄)의 아래 끝. 그릴 것이 없으면 None (BUG-031). `draw_bag`과 같은 조건.
+pub fn bag_bottom(text: &TextPainter, bag: &Bag, show_recipe: bool) -> Option<f32> {
+    if show_recipe && !bag.has_pickaxe {
+        Some(RECIPE_TOP + RECIPE_HEIGHT)
+    } else {
+        (bag_width(text, bag) > 0.0).then_some(BAG_TOP + BAG_HEIGHT)
+    }
+}
+
+/// 정보판 아래 왼쪽: 가진 재료 개수와 곡괭이·다이아래더라이트 곡괭이 (US-020, US-021, US-082). 화면 좌표.
 /// `show_recipe`: 제작대가 있는 맵이면 곡괭이 없을 때 만드는 법 한 줄을 아래에 단다.
-pub fn draw_bag(text: &TextPainter, bag: &Bag, show_recipe: bool) {
+pub fn draw_bag(text: &TextPainter, bag: &Bag, art: &M6Art, show_recipe: bool) {
     if show_recipe && !bag.has_pickaxe {
         let line = recipe_line(bag);
         draw_pill(BAG_LEFT, RECIPE_TOP, text.width(&line, RECIPE_TEXT) + BAG_PAD * 2.0, RECIPE_HEIGHT, PANEL);
@@ -405,6 +463,10 @@ pub fn draw_bag(text: &TextPainter, bag: &Bag, show_recipe: bool) {
     }
     if bag.has_pickaxe {
         draw_pickaxe(vec2(x + BAG_ICON / 2.0, mid_y), BAG_ICON, WHITE);
+        x += BAG_ICON + BAG_GAP;
+    }
+    if bag.has_diamond_pickaxe {
+        draw_item_picture(art, ItemPicture::DiamondPickaxe, vec2(x + BAG_ICON / 2.0, mid_y), BAG_ICON * 1.1);
     }
 }
 
@@ -412,8 +474,8 @@ pub fn draw_bag(text: &TextPainter, bag: &Bag, show_recipe: bool) {
 pub struct GatherView {
     /// 막 캔 것과 보인 지 몇 초
     popup: Option<(Material, f32)>,
-    /// 제작대에서 칸에 놓을 재료 (나무 또는 철광석)
-    pub craft_pick: Material,
+    /// 제작대 화면 상태: 칸에 놓을 재료와 막 꺼낸 것
+    pub craft: CraftView,
     /// 곡괭이 만드는 법 안내를 보인 지 몇 초. 판마다 처음 나무를 캤을 때 한 번만 켠다.
     recipe_hint: Option<f32>,
     recipe_told: bool,
@@ -421,7 +483,7 @@ pub struct GatherView {
 
 impl GatherView {
     pub fn new() -> GatherView {
-        GatherView { popup: None, craft_pick: Material::Wood, recipe_hint: None, recipe_told: false }
+        GatherView { popup: None, craft: CraftView::new(), recipe_hint: None, recipe_told: false }
     }
 
     /// `can_craft`: 아직 곡괭이가 없고 제작대가 있는 맵이다.
@@ -457,6 +519,11 @@ impl GatherView {
         self.recipe_hint.is_some()
     }
 
+    /// 곡괭이 안내 상자의 아래 끝 (보일 때만)
+    pub fn recipe_hint_bottom(&self) -> Option<f32> {
+        self.recipe_hint_showing().then_some(RECIPE_HINT_TOP + RECIPE_HINT_HEIGHT)
+    }
+
     #[cfg(test)]
     pub fn popup(&self) -> Option<Material> {
         self.popup.map(|(m, _)| m)
@@ -489,6 +556,17 @@ impl GatherView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tag_space_covers_the_bouncing_e_key_on_screen() {
+        let door = Rect::new(1000.0, 328.0, 68.0, 112.0);
+        let space = tag_space(door, 600.0);
+        assert!((space.center().x - (door.center().x - 600.0)).abs() < 0.01, "화면 좌표");
+        for t in [0.0, 0.13, 0.25] {
+            let bottom = door.y - TAG_GAP - tag_bounce(t);
+            assert!(space.y <= bottom - KEY_SIZE && space.bottom() >= bottom + 5.0, "E 키(옆면 포함)가 칸 안: t={t}");
+        }
+    }
 
     #[test]
     fn popup_goes_away_after_about_one_and_a_half_seconds() {
@@ -546,13 +624,17 @@ mod tests {
 
     #[test]
     fn ore_colors_differ_and_gold_silver_sparkle() {
-        let ores = [Material::Iron, Material::Copper, Material::Silver, Material::Gold];
+        let ores = [Material::Iron, Material::Copper, Material::Silver, Material::Gold, Material::Ruby, Material::Emerald, Material::Diamond];
         for (i, a) in ores.iter().enumerate() {
             for b in &ores[i + 1..] {
                 assert_ne!(material_color(*a), material_color(*b), "{a:?} {b:?}");
             }
         }
         assert!(sparkles(Material::Gold) && sparkles(Material::Silver));
+        assert!(sparkles(Material::Ruby) && sparkles(Material::Emerald) && sparkles(Material::Diamond), "새 광물도 반짝 (US-079)");
+        // 아이 확정 색: 루비 빨강, 에메랄드 초록, 다이아몬드 하늘
+        let (r, e, d) = (material_color(Material::Ruby), material_color(Material::Emerald), material_color(Material::Diamond));
+        assert!(r.r > r.g && r.r > r.b && e.g > e.r && e.g > e.b && d.b > d.r && d.g > d.r);
         assert!(!sparkles(Material::Iron) && !sparkles(Material::Wood));
     }
 

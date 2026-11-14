@@ -4,17 +4,20 @@
 //! (D9, D10): 노을 때 하늘 아래가 주황·분홍, 밤에는 남색 하늘에 별. 해·달은 시계를 따라 호를 그린다 (D31).
 
 use super::assets::{height_with_antenna, Assets};
+use super::boxes;
 use super::coin::draw_coins;
 use super::effects::{draw_bubble, Effects};
 use super::gameover::{draw_end_panel, draw_fallen_player, EndScreen};
 use super::gather::{self, GatherView};
-use super::hud::{draw_health, draw_hud, draw_level, draw_weapons};
+use super::hud::{draw_health, draw_hud, draw_level, draw_weapons, hud_bottom};
 use super::places;
-use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
+use super::screen::{set_shake, Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
 use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
-use crate::config::CITIZEN_HELP_TEXT;
+use super::items;
+use super::shop::{self, Pocket};
+use crate::config::{CITIZEN_HELP_TEXT, DEV_FAST_FORWARD_SCALE};
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
 use crate::logic::monster::ZombieState;
@@ -294,6 +297,12 @@ fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
         };
         let facing = if shortest_dx(player_x, r.center().x) > 0.0 { Facing::Left } else { Facing::Right };
         let feet = vec2(r.center().x, r.y + r.h);
+        let tint = if zombie.poison.is_on() {
+            shop::draw_poison_aura(r, time() + i as f32);
+            shop::poison_tint(tint)
+        } else {
+            tint
+        };
         draw_character(&assets.zombie, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, tint);
         if zombie.is_flashing() {
             draw_character(&assets.zombie_flash, feet, ZOMBIE_SPRITE_HEIGHT, facing, pose, ZOMBIE_FLASH);
@@ -323,6 +332,12 @@ fn draw_skeletons(assets: &Assets, game: &Game, tint: Color) {
         // `draw_character`는 Left일 때 뒤집으니, 왼쪽을 보는 그림은 반대로 준다.
         let facing = if player_on_left != sprites::skeleton_art_faces_left(skeleton.stage) { Facing::Left } else { Facing::Right };
         let feet = vec2(r.center().x, r.y + r.h);
+        let tint = if skeleton.poison.is_on() {
+            shop::draw_poison_aura(r, time() + i as f32);
+            shop::poison_tint(tint)
+        } else {
+            tint
+        };
         draw_character(picture, feet, height, facing, pose, tint);
         if skeleton.is_flashing() {
             draw_character(flash, feet, height, facing, pose, ZOMBIE_FLASH);
@@ -372,6 +387,31 @@ fn draw_held_weapon(assets: &Assets, weapon: Weapon, feet: Vec2, facing: Facing,
     draw_texture_ex(texture, c.x - size.x / 2.0, c.y - size.y / 2.0, tint, DrawTextureParams { dest_size: Some(size), flip_x: flip_weapon(weapon, facing), ..Default::default() });
 }
 
+/// 자동차를 타고 달리는 중인지 (차가 통통 튀고 "부릉!"이 뜬다). 걷는 빠르기 판정은 logic(`walk_speed`)이 한다.
+pub fn car_is_moving(riding_car: bool, speed_x: f32) -> bool {
+    riding_car && speed_x.abs() > 1.0
+}
+
+/// PC 플레이 화면 아래 키 안내. 바꾸기(W)는 무기가 있을 때, 포션(R·T)·주사기총(Y)·엔더열매(G)는 가진 것만 쓴다.
+pub fn keyboard_hint(can_switch: bool, owned: &[Pocket]) -> String {
+    let mut hint = String::from("화살표: 걷기  Space: 점프  Q: 공격  ");
+    if can_switch {
+        hint.push_str("W: 바꾸기  ");
+    }
+    hint.push_str("E: 캐기  ");
+    let potions: Vec<&str> = owned.iter().filter(|p| matches!(p, Pocket::Potion(_))).map(|p| super::input::pocket_key_label(*p)).collect();
+    if !potions.is_empty() {
+        hint.push_str(&format!("{}: 포션  ", potions.join("·")));
+    }
+    for (pocket, name) in [(Pocket::SyringeGun, "주사기총"), (Pocket::EnderFruit, "엔더열매")] {
+        if owned.contains(&pocket) {
+            hint.push_str(&format!("{}: {name}  ", super::input::pocket_key_label(pocket)));
+        }
+    }
+    hint.push_str("Esc: 멈춤");
+    hint
+}
+
 /// `touch_mode`면 키보드 안내 대신 조이스틱 안내를 보여 준다 (터치 조이스틱·버튼은 main이 위에 그린다).
 /// `ended`가 있으면 판이 끝난 화면이다 (쓰러짐이나 클리어).
 pub fn draw_play(
@@ -386,6 +426,8 @@ pub fn draw_play(
 ) {
     let d = game.clock.sky_darkness();
     let (camera_x, view_x) = (game.camera_left(), view_center(game));
+    // 쿵 하면 맵 그림이 잠깐 흔들린다 (정보판·버튼은 그대로)
+    set_shake(effects.shake());
     // 여기부터 맵 좌표: 아래 `look_at(0.0)`까지는 카메라를 따라 움직인다.
     // 움직이는 것은 화면에 가장 가까운 한 자리(`nearest_copy`)에만 그려서 두 번 보이지 않는다 (D61).
     // 동굴 안(임시-12)은 따로 된 한 화면: 맵의 미스·상자·코인·시민·무기·몬스터를 그리지 않는다.
@@ -400,7 +442,9 @@ pub fn draw_play(
         places::on_ring_cameras(camera_x, |_| places::draw_covers(&game.world, d));
         gather::draw_map_things(game, view_x, d);
         for b in game.world.boxes() {
-            draw_wood_box(nearest_copy(b, view_x), d);
+            let r = nearest_copy(b, view_x);
+            draw_wood_box(r, d);
+            boxes::draw_cracks(r, game.boxes.cracks_at(b), d);
         }
         draw_coins(&game.coins, d, time(), view_x);
     } else {
@@ -432,20 +476,43 @@ pub fn draw_play(
     }
     if on_map {
         draw_dropped_weapons(assets, game);
+        boxes::draw_dropped_items(&assets.m6, game, view_x, time());
         draw_zombies(assets, game, tint);
         draw_skeletons(assets, game, tint);
     }
     if let Some(fallen) = ended.filter(|e| !e.cleared) {
         draw_fallen_player(texture, player, &game.world, feet.x, height, tint, fallen.seconds);
+    } else if ended.is_some_and(|e| e.cleared) {
+        // 클리어하면 맵 위 캐릭터 대신 가운데에서 크게 춤춘다 (draw_end_panel). 같은 캐릭터가 둘 보이지 않게.
     } else {
         let blink = ended.is_none() && game.combat.health.is_invincible() && (time() * HURT_BLINKS_PER_SECOND).fract() < 0.5;
-        let player_tint = Color { a: if blink { HURT_BLINK_ALPHA } else { 1.0 }, ..tint };
-        // 클리어하면 걷던 그대로 굳지 않고 서서 숨 쉰다
-        let motion = if ended.is_some() { Motion::Idle } else { player.motion };
+        // 갑옷 (US-070): 둘레 빛, 무지개는 캐릭터 색도 바뀐다. 쓰러진 화면에서는 안 그린다.
+        let armor = game.shop.armor().filter(|_| ended.is_none());
+        let bag = &game.gathering.bag;
+        // 자동차 (US-080, 아이: 빨간 차를 타고 다닌다): 캐릭터는 차 위에 앉고, 차를 나중에 그려서 다리를 가린다
+        let moving = car_is_moving(bag.riding_car, player.vel.x);
+        let body_feet = if bag.riding_car { items::seat_feet(&assets.m6, feet, moving, time()) } else { feet };
+        let body = Rect { y: r.y - (feet.y - body_feet.y), ..r };
+        // 엔더열매 힘 (US-081, 아이: 몸에서 금빛 기운이 활활): 캐릭터 뒤에 금빛 불꽃
+        if bag.has_ender_power && ended.is_none() {
+            items::draw_golden_aura(body, time());
+        }
+        if let Some(armor) = armor {
+            shop::draw_armor_glow(armor, body, time());
+        }
+        let player_tint = Color { a: if blink { HURT_BLINK_ALPHA } else { 1.0 }, ..shop::armor_tint(armor, tint, time()) };
+        // 클리어하면 걷던 그대로 굳지 않고 서서 숨 쉰다. 자동차에 앉아 있으면 다리를 움직이지 않는다.
+        let motion = if ended.is_some() || bag.riding_car { Motion::Idle } else { player.motion };
         let pose = sprites::pose(motion, time(), player.vel.y < 0.0);
-        draw_character(texture, feet, height, player.facing, pose, player_tint);
+        draw_character(texture, body_feet, height, player.facing, pose, player_tint);
         if !effects.swinging_blade() {
-            draw_held_weapon(assets, game.weapons.held(), feet, player.facing, player_tint);
+            draw_held_weapon(assets, game.weapons.held(), body_feet, player.facing, player_tint);
+        }
+        if bag.riding_car {
+            items::draw_car(&assets.m6, feet, player.facing, Color { a: player_tint.a, ..tint }, moving, time());
+        }
+        if let Some(armor) = armor {
+            shop::draw_armor_sparkles(armor, body, time());
         }
     }
 
@@ -458,6 +525,7 @@ pub fn draw_play(
         gather::draw_usable_tag(text, game, view_x, camera_x, touch_mode, time());
     }
     if ended.is_none() && on_map {
+        boxes::draw_monster_shouts(text, game, view_x, camera_x);
         for (i, walker) in game.citizens.walkers.iter().enumerate() {
             let head = vec2(places::near_view(view_x, walker.rect.center().x), walker.rect.y - CITIZEN_BUBBLE_GAP);
             if !walker.is_walking() && effects.citizen_talks(i) && game.world.is_on_screen(head.x, r.center().x) {
@@ -466,34 +534,76 @@ pub fn draw_play(
         }
     }
 
-    // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다.
+    // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다. 흔들지 않는다.
+    set_shake(Vec2::ZERO);
     Letterbox::current().look_at(0.0);
-    effects.draw_on_screen(text);
-    gathered.draw_popup(text);
+    let tag_space = if ended.is_none() { gather::usable_tag_screen_rect(game, view_x, camera_x) } else { None };
     let owned = game.weapons.owned();
     // 끝난 화면은 큰 글이 맨 위에 온다 (BUG-024). 쓰러질 때는 움직임이 끝난 뒤에 숨긴다
-    if !game.is_cleared() && !ended.is_some_and(EndScreen::ready) {
+    let show_info = !game.is_cleared() && !ended.is_some_and(EndScreen::ready);
+    let time_scale = if fast_forward { DEV_FAST_FORWARD_SCALE } else { 1.0 };
+    let show_recipe = game.world.workbench().is_some() && !gathered.recipe_hint_showing();
+    // 큰 알림 글은 정보판(재료 줄·물건 줄까지) 아래에 쌓는다 (BUG-031)
+    let info_bottom = if show_info {
+        [
+            Some(hud_bottom(!owned.is_empty())),
+            gather::bag_bottom(text, &game.gathering.bag, show_recipe),
+            gathered.recipe_hint_bottom(),
+            shop::status_bottom(game, time_scale, !owned.is_empty()),
+        ]
+        .into_iter()
+        .flatten()
+        .fold(0.0, f32::max)
+    } else {
+        0.0
+    };
+    effects.draw_on_screen(text, info_bottom, tag_space);
+    gathered.draw_popup(text);
+    if show_info {
         draw_hud(text, &game.clock, game.wallet.coins(), fast_forward, game.place_name());
         draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
         draw_level(text, game.combat.level, game.combat.experience);
         draw_weapons(&assets.m6, &owned, game.weapons.held());
-        gather::draw_bag(text, &game.gathering.bag, game.world.workbench().is_some() && !gathered.recipe_hint_showing());
+        shop::draw_status(text, game, &assets.m6, time_scale, !owned.is_empty(), touch_mode);
+        gather::draw_bag(text, &game.gathering.bag, &assets.m6, show_recipe);
     }
     if touch_mode && ended.is_none() {
         text.centered("조이스틱을 위로 밀면 점프", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
     }
     if !touch_mode && ended.is_none() {
-        let hint = if owned.is_empty() { "화살표: 걷기  Space: 점프  Q: 공격  E: 캐기  Esc: 고르기" } else { "화살표: 걷기  Space: 점프  Q: 공격  W: 바꾸기  E: 캐기  Esc: 고르기" };
-        text.centered(hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
+        let owned_pockets: Vec<Pocket> = Pocket::ALL.into_iter().filter(|p| p.count(game) > 0).collect();
+        let hint = keyboard_hint(game.can_switch(), &owned_pockets);
+        // 글이 길어지면 화면 폭에 맞게 조금 줄인다
+        let size = (26.0 * (VIRTUAL_WIDTH - 24.0) / text.width(&hint, 26.0).max(1.0)).min(26.0);
+        text.centered(&hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, size, TEXT_COLOR);
     }
     if let Some(ended) = ended {
-        draw_end_panel(text, ended, &assets.m6.miss);
+        draw_end_panel(text, ended, texture);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_hint_shows_keys_only_for_what_you_have() {
+        use crate::logic::shop::Potion;
+        assert_eq!(keyboard_hint(false, &[]), "화살표: 걷기  Space: 점프  Q: 공격  E: 캐기  Esc: 멈춤");
+        assert_eq!(
+            keyboard_hint(true, &Pocket::ALL),
+            "화살표: 걷기  Space: 점프  Q: 공격  W: 바꾸기  E: 캐기  R·T: 포션  Y: 주사기총  G: 엔더열매  Esc: 멈춤"
+        );
+        let one = keyboard_hint(false, &[Pocket::Potion(Potion::Poison), Pocket::EnderFruit]);
+        assert!(one.contains("T: 포션") && one.contains("G: 엔더열매") && !one.contains("Y:") && !one.contains("W:"), "{one}");
+    }
+
+    #[test]
+    fn car_moves_only_while_riding_and_rolling() {
+        assert!(car_is_moving(true, 660.0) && car_is_moving(true, -660.0));
+        assert!(!car_is_moving(true, 0.0), "서 있으면 안 튄다");
+        assert!(!car_is_moving(false, 220.0), "차가 없으면 아니다");
+    }
 
     #[test]
     fn tapping_a_card_picks_that_character() {

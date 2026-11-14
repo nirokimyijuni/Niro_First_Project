@@ -351,7 +351,8 @@ pub const MATH_ADD_TWO_RANGE: (u32, u32) = (10, 99);
 /// 세 수 연속 더하기: 세 수 모두 이 범위 (예: 7 + 15 + 3). 부모님 말(2026-11-08): 20 이하, 가장 작은 수 1은 임시.
 pub const MATH_ADD_THREE_RANGE: (u32, u32) = (1, 20);
 /// 뺄셈 (US-074 표): 빼지는 수는 이 범위, 빼는 수는 `MATH_SUBTRACT_TAKE_MIN` ~ (빼지는 수 - 1). 답은 1 이상이다.
-pub const MATH_SUBTRACT_RANGE: (u32, u32) = (100, 999);
+/// D88 (부모님 결정 2026-11-14): 두 수 모두 두 자리(10~99)로만 뺀다 (예: 52 - 17). 빼는 수가 10 이상이고 답이 1 이상이라 빼지는 수는 11부터다.
+pub const MATH_SUBTRACT_RANGE: (u32, u32) = (11, 99);
 pub const MATH_SUBTRACT_TAKE_MIN: u32 = 10;
 /// 답은 0 ~ 이 값. 숫자판으로 넣는 자리 수는 `MATH_ANSWER_DIGITS`까지다.
 pub const MATH_ANSWER_MAX: u32 = 999;
@@ -435,11 +436,15 @@ pub const ORE_LUMP_WIDTH: f32 = 48.0;
 pub const ORE_LUMP_HEIGHT: f32 = 48.0;
 /// 임시-15 캔 덩이가 다시 생길 때까지 (초)
 pub const ORE_REGROW_SECONDS: f32 = 30.0;
-/// 임시-15 광석이 나올 확률. 넷을 더하면 1이어야 한다.
-pub const ORE_IRON_CHANCE: f32 = 0.70;
+/// 임시-15, D75 광석이 나올 확률. 일곱을 더하면 1이어야 한다.
+/// 희귀한 순서 다이아몬드 > 에메랄드 > 루비는 아이가 정했다 (US-079).
+pub const ORE_IRON_CHANCE: f32 = 0.60;
 pub const ORE_COPPER_CHANCE: f32 = 0.15;
 pub const ORE_SILVER_CHANCE: f32 = 0.10;
+pub const ORE_RUBY_CHANCE: f32 = 0.07;
 pub const ORE_GOLD_CHANCE: f32 = 0.05;
+pub const ORE_EMERALD_CHANCE: f32 = 0.025;
+pub const ORE_DIAMOND_CHANCE: f32 = 0.005;
 /// 임시-13 밤에도 동굴에 들어갈지. false면 18:00에 입구 앞으로 나온다.
 /// true면 밤에도 있을 수 있고, 몬스터는 입구 앞에서 기다린다.
 pub const CAVE_OPEN_AT_NIGHT: bool = false;
@@ -468,6 +473,13 @@ pub const IRON_NAME: &str = "철광석";
 pub const COPPER_NAME: &str = "동";
 pub const SILVER_NAME: &str = "은";
 pub const GOLD_NAME: &str = "금";
+/// D75 새 광물 이름 (US-079)
+pub const RUBY_NAME: &str = "루비";
+pub const EMERALD_NAME: &str = "에메랄드";
+pub const DIAMOND_NAME: &str = "다이아몬드";
+pub const RUBY_MINED_TEXT: &str = "루비를 캤어요!";
+pub const EMERALD_MINED_TEXT: &str = "에메랄드를 캤어요!";
+pub const DIAMOND_MINED_TEXT: &str = "영차! 다이아몬드를 캤어요!";
 /// US-065 캤을 때 문구
 pub const WOOD_MINED_TEXT: &str = "나무를 캤어요!";
 pub const IRON_MINED_TEXT: &str = "철광석을 캤어요!";
@@ -483,6 +495,193 @@ pub const MINE_BUTTON_TEXT: &str = "캐기";
 pub const CAVE_ENTER_BUTTON_TEXT: &str = "들어가기";
 pub const CAVE_EXIT_BUTTON_TEXT: &str = "나가기";
 pub const WORKBENCH_BUTTON_TEXT: &str = "만들기";
+
+// ---- M8 상점 (stories/backlog.md M8 맨 위 표, docs/02-plan.md D65·D71. 임시-N은 아이·부모가 언제든 바꿀 수 있다) ----
+
+/// 임시-22 집 문 가운데 x (집 그림 가운데). 크기는 집 그림의 문과 같다.
+pub const HOUSE_DOOR_X: f32 = 3555.0;
+pub const HOUSE_DOOR_WIDTH: f32 = 68.0;
+pub const HOUSE_DOOR_HEIGHT: f32 = 112.0;
+/// 임시-36 폰 버튼 글
+pub const HOUSE_DOOR_BUTTON_TEXT: &str = "들어가기";
+/// 임시-24 상점 화면이 열려 있는 동안 게임 속 시간이 모두 멈춘다
+pub const SHOP_PAUSES_GAME: bool = true;
+
+/// 가격 (코인, D65, 아이가 정함). 칼·도끼·총은 상점에서 팔지 않는다 (부모님 결정 2026-11-14).
+pub const HEALTH_POTION_PRICE: u32 = 100;
+pub const POISON_POTION_PRICE: u32 = 100;
+pub const SKATES_PRICE: u32 = 200;
+pub const RAINBOW_ARMOR_PRICE: u32 = 500;
+pub const DIAMOND_ARMOR_PRICE: u32 = 1000;
+
+/// 상점 물건 이름
+pub const HEALTH_POTION_NAME: &str = "체력 포션";
+pub const POISON_POTION_NAME: &str = "독약 포션";
+pub const SKATES_NAME: &str = "스케이트";
+pub const RAINBOW_ARMOR_NAME: &str = "무지개 갑옷";
+pub const DIAMOND_ARMOR_NAME: &str = "다이아몬드 갑옷";
+
+/// 상점 문구
+pub const SHOP_NOT_ENOUGH_COINS_TEXT: &str = "코인이 모자라요";
+pub const SHOP_ALREADY_HAVE_TEXT: &str = "가지고 있어요";
+pub const SHOP_NONE_TO_SELL_TEXT: &str = "팔 것이 없어요";
+/// 상점 화면 안내 글
+pub const SHOP_HINT_TEXT: &str = "물건을 눌러서 사요";
+/// 산 뒤, 판 뒤 잠깐 나오는 글
+pub const SHOP_BOUGHT_TEXT: &str = "샀어요!";
+pub const SHOP_SOLD_TEXT: &str = "팔았어요!";
+/// 06:00에 스케이트가 벗겨질 때 나오는 글 (`ShopEvent::SkatesOff`)
+pub const SKATES_OFF_TEXT: &str = "아침이 되어 스케이트를 벗었어요";
+/// 갑옷 시간이 끝날 때 나오는 글 (`ShopEvent::ArmorOff`)
+pub const ARMOR_OFF_TEXT: &str = "갑옷 시간이 끝났어요";
+
+/// 임시-25 스케이트를 신으면 걷는 빠르기가 이만큼 곱해진다. 산 뒤 처음 오는 06:00에 벗겨진다.
+pub const SKATES_SPEED_MULTIPLIER: f32 = 1.5;
+
+/// 임시-26 갑옷 무적 시간 (게임 속 초 = 빨리감기 배수만큼 빨리 준다, D71). 다이아몬드 12분, 무지개 72초.
+pub const DIAMOND_ARMOR_SECONDS: f32 = 12.0 * 60.0;
+pub const RAINBOW_ARMOR_SECONDS: f32 = 72.0;
+
+/// 임시-27 체력 포션이 채우는 체력
+pub const HEALTH_POTION_HEAL: u32 = 5;
+/// 임시-28 독약 포션: 주인공 몸 가운데에서 이 거리(픽셀) 안의 몬스터 몸 가운데에 뿌린다
+pub const POISON_RANGE: f32 = 200.0;
+/// 임시-28 독에 걸린 몬스터는 이 실제 초마다 체력이 `POISON_DAMAGE`씩 준다
+pub const POISON_TICK_SECONDS: f32 = 1.0;
+pub const POISON_DAMAGE: u32 = 1;
+
+/// 임시-38 광물 파는 값 (코인). 철광석은 팔지 않는다.
+pub const GOLD_SELL_PRICE: u32 = 1000;
+pub const SILVER_SELL_PRICE: u32 = 500;
+pub const COPPER_SELL_PRICE: u32 = 200;
+// 팔아서 코인이 `COIN_MAX`를 넘어도 막지 않는다. 코인은 `COIN_MAX`에서 멈춘다 (부모님 결정, US-072).
+
+// ---- M8 새 조합 네 가지 (D74~D80, stories/backlog.md US-078~US-083, 임시-39~48) ----
+
+/// 임시-39 조합판 표시. 곡괭이의 '나'·'철'(`CRAFT_WOOD_MARK`, `CRAFT_IRON_MARK`)과 함께 쓴다. ' '는 빈칸이다.
+pub const CRAFT_COPPER_MARK: char = '동';
+pub const CRAFT_SILVER_MARK: char = '은';
+pub const CRAFT_GOLD_MARK: char = '금';
+pub const CRAFT_RUBY_MARK: char = '루';
+pub const CRAFT_EMERALD_MARK: char = '에';
+pub const CRAFT_DIAMOND_MARK: char = '다';
+/// D76 자동차 (철광석 4, 나무 3). 모든 조합은 왼쪽 3칸이고 4번째 칸은 비운다 (D74).
+pub const CAR_SHAPE: [[char; CRAFT_GRID_WIDTH]; CRAFT_GRID_HEIGHT] = [
+    ['철', '나', '철', ' '],
+    [' ', '나', ' ', ' '],
+    ['철', '나', '철', ' '],
+];
+/// D77 엔더열매 (동 9)
+pub const ENDER_FRUIT_SHAPE: [[char; CRAFT_GRID_WIDTH]; CRAFT_GRID_HEIGHT] = [
+    ['동', '동', '동', ' '],
+    ['동', '동', '동', ' '],
+    ['동', '동', '동', ' '],
+];
+/// D78 다이아래더라이트 곡괭이 (철광석 2, 다이아몬드 1, 나무 3)
+pub const DIAMOND_PICKAXE_SHAPE: [[char; CRAFT_GRID_WIDTH]; CRAFT_GRID_HEIGHT] = [
+    ['철', '다', '철', ' '],
+    [' ', '나', ' ', ' '],
+    [' ', '나', '나', ' '],
+];
+/// D79 주사기총 (은 3, 나무 2, 에메랄드 3, 루비 1)
+pub const SYRINGE_GUN_SHAPE: [[char; CRAFT_GRID_WIDTH]; CRAFT_GRID_HEIGHT] = [
+    ['은', '나', '나', ' '],
+    ['은', '에', '에', ' '],
+    ['은', '에', '루', ' '],
+];
+
+/// 만들 것 이름 (아이가 지은 이름 그대로)
+pub const PICKAXE_NAME: &str = "곡괭이";
+pub const CAR_NAME: &str = "자동차";
+pub const ENDER_FRUIT_NAME: &str = "엔더열매";
+pub const DIAMOND_PICKAXE_NAME: &str = "다이아래더라이트 곡괭이";
+pub const SYRINGE_GUN_NAME: &str = "주사기총";
+/// 만들었을 때 문구. 자동차는 만들면 바로 타서 `CAR_ON_TEXT`가 나온다.
+pub const PICKAXE_CRAFTED_TEXT: &str = "곡괭이를 만들었어요!";
+pub const ENDER_FRUIT_CRAFTED_TEXT: &str = "엔더열매를 만들었어요!";
+pub const DIAMOND_PICKAXE_CRAFTED_TEXT: &str = "다이아래더라이트 곡괭이를 만들었어요!";
+pub const SYRINGE_GUN_CRAFTED_TEXT: &str = "주사기총을 만들었어요!";
+/// 재료가 모자랄 때. {모자란 것}은 "에메랄드가 2개", 여러 개면 "철광석이 1개, 나무가 2개"가 된다.
+pub const CRAFT_NEED_MORE_TEXT: &str = "{모자란 것} 더 필요해요";
+/// 이미 가진 것 (결과 칸에 나오지 않는다)
+pub const CRAFT_ALREADY_HAVE_TEXT: &str = "벌써 가지고 있어요";
+/// 임시-39 순서 안내
+pub const CRAFT_STEPS_TEXT: &str = "① 만들 것을 골라요 → ② 재료를 골라요 → ③ 흐린 칸을 눌러 채워요 → ④ 결과를 눌러 가져가요";
+
+/// 임시-41 자동차를 타면 걷는 빠르기가 이만큼 곱해진다 (부모님: 3배, 220 → 660). 스케이트와 겹쳐 곱하지 않는다.
+pub const CAR_SPEED_MULTIPLIER: f32 = 3.0;
+pub const CAR_ON_TEXT: &str = "자동차를 탔어요! 슝!";
+pub const CAR_OFF_TEXT: &str = "아침이 와서 자동차에서 내렸어요";
+/// 자동차를 타고 움직이는 동안 떠오르는 글 (아이: 자동차 소리).
+pub const CAR_VROOM_TEXT: &str = "부릉!";
+
+/// Esc(PC)·멈춤 버튼(폰)으로 여는 멈춤 창 글 (부모님 요청).
+pub const PAUSE_TITLE_TEXT: &str = "잠깐 멈췄어요";
+pub const PAUSE_RESUME_TEXT: &str = "이어서 하기";
+pub const PAUSE_QUIT_TEXT: &str = "처음으로";
+pub const PAUSE_QUIT_SUB_TEXT: &str = "(캐릭터 고르기)";
+
+/// 임시-45 다이아래더라이트 곡괭이로 하나 캐는 시간 (초, 실제 시간)
+pub const MINE_SECONDS_DIAMOND_PICKAXE: f32 = 0.5;
+
+/// 임시-42 바다에 쿵 하는 자리: 긴 맵 해변 모래밭, 몸 가운데 x가 이 안이면 된다.
+pub const SLAM_BEACH_LEFT: f32 = 40.0;
+pub const SLAM_BEACH_RIGHT: f32 = 780.0;
+/// 임시-42 폰 쿵 버튼 글. 캐기 버튼 자리에 나온다.
+pub const SLAM_BUTTON_TEXT: &str = "쿵!";
+pub const SLAM_TEXT: &str = "쿵! 몬스터들을 다 없애버려!";
+/// 임시-44, 임시-45 쿵 하면 얻는 다이아몬드 (몬스터가 없어도 얻는다)
+pub const ENDER_FRUIT_SLAM_DIAMONDS: u32 = 10;
+pub const DIAMOND_PICKAXE_SLAM_DIAMONDS: u32 = 1;
+pub const ENDER_FRUIT_SLAM_DIAMONDS_TEXT: &str = "다이아몬드를 10개 얻었어요!";
+pub const DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT: &str = "다이아몬드를 1개 얻었어요!";
+pub const DIAMOND_PICKAXE_GONE_TEXT: &str = "곡괭이가 쿵 하고 사라졌어요";
+/// 임시-44 엔더열매 먹기
+pub const ENDER_FRUIT_EATEN_TEXT: &str = "엔더열매를 먹었어요! 해변 바닷가에서 쿵 해 봐요";
+pub const ENDER_FRUIT_ALREADY_EATEN_TEXT: &str = "벌써 먹었어요";
+
+/// 임시-47, D80 한 번 쓸 때 점수의 "해치운 몬스터 수"에 더하는 수. 쓰러진 몬스터가 0마리면 더하지 않는다.
+pub const ENDER_FRUIT_SLAM_SCORE: u32 = 700;
+pub const DIAMOND_PICKAXE_SLAM_SCORE: u32 = 600;
+pub const SYRINGE_GUN_SCORE: u32 = 500;
+
+/// D87 상자 부수기 (US-089). 도끼를 들었을 때만 공격으로 부순다. 처음 값은 임시다.
+/// [임시-63] 이만큼 치면 부서진다 (아이 확정: 3번)
+pub const BOX_HITS_TO_BREAK: u32 = 3;
+/// [임시-65] [임시-69] 부서질 때 나오는 것: 아이템 30%, 몬스터 15%, 나머지는 아무것도 없음 (부모님 확정)
+pub const BOX_ITEM_CHANCE: f32 = 0.30;
+pub const BOX_MONSTER_CHANCE: f32 = 0.15;
+/// [임시-65] 아이템 안의 비율 (감독 임시): 총 10%, 아주 센 것(다이아몬드 갑옷, 다이아래더라이트 곡괭이, 엔더열매, 자동차) 각 1%.
+/// 나머지 7개(칼, 도끼, 체력 포션, 독약 포션, 스케이트, 무지개 갑옷, 주사기총)가 남은 몫을 똑같이 나눈다.
+pub const BOX_ITEM_GUN_SHARE: f32 = 0.10;
+pub const BOX_ITEM_VERY_STRONG_SHARE: f32 = 0.01;
+/// [임시-69] 몬스터가 나올 때 스켈레톤일 확률 (나머지는 좀비, 감독 임시 반반)
+pub const BOX_SKELETON_CHANCE: f32 = 0.5;
+/// [임시-69] 상자에서 나온 몬스터가 가만히 있는 시간 (실제 초). 이동안 공격하지 않는다.
+pub const BOX_MONSTER_WAIT_SECONDS: f32 = 1.0;
+/// [임시-65] 깜짝 아이템 크기, 떨어지는 빠르기, 땅에 닿은 뒤 사라질 때까지 (실제 초)
+pub const BOX_ITEM_SIZE: f32 = 32.0;
+pub const BOX_ITEM_FALL_SPEED: f32 = 300.0;
+pub const BOX_ITEM_GROUND_SECONDS: f32 = 15.0;
+/// [임시-68] 도끼가 아닌 것으로 상자를 처음 쳤을 때 한 번 나오는 안내
+pub const BOX_NEED_AXE_TEXT: &str = "도끼로 부술 수 있어요";
+/// 아주 센 것이 나오면 캐릭터 머리 위에 (아이)
+pub const BOX_WOW_TEXT: &str = "와우!";
+/// [임시-69] 상자에서 몬스터가 나오면 몬스터 머리 위에 (아이)
+pub const BOX_MONSTER_TEXT: &str = "공격!";
+/// [임시-65] 깜짝 아이템을 주웠을 때 ("○○을 얻었어요!")
+pub const BOX_GOT_SWORD_TEXT: &str = "칼을 얻었어요!";
+pub const BOX_GOT_AXE_TEXT: &str = "도끼를 얻었어요!";
+pub const BOX_GOT_GUN_TEXT: &str = "총을 얻었어요!";
+pub const BOX_GOT_HEALTH_POTION_TEXT: &str = "체력 포션을 얻었어요!";
+pub const BOX_GOT_POISON_POTION_TEXT: &str = "독약 포션을 얻었어요!";
+pub const BOX_GOT_SKATES_TEXT: &str = "스케이트를 얻었어요!";
+pub const BOX_GOT_RAINBOW_ARMOR_TEXT: &str = "무지개 갑옷을 얻었어요!";
+pub const BOX_GOT_DIAMOND_ARMOR_TEXT: &str = "다이아몬드 갑옷을 얻었어요!";
+pub const BOX_GOT_SYRINGE_GUN_TEXT: &str = "주사기총을 얻었어요!";
+pub const BOX_GOT_ENDER_FRUIT_TEXT: &str = "엔더열매를 얻었어요!";
+pub const BOX_GOT_CAR_TEXT: &str = "자동차를 얻었어요!";
+pub const BOX_GOT_DIAMOND_PICKAXE_TEXT: &str = "다이아래더라이트 곡괭이를 얻었어요!";
 
 #[cfg(test)]
 mod tests {

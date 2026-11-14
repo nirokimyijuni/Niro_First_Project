@@ -44,7 +44,16 @@ jobs:
         timeout-minutes: 15
         run: cargo test
 
+      # 글꼴 줄이기(tools/font-subset)에 쓴다. 부모 결정 2026-11-14.
+      - name: 파이썬 + fonttools 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install fonttools
+
       - name: 웹 빌드 (dist/)
+        env:
+          PYTHON: python
         run: bash deploy/build.sh
 
       # 15MiB는 시작값이다. 첫 다운로드가 커지면 낮춘다.

@@ -3,14 +3,15 @@
 //! `Combat` 하나가 체력과 좀비·스켈레톤을 함께 들고 있다. 결과는 `CombatEvent`로 돌려주고,
 //! 화면(로건)이 그걸 보고 "쓰러졌어요", "펑!" 같은 표시와 소리를 낸다.
 
+use super::boxes::BoxMonster;
 use super::monster::{pick_left_side, spawn_x_on_side, SeededRandom, Zombie, Zombies};
 use super::player::Facing;
 use super::skeleton::{ProjectileKind, Skeleton, SkeletonStage, Skeletons};
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
-    CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
+    BOX_MONSTER_WAIT_SECONDS, CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
     MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
-    PLAYER_ATTACK_RANGE, PLAYER_HP_PER_LEVEL, PLAYER_HURT_INVINCIBLE_SECONDS, PLAYER_START_HP,
+    PLAYER_ATTACK_RANGE, PLAYER_HP_PER_LEVEL, POISON_DAMAGE, POISON_RANGE, PLAYER_HURT_INVINCIBLE_SECONDS, PLAYER_START_HP, SCREEN_WIDTH,
     SKELETON_SPAWN_CHANCE, SKELETON_WIDTH, ZOMBIE_ATTACK, ZOMBIE_FLOAT_CHANCE, ZOMBIE_MAX_ON_SCREEN,
     ZOMBIE_SPAWN_SECONDS, ZOMBIE_WIDTH,
 };
@@ -58,11 +59,28 @@ pub struct PlayerHealth {
     hp: u32,
     max_hp: u32,
     invincible_seconds_left: f32,
+    /// 갑옷을 입었으면 true (US-070). 이 동안 무엇에 맞아도 체력이 줄지 않는다. `Game`이 상점 갑옷을 보고 채운다.
+    armored: bool,
 }
 
 impl PlayerHealth {
     pub fn new() -> PlayerHealth {
-        PlayerHealth { hp: PLAYER_START_HP, max_hp: PLAYER_START_HP, invincible_seconds_left: 0.0 }
+        PlayerHealth { hp: PLAYER_START_HP, max_hp: PLAYER_START_HP, invincible_seconds_left: 0.0, armored: false }
+    }
+
+    /// 갑옷을 입거나 벗는다.
+    pub fn set_armored(&mut self, on: bool) {
+        self.armored = on;
+    }
+
+    /// 체력 포션 (임시-27): `amount`만큼 차고 최대 체력을 넘지 않는다. 돌려주는 값: 실제로 찬 체력.
+    pub fn heal(&mut self, amount: u32) -> u32 {
+        if self.is_down() {
+            return 0;
+        }
+        let healed = amount.min(self.max_hp - self.hp);
+        self.hp += healed;
+        healed
     }
 
     pub fn hp(&self) -> u32 {
@@ -83,7 +101,7 @@ impl PlayerHealth {
     }
 
     fn can_be_hit(&self) -> bool {
-        !self.is_invincible() && !self.is_down()
+        !self.is_invincible() && !self.is_down() && !self.armored
     }
 
     /// 수학 문제를 틀렸을 때: `amount`만큼 준다. 0이면 쓰러진다. 무적 시간은 생기지 않는다 (D67, 부모님 답).
@@ -196,15 +214,17 @@ impl Combat {
         while time_left > 0.0 && !self.health.is_down() {
             let step = time_left.min(PHYSICS_STEP_SECONDS);
             self.health.invincible_seconds_left = (self.health.invincible_seconds_left - step).max(0.0);
+            self.hurt_poisoned_monsters(step, &mut events);
+            // 밤에만 화면 밖에서 나온다. 낮에는 상자에서 나온 몬스터만 있다 (임시-69: 낮에도 나온다).
             if is_night {
                 self.spawn_monster_when_ready(step, player_rect, world, &mut events);
-                self.zombies.step(step, player_rect, world, &mut events);
-                let defeated = self.skeletons.step(step, player_rect, world, &mut events);
-                self.gain_experience(defeated, &mut events);
-                self.defeat_skeletons_touching(player_rect, &mut events);
-                self.get_hurt_by_touching_zombie(player_rect, &mut events);
-                self.get_hurt_by_skeletons(player_rect, &mut events);
             }
+            self.zombies.step(step, player_rect, world, &mut events);
+            let defeated = self.skeletons.step(step, player_rect, world, &mut events);
+            self.gain_experience(defeated, &mut events);
+            self.defeat_skeletons_touching(player_rect, &mut events);
+            self.get_hurt_by_touching_zombie(player_rect, &mut events);
+            self.get_hurt_by_skeletons(player_rect, &mut events);
             time_left -= step;
         }
         self.forget_far_monsters(player_rect.center().x);
@@ -283,6 +303,84 @@ impl Combat {
         events
     }
 
+    /// 독약 포션 (임시-28): 몸 가운데가 `at`에서 `POISON_RANGE` 안인 몬스터가 독에 걸린다. 이음매 너머도 닿는다.
+    /// 시민과 미스는 몬스터가 아니라서 아무 일이 없다. 돌려주는 값: 범위 안 몬스터 수 (0이면 아무 일도 없다).
+    pub fn spray_poison(&mut self, at: Vec2) -> u32 {
+        let is_near = |body: Rect| nearest_copy(body, at.x).center().distance(at) <= POISON_RANGE;
+        let mut count = 0;
+        for zombie in self.zombies.list.iter_mut().filter(|z| is_near(z.rect())) {
+            zombie.poison.start();
+            count += 1;
+        }
+        for skeleton in self.skeletons.list.iter_mut().filter(|s| is_near(s.rect())) {
+            skeleton.poison.start();
+            count += 1;
+        }
+        count
+    }
+
+    /// 독에 걸린 몬스터는 `POISON_TICK_SECONDS`마다 체력이 `POISON_DAMAGE` 준다. 쓰러지면 경험치를 준다.
+    fn hurt_poisoned_monsters(&mut self, step: f32, events: &mut Vec<CombatEvent>) {
+        let mut defeated = 0;
+        self.zombies.list.retain_mut(|zombie| {
+            if !zombie.poison.tick(step) {
+                return true;
+            }
+            zombie.take_hit(POISON_DAMAGE);
+            let at = zombie.rect().center();
+            if zombie.hp == 0 {
+                events.push(CombatEvent::ZombieDefeated { at });
+                defeated += 1;
+                return false;
+            }
+            events.push(CombatEvent::ZombieHit { at, hp_left: zombie.hp });
+            true
+        });
+        self.skeletons.list.retain_mut(|skeleton| {
+            if !skeleton.poison.tick(step) {
+                return true;
+            }
+            events.push(skeleton.take_hit(POISON_DAMAGE));
+            if skeleton.hp == 0 {
+                defeated += 1;
+            }
+            skeleton.hp > 0
+        });
+        self.gain_experience(defeated, events);
+    }
+
+    /// 주사기총·쿵 (임시-43): 몸이 화면(`screen_left` ~ `screen_left + SCREEN_WIDTH`)에 조금이라도 보이는
+    /// 좀비와 스켈레톤이 모두 쓰러진다. 이음매 너머도 화면에 보이면 넣는다. 상자·벽에 막히지 않는다.
+    /// 경험치를 주지 않고 "해치운 몬스터 수"에도 세지 않는다 (D80). 시민, 미스, 날아가는 화살·총알은 그대로다.
+    pub fn sweep_monsters_on_screen(&mut self, screen_left: f32) -> Vec<CombatEvent> {
+        let mut events = Vec::new();
+        let screen_middle = screen_left + SCREEN_WIDTH / 2.0;
+        let on_screen = |body: Rect| {
+            let body = nearest_copy(body, screen_middle);
+            body.x + body.w > screen_left && body.x < screen_left + SCREEN_WIDTH
+        };
+        self.zombies.list.retain(|zombie| {
+            let hit = on_screen(zombie.rect());
+            if hit {
+                events.push(CombatEvent::ZombieDefeated { at: zombie.rect().center() });
+            }
+            !hit
+        });
+        self.skeletons.list.retain(|skeleton| {
+            let hit = on_screen(skeleton.rect());
+            if hit {
+                events.push(CombatEvent::SkeletonDefeated { at: skeleton.rect().center() });
+            }
+            !hit
+        });
+        events
+    }
+
+    /// 한꺼번에 쓰러뜨린 점수 (D80): "해치운 몬스터 수"에 `points`를 한 번 더한다. 경험치·레벨은 그대로다.
+    pub fn add_sweep_score(&mut self, points: u32) {
+        self.monsters_defeated += points;
+    }
+
     /// 레벨이 1 오른다: 최대 체력 +5 (D2), 몬스터도 같이 (D3), 체력은 바로 다 찬다 (아이가 정함).
     /// 쓰러진 뒤에는 오르지 않는다: 체력이 차면 일어나 버린다.
     pub fn level_up(&mut self) {
@@ -331,6 +429,30 @@ impl Combat {
             }
             let from_left = first_from_left == (turn % 2 == 0);
             taken.extend(self.spawn_one_monster(from_left, player_rect, world, &taken, events));
+        }
+    }
+
+    /// 부서진 상자에서 몬스터 하나가 나온다 (임시-69). 가운데가 `center_x`인 땅 위에 서서
+    /// `BOX_MONSTER_WAIT_SECONDS`초 가만히 있다가 움직인다. 보통 몬스터와 같아서 쓰러지면 경험치를 준다.
+    /// 몬스터가 모두 `MONSTER_MAX_ON_SCREEN`마리면 나오지 않고 None이다. 좀비가 꽉 찼으면 좀비 대신 스켈레톤이 나온다.
+    /// 스켈레톤은 지금 레벨의 단계로 나온다.
+    pub fn spawn_from_box(&mut self, center_x: f32, ground_y: f32, wanted: BoxMonster) -> Option<CombatEvent> {
+        if self.is_map_full() || self.health.is_down() {
+            return None;
+        }
+        let zombies_full = self.zombies.list.len() >= ZOMBIE_MAX_ON_SCREEN;
+        if wanted == BoxMonster::Skeleton || zombies_full {
+            let stage = SkeletonStage::for_level(self.level);
+            let skeleton = Skeleton::waiting(center_x - SKELETON_WIDTH / 2.0, ground_y, stage, BOX_MONSTER_WAIT_SECONDS);
+            let at = skeleton.rect().center();
+            self.skeletons.list.push(skeleton);
+            Some(CombatEvent::SkeletonAppeared { at, stage })
+        } else {
+            let will_float = self.random.next_unit() < ZOMBIE_FLOAT_CHANCE;
+            let zombie = Zombie::waiting(center_x - ZOMBIE_WIDTH / 2.0, ground_y, will_float, BOX_MONSTER_WAIT_SECONDS);
+            let at = zombie.rect().center();
+            self.zombies.list.push(zombie);
+            Some(CombatEvent::ZombieAppeared { at })
         }
     }
 

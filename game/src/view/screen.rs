@@ -8,6 +8,16 @@ pub const VIRTUAL_HEIGHT: f32 = 540.0;
 /// 화면 바깥 띠 색
 const LETTERBOX_COLOR: Color = Color::new(0.16, 0.20, 0.28, 1.0);
 
+thread_local! {
+    /// 화면 흔들기 (쿵, US-081/082): `look_at`이 카메라를 이만큼 옮긴다. 플레이 장면을 그리는 동안만 0이 아니다.
+    static SHAKE: std::cell::Cell<Vec2> = const { std::cell::Cell::new(Vec2::ZERO) };
+}
+
+/// 이제부터 `look_at`이 거는 카메라를 `offset`만큼 흔든다. 터치 버튼·정보판을 그리기 전에 `Vec2::ZERO`로 되돌린다.
+pub fn set_shake(offset: Vec2) {
+    SHAKE.with(|s| s.set(offset));
+}
+
 /// 이번 프레임의 화면 맞춤 정보 (창 좌표 = 논리 픽셀, `screen_width()`와 같은 단위).
 #[derive(Clone, Copy)]
 pub struct Letterbox {
@@ -54,7 +64,7 @@ impl Letterbox {
             (VIRTUAL_HEIGHT * self.scale * dpi).round() as i32,
         );
         set_camera(&Camera2D {
-            target: vec2(camera_x + VIRTUAL_WIDTH / 2.0, VIRTUAL_HEIGHT / 2.0),
+            target: vec2(camera_x + VIRTUAL_WIDTH / 2.0, VIRTUAL_HEIGHT / 2.0) - SHAKE.with(|s| s.get()),
             // y가 아래로 커지게 (화면 좌표와 같은 방향)
             zoom: vec2(2.0 / VIRTUAL_WIDTH, 2.0 / VIRTUAL_HEIGHT),
             viewport: Some(viewport),

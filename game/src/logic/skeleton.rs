@@ -6,7 +6,7 @@
 //! - 플레이어 체력과 경험치는 `combat.rs`가 맡는다.
 
 use super::combat::CombatEvent;
-use super::monster::walk_x;
+use super::monster::{walk_x, Poison};
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     ARROW_INTERVAL_SECONDS, ARROW_SPEED, ARROW_WIDTH, BULLET_INTERVAL_SECONDS, BULLET_SPEED, BULLET_WIDTH,
@@ -78,9 +78,23 @@ pub struct Skeleton {
     fall_speed: f32,
     seconds_to_next_shot: f32,
     hit_flash_seconds_left: f32,
+    /// 독약 포션의 독 (US-071).
+    pub poison: Poison,
+    /// 상자에서 나와 가만히 있을 남은 초 (임시-69). 이동안 걷지도, 쏘지도, 손으로 때리지도 않는다.
+    wait_seconds_left: f32,
 }
 
 impl Skeleton {
+    /// 상자에서 막 나온 스켈레톤: `wait_seconds`초 가만히 있다가 움직인다.
+    pub fn waiting(x: f32, ground_y: f32, stage: SkeletonStage, wait_seconds: f32) -> Skeleton {
+        Skeleton { wait_seconds_left: wait_seconds, ..Skeleton::new(x, ground_y, stage) }
+    }
+
+    /// 상자에서 나와 가만히 있는 중이면 true. 화면은 이동안 머리 위에 "공격!"을 보여 줄 수 있다.
+    pub fn is_waiting(&self) -> bool {
+        self.wait_seconds_left > 0.0
+    }
+
     /// 땅 위 `x`에 서 있는 스켈레톤. 첫 공격은 쏘는 간격만큼 지나서 나온다.
     pub fn new(x: f32, ground_y: f32, stage: SkeletonStage) -> Skeleton {
         Skeleton {
@@ -91,6 +105,8 @@ impl Skeleton {
             fall_speed: 0.0,
             seconds_to_next_shot: stage.weapon().map_or(0.0, ProjectileKind::interval),
             hit_flash_seconds_left: 0.0,
+            poison: Poison::default(),
+            wait_seconds_left: 0.0,
         }
     }
 
@@ -118,6 +134,11 @@ impl Skeleton {
 
     fn step(&mut self, step: f32, player_x: f32, world: &World, shots: &mut Vec<Projectile>, events: &mut Vec<CombatEvent>) {
         self.hit_flash_seconds_left = (self.hit_flash_seconds_left - step).max(0.0);
+        if self.is_waiting() {
+            self.wait_seconds_left = (self.wait_seconds_left - step).max(0.0);
+            self.state = SkeletonState::Standing;
+            return;
+        }
         if self.state == SkeletonState::Dodging {
             self.jump(step, world);
             return;
@@ -314,14 +335,14 @@ impl Skeletons {
         self.list.iter().find(|s| {
             let body = s.rect();
             let reach = Rect::new(body.x - SKELETON_HAND_RANGE, body.y, body.w + SKELETON_HAND_RANGE * 2.0, body.h);
-            s.stage == SkeletonStage::Half && really_overlaps(reach, player_rect)
+            s.stage == SkeletonStage::Half && !s.is_waiting() && really_overlaps(reach, player_rect)
         })
     }
 
     fn dodge_bounced_attacks(&mut self, events: &mut Vec<CombatEvent>) {
         for skeleton in &mut self.list {
             let body = skeleton.rect();
-            if skeleton.state != SkeletonState::Dodging && self.projectiles.iter().any(|shot| shot.is_about_to_hit(body)) {
+            if skeleton.state != SkeletonState::Dodging && !skeleton.is_waiting() && self.projectiles.iter().any(|shot| shot.is_about_to_hit(body)) {
                 skeleton.start_dodge();
                 events.push(CombatEvent::SkeletonDodged { at: body.center() });
             }

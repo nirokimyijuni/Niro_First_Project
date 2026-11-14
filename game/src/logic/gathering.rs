@@ -6,10 +6,12 @@ use super::combat::is_reached_on_either_side;
 use super::monster::SeededRandom;
 use super::world::World;
 use crate::config::{
-    COPPER_MINED_TEXT, COPPER_NAME, GOLD_MINED_TEXT, GOLD_NAME, IRON_MINED_TEXT, IRON_NAME, MINE_REACH, MINE_SECONDS_BARE_HAND,
-    MINE_SECONDS_PICKAXE, ORE_COPPER_CHANCE, ORE_IRON_CHANCE, ORE_LUMP_HEIGHT, ORE_LUMP_WIDTH, ORE_LUMP_XS, ORE_REGROW_SECONDS,
-    ORE_SILVER_CHANCE, SILVER_MINED_TEXT, SILVER_NAME, TREE_REGROW_SECONDS, WOOD_MINED_TEXT,
-    WOOD_NAME,
+    COPPER_MINED_TEXT, COPPER_NAME, CRAFT_COPPER_MARK, CRAFT_DIAMOND_MARK, CRAFT_EMERALD_MARK, CRAFT_GOLD_MARK, CRAFT_IRON_MARK,
+    CRAFT_RUBY_MARK, CRAFT_SILVER_MARK, CRAFT_WOOD_MARK, DIAMOND_MINED_TEXT, DIAMOND_NAME, EMERALD_MINED_TEXT, EMERALD_NAME,
+    GOLD_MINED_TEXT, GOLD_NAME, IRON_MINED_TEXT, IRON_NAME, MINE_REACH, MINE_SECONDS_BARE_HAND, MINE_SECONDS_DIAMOND_PICKAXE,
+    MINE_SECONDS_PICKAXE, ORE_COPPER_CHANCE, ORE_DIAMOND_CHANCE, ORE_EMERALD_CHANCE, ORE_GOLD_CHANCE, ORE_IRON_CHANCE, ORE_LUMP_HEIGHT, ORE_LUMP_WIDTH,
+    ORE_LUMP_XS, ORE_REGROW_SECONDS, ORE_RUBY_CHANCE, ORE_SILVER_CHANCE, RUBY_MINED_TEXT, RUBY_NAME, SILVER_MINED_TEXT, SILVER_NAME,
+    TREE_REGROW_SECONDS, WOOD_MINED_TEXT, WOOD_NAME,
 };
 use macroquad::math::{Rect, Vec2};
 
@@ -21,11 +23,24 @@ pub enum Material {
     Copper,
     Silver,
     Gold,
+    /// D75 새 광물 (US-079)
+    Ruby,
+    Emerald,
+    Diamond,
 }
 
 impl Material {
     /// 정보판에 보여 주는 순서.
-    pub const ALL: [Material; 5] = [Material::Wood, Material::Iron, Material::Copper, Material::Silver, Material::Gold];
+    pub const ALL: [Material; 8] = [
+        Material::Wood,
+        Material::Iron,
+        Material::Copper,
+        Material::Silver,
+        Material::Gold,
+        Material::Ruby,
+        Material::Emerald,
+        Material::Diamond,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -34,10 +49,13 @@ impl Material {
             Material::Copper => COPPER_NAME,
             Material::Silver => SILVER_NAME,
             Material::Gold => GOLD_NAME,
+            Material::Ruby => RUBY_NAME,
+            Material::Emerald => EMERALD_NAME,
+            Material::Diamond => DIAMOND_NAME,
         }
     }
 
-    /// 다 캤을 때 팝업 문구 (US-065).
+    /// 다 캤을 때 팝업 문구 (US-065, US-079).
     pub fn mined_text(self) -> &'static str {
         match self {
             Material::Wood => WOOD_MINED_TEXT,
@@ -45,28 +63,75 @@ impl Material {
             Material::Copper => COPPER_MINED_TEXT,
             Material::Silver => SILVER_MINED_TEXT,
             Material::Gold => GOLD_MINED_TEXT,
+            Material::Ruby => RUBY_MINED_TEXT,
+            Material::Emerald => EMERALD_MINED_TEXT,
+            Material::Diamond => DIAMOND_MINED_TEXT,
         }
     }
-}
 
-/// `roll`(0 이상 1 미만)로 광석을 고른다 (임시-15). 남는 몫은 금이다.
-fn ore_for_roll(roll: f32) -> Material {
-    if roll < ORE_IRON_CHANCE {
-        Material::Iron
-    } else if roll < ORE_IRON_CHANCE + ORE_COPPER_CHANCE {
-        Material::Copper
-    } else if roll < ORE_IRON_CHANCE + ORE_COPPER_CHANCE + ORE_SILVER_CHANCE {
-        Material::Silver
-    } else {
-        Material::Gold
+    /// 귀한 광물이면 true: 팝업에 반짝이는 표시가 더 나온다 (은, 금, 루비, 에메랄드, 다이아몬드).
+    pub fn is_precious(self) -> bool {
+        matches!(self, Material::Silver | Material::Gold | Material::Ruby | Material::Emerald | Material::Diamond)
+    }
+
+    /// 조합 모양(`config`의 `..._SHAPE`)에 쓰는 표시 글자.
+    pub fn craft_mark(self) -> char {
+        match self {
+            Material::Wood => CRAFT_WOOD_MARK,
+            Material::Iron => CRAFT_IRON_MARK,
+            Material::Copper => CRAFT_COPPER_MARK,
+            Material::Silver => CRAFT_SILVER_MARK,
+            Material::Gold => CRAFT_GOLD_MARK,
+            Material::Ruby => CRAFT_RUBY_MARK,
+            Material::Emerald => CRAFT_EMERALD_MARK,
+            Material::Diamond => CRAFT_DIAMOND_MARK,
+        }
+    }
+
+    /// 조합 모양의 표시 글자가 가리키는 재료. 빈칸(' ')이나 모르는 글자는 None이다.
+    pub fn from_craft_mark(mark: char) -> Option<Material> {
+        Material::ALL.into_iter().find(|material| material.craft_mark() == mark)
     }
 }
 
-/// 가진 재료와 곡괭이. 새 게임을 하면 새로 만든다 (저장은 M9).
+/// 광석이 나오는 차례와 확률 (임시-15, D75). 흔한 것부터 적었다.
+const ORE_CHANCES: [(Material, f32); 7] = [
+    (Material::Iron, ORE_IRON_CHANCE),
+    (Material::Copper, ORE_COPPER_CHANCE),
+    (Material::Silver, ORE_SILVER_CHANCE),
+    (Material::Ruby, ORE_RUBY_CHANCE),
+    (Material::Gold, ORE_GOLD_CHANCE),
+    (Material::Emerald, ORE_EMERALD_CHANCE),
+    (Material::Diamond, ORE_DIAMOND_CHANCE),
+];
+
+/// `roll`(0 이상 1 미만)로 광석을 고른다 (임시-15, D75). 확률을 다 더해도 남는 몫은 다이아몬드다.
+pub fn ore_for_roll(roll: f32) -> Material {
+    let mut sum = 0.0;
+    for (material, chance) in ORE_CHANCES {
+        sum += chance;
+        if roll < sum {
+            return material;
+        }
+    }
+    Material::Diamond
+}
+
+/// 가진 재료, 곡괭이, 제작대로 만든 새 물건 (US-078~083). 새 게임을 하면 새로 만든다 (저장은 M9).
 #[derive(Debug, Clone, Default)]
 pub struct Bag {
     counts: [u32; Material::ALL.len()],
     pub has_pickaxe: bool,
+    /// 다이아래더라이트 곡괭이 (US-082). 한 번에 하나, 쿵을 쓰면 없어진다.
+    pub has_diamond_pickaxe: bool,
+    /// 주사기총 (US-083). 한 번에 하나.
+    pub has_syringe_gun: bool,
+    /// 엔더열매 개수 (US-081). 여러 개 가질 수 있다.
+    pub ender_fruits: u32,
+    /// 엔더열매를 먹어서 생긴 힘. 쿵을 쓸 때까지 남는다 (임시-44).
+    pub has_ender_power: bool,
+    /// 자동차를 타고 있으면 true (US-080). 탄 뒤 처음 오는 06:00에 내린다.
+    pub riding_car: bool,
 }
 
 impl Bag {
@@ -83,9 +148,11 @@ impl Bag {
         self.counts[material as usize] = self.counts[material as usize].saturating_sub(1);
     }
 
-    /// 하나 캐는 데 걸리는 시간 (D5).
+    /// 하나 캐는 데 걸리는 시간 (D5, 임시-45): 가진 것 중 가장 빠른 것으로 캔다.
     pub fn mine_seconds(&self) -> f32 {
-        if self.has_pickaxe {
+        if self.has_diamond_pickaxe {
+            MINE_SECONDS_DIAMOND_PICKAXE
+        } else if self.has_pickaxe {
             MINE_SECONDS_PICKAXE
         } else {
             MINE_SECONDS_BARE_HAND

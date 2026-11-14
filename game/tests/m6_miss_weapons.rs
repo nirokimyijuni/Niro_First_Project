@@ -384,7 +384,7 @@ fn picking_up_a_weapon_you_have_only_removes_it() {
     let mut g = quiet_game(4);
     give(&mut g, &[Weapon::Axe]);
     assert_eq!(g.weapons.held(), Weapon::Axe);
-    g.weapons.switch();
+    g.switch_weapon();
     assert_eq!(g.weapons.held(), Weapon::Hands);
     drop_weapon(&mut g, Weapon::Axe, 300.0);
     g.player.pos = g.weapons.dropped[0].rect.point();

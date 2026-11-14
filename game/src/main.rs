@@ -1,5 +1,5 @@
 //! 미스 찾기 — 게임 루프: 입력 → logic 업데이트 → 이벤트 처리 → 그리기.
-//! 화면 흐름: 타이틀 → 캐릭터 고르기 → 플레이 (Esc를 누르면 다시 고르기, 다시 고르면 새 게임).
+//! 화면 흐름: 타이틀 → 캐릭터 고르기 → 플레이 (Esc를 누르면 멈춤 창, 거기서 "처음으로"를 누르면 다시 고르기).
 //! 플레이에서 쓰러지거나 클리어하면 같은 장면 위에 끝난 화면이 나오고, "다시 하기"로 고르기에 간다.
 
 mod config;
@@ -13,11 +13,13 @@ use logic::player::PlayerInput;
 use macroquad::prelude::*;
 use view::assets::Assets;
 use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
+use view::pause::{draw_pause, pause_tap_at, PauseTap};
+use view::shop::Pocket;
 use view::effects::Effects;
 use view::gameover::{EndScreen, RETRY_BUTTON};
 use view::input::{
     any_key_pressed, fast_forward_pressed, fingers, hold_walk_until_released, math_keys_pressed, menu_input, merge_touch, mine_key_down, player_input,
-    switch_weapon_pressed, MenuInput,
+    pocket_keys_pressed, switch_weapon_pressed, MenuInput,
 };
 use view::gather::GatherView;
 use view::math::{draw_math, pad_key_at};
@@ -27,6 +29,8 @@ use view::touch::{
 };
 use view::screen::Letterbox;
 use view::screens;
+use view::shop::{draw_shop, shop_tap_at, ShopView};
+use logic::shop::ShopEvent;
 use view::text::TextPainter;
 
 enum Scene {
@@ -45,13 +49,17 @@ enum Scene {
         walk_lock: bool,
         /// 캔 것 팝업과 제작대에서 고른 재료 (M7, 화면 전용)
         gathered: GatherView,
+        /// 상점 화면의 "샀어요!" 같은 잠깐 효과 (M8, 화면 전용)
+        shop_view: ShopView,
+        /// 멈춤 창이 떠 있으면 true (부모님 요청: Esc로 멈추고 이어서 하기). 그동안 logic을 부르지 않아 시계·몬스터가 멈춘다.
+        paused: bool,
     },
 }
 
 fn start_play(kind: CharacterKind) -> Scene {
     // 판마다 좀비가 다르게 나오도록 지금 시각(밀리초)을 시드로 쓴다.
     let seed = (macroquad::miniquad::date::now() * 1000.0) as u64 as u32;
-    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new() }
+    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false }
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
@@ -75,6 +83,79 @@ fn update_screen_effects(effects: &mut Effects, gathered: &mut GatherView, dt: f
     if !window_open {
         effects.update(dt);
         gathered.update(dt);
+    }
+}
+
+/// 공격을 눌렀을 때 휘두르기(맨손·칼·도끼·총 빛)를 그릴지. 포션은 손에 들지 않으니 공격은 늘 휘두르기다.
+fn shows_swing(attack_pressed: bool, playing: bool) -> bool {
+    attack_pressed && playing
+}
+
+/// 이번 프레임에 쓰려는 물건들: PC의 R·T·Y·G 키와 폰에서 누른 정보판 그림 (부모님 결정).
+fn pockets_to_use(keys: Vec<Pocket>, tapped: Option<Pocket>) -> Vec<Pocket> {
+    let mut list = keys;
+    if let Some(p) = tapped.filter(|p| !list.contains(p)) {
+        list.push(p);
+    }
+    list
+}
+
+/// 물건 하나를 쓴다. 쓸 수 있는지(체력 가득, 화면에 몬스터 없음, 벌써 먹음 …)는 logic이 정한다. 쓰였으면 true.
+fn use_pocket(game: &mut Game, pocket: Pocket) -> bool {
+    match pocket {
+        Pocket::Potion(potion) => game.use_potion(potion),
+        Pocket::SyringeGun => game.fire_syringe_gun(),
+        Pocket::EnderFruit => game.eat_ender_fruit(),
+    }
+}
+
+/// 폰 캐기 버튼 글: 손 닿는 것(캐기·들어가기·만들기 …)이 먼저, 없으면 해변 쿵 (US-081/082). 버튼을 안 보이면 None.
+fn mine_button_label(game: &Game) -> Option<&'static str> {
+    game.usable_in_reach().map(|u| u.button_text()).or_else(|| game.slam_power_here().map(|_| config::SLAM_BUTTON_TEXT))
+}
+
+/// 플레이 중 Esc·"멈춤" 버튼으로 멈춘 상태에서 받은 입력 (부모님 요청 2026-11-14).
+/// Esc를 다시 누르거나 "이어서 하기"를 누르면 이어서, "처음으로"를 누르면 캐릭터 고르기로.
+fn pause_choice(esc: bool, tap: Option<Vec2>) -> Option<PauseTap> {
+    if esc {
+        return Some(PauseTap::Resume);
+    }
+    tap.and_then(pause_tap_at)
+}
+
+/// Esc(PC)·폰 "멈춤"·문제 창 "◀ 고르기"를 눌렀을 때 할 일 (멈춤 창이 떠 있을 때는 `pause_choice`가 받는다).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackAction {
+    CloseCraft,
+    CloseShop,
+    Pause,
+    Leave,
+}
+
+/// 제작대·상점은 그 창만 닫고, 게임 중과 수학 문제 창은 멈춤 창을 띄운다 (REVIEW-020 1번).
+/// 캐릭터 고르기로 바로 나가는 것은 끝난 화면뿐이다.
+fn back_action(back: bool, ended: bool, craft_open: bool, shop_open: bool) -> Option<BackAction> {
+    if !back {
+        None
+    } else if ended {
+        Some(BackAction::Leave)
+    } else if craft_open {
+        Some(BackAction::CloseCraft)
+    } else if shop_open {
+        Some(BackAction::CloseShop)
+    } else {
+        Some(BackAction::Pause)
+    }
+}
+
+/// 상점·포션 일을 효과로 보여 준다 (US-070, US-071).
+fn show_shop_event(effects: &mut Effects, event: ShopEvent) {
+    match event {
+        ShopEvent::Opened => {}
+        ShopEvent::HealthPotionUsed { at, .. } => effects.on_health_potion(at),
+        ShopEvent::PoisonSprayed { at, .. } => effects.on_poison_sprayed(at),
+        ShopEvent::SkatesOff => effects.show_message(config::SKATES_OFF_TEXT),
+        ShopEvent::ArmorOff => effects.show_message(config::ARMOR_OFF_TEXT),
     }
 }
 
@@ -118,6 +199,8 @@ async fn main() {
     // 최고 기록 (US-044). 브라우저 저장소에서 읽고, 새 기록이 나오면 저장한다.
     let mut best_days = view::web::load_best_days();
     let mut best_score = view::web::load_best_score();
+    // 시험용 단축 (엘리용, 부모님 결정 2026-11-14). 주소에 ?qa가 있을 때만 켜진다.
+    let mut qa = view::qa::Qa::new(view::web::qa_mode());
 
     loop {
         let letterbox = Letterbox::current();
@@ -134,9 +217,19 @@ async fn main() {
         let quiz_open = matches!(&scene, Scene::Play { game, ended: None, .. } if game.math.is_open());
         // 제작대 화면도 같다: 칸을 누르던 손가락이 조이스틱·버튼이 되지 않고, 걷기·공격이 게임에 들어가지 않는다 (US-021).
         let craft_open = !quiz_open && matches!(&scene, Scene::Play { game, ended: None, .. } if game.crafting.is_open());
+        // 상점 화면도 같다 (US-062): 물건을 누르던 손가락이 조이스틱·버튼이 되지 않고, 걷기·공격이 게임에 들어가지 않는다.
+        let shop_open = !quiz_open && !craft_open && matches!(&scene, Scene::Play { game, ended: None, .. } if game.shop.is_open());
+        let window_open = quiz_open || craft_open || shop_open;
+        // 멈춤 창 (부모님 요청): 창처럼 손가락은 메뉴 탭으로만 받는다
+        let paused_now = matches!(&scene, Scene::Play { paused: true, ended: None, .. });
+        // QA 창도 멈춤처럼: 손가락은 메뉴 탭으로만, logic은 부르지 않는다
+        qa.open &= matches!(&scene, Scene::Play { ended: None, .. });
+        // 플레이 중 새로 댄 손가락 (QA 표 누르기용. 조이스틱·버튼과 같은 손가락이어도 QA 표 자리에는 버튼이 없다)
+        let new_finger = fingers.iter().find(|f| f.phase == TouchPhase::Started).map(|f| f.pos);
+        let paused_now = paused_now || qa.open;
         // 글자 줄은 장면과 상관없이 매 프레임 꺼낸다 (닫혀 있으면 버린다)
         let quiz_keys = math_keys_pressed(quiz_open && !rotate_hint);
-        if rotate_hint || quiz_open || craft_open || !matches!(scene, Scene::Play { ended: None, .. }) {
+        if rotate_hint || window_open || paused_now || !matches!(scene, Scene::Play { ended: None, .. }) {
             let tap = touch.idle(&fingers);
             if !rotate_hint {
                 menu.tap = menu.tap.or(tap);
@@ -173,21 +266,66 @@ async fn main() {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, effects, ended, walk_lock, gathered } => {
+                Scene::Play { game, fast_forward, effects, ended, walk_lock, gathered, shop_view, paused } => {
+                    // 상점의 "샀어요!"는 진짜 시간으로 흐른다 (게임은 멈춰 있어도)
+                    shop_view.update(dt);
                     // 플레이 중 터치는 조이스틱·버튼으로만. 쓰러진 화면의 터치는 위 idle이 메뉴 탭으로 준다.
-                    let buttons = play_buttons_with_mine(!game.weapons.owned().is_empty(), game.usable_in_reach().is_some());
-                    let touched = if ended.is_none() && !quiz_open && !craft_open { touch.update(&fingers, &buttons, touch_mode) } else { TouchFrame::default() };
+                    // 바꾸기 버튼은 무기가 있을 때만. 포션·주사기총·엔더열매는 정보판의 그림을 누르면 쓴다 (부모님 결정)
+                    let buttons = play_buttons_with_mine(game.can_switch(), mine_button_label(game).is_some());
+                    let pocket_spots = view::shop::pocket_tap_rects(game, game.can_switch());
+                    let touched = if ended.is_none() && !window_open && !*paused && !qa.open {
+                        touch.update_with_pockets(&fingers, &buttons, &pocket_spots.iter().map(|(_, r)| *r).collect::<Vec<_>>(), touch_mode)
+                    } else {
+                        TouchFrame::default()
+                    };
                     let retry = ended.as_mut().is_some_and(|screen| {
                         screen.seconds += dt;
                         screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
                     });
-                    // 문제 창에서는 터치 "◀ 고르기"가 위 idle의 탭으로 온다 (D35: 창이 열려도 나가기)
+                    // 문제 창에서는 터치 "◀ 고르기"가 위 idle의 탭으로 온다. 누르면 멈춤 창 (REVIEW-020 1번)
                     let quiz_back = quiz_open && touch_mode && menu.tap.is_some_and(|p| BACK_BUTTON.contains(p));
-                    if craft_open && menu.back {
+                    let back = back_action(menu.back || touched.back_pressed || quiz_back, ended.is_some(), craft_open, shop_open);
+                    if qa.open {
+                        // QA 창: 칸을 누르면 그 단축을 하고 닫는다. 밖을 누르거나 Esc를 누르면 그냥 닫는다
+                        if let Some(action) = menu.tap.and_then(view::qa::qa_tap_at) {
+                            view::qa::apply(game, action);
+                        }
+                        if menu.tap.is_some() || menu.back {
+                            qa.open = false;
+                            *walk_lock = true;
+                        }
+                        None
+                    } else if *paused && ended.is_none() {
+                        // 멈춤 창: logic을 부르지 않는다 (시계·몬스터·효과가 그대로 멈춘다)
+                        match pause_choice(menu.back, menu.tap) {
+                            Some(PauseTap::Resume) => {
+                                *paused = false;
+                                // 멈춘 동안 누르던 ←/→는 뗄 때까지 걷기가 되지 않는다
+                                *walk_lock = true;
+                                None
+                            }
+                            Some(PauseTap::Quit) => {
+                                keep_record(game.clock.nights_survived(), &mut best_days);
+                                keep_score(game.score(), &mut best_score);
+                                Some(Scene::Select { picked: kind_index(game.player.kind) })
+                            }
+                            None => None,
+                        }
+                    } else if back == Some(BackAction::CloseCraft) {
                         // 제작대 화면의 Esc는 고르기로 나가지 않고 제작대만 닫는다 (US-021)
                         game.crafting.close();
                         None
-                    } else if menu.back || touched.back_pressed || retry || quiz_back {
+                    } else if back == Some(BackAction::CloseShop) {
+                        // 상점 화면의 Esc도 상점만 닫는다 (US-062). 문 앞에 그대로 서 있다.
+                        shop_view.apply(game, view::shop::ShopTap::Close);
+                        None
+                    } else if back == Some(BackAction::Pause) {
+                        // 게임 중·문제 창의 Esc나 폰 "멈춤"·"◀ 고르기": 바로 나가지 않고 멈춤 창을 띄운다 (부모님 요청 2026-11-14)
+                        // 문제 창은 그대로 열려 있고, 이어서 하면 그 창으로 돌아온다
+                        *paused = true;
+                        game.mine_held = false;
+                        None
+                    } else if back == Some(BackAction::Leave) || retry {
                         keep_record(game.clock.nights_survived(), &mut best_days);
                         keep_score(game.score(), &mut best_score);
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
@@ -199,25 +337,47 @@ async fn main() {
                                 key.apply(&mut game.math);
                             }
                         } else if craft_open {
-                            // "곡괭이를 만들었어요!"는 제작대 화면이 바로 보여 준다 (craft::draw_craft)
+                            // "…을 만들었어요!"는 제작대 화면이 바로 보여 준다 (craft::draw_craft)
                             if let Some(tap) = menu.tap.and_then(craft_tap_at) {
-                                apply_craft_tap(game, &mut gathered.craft_pick, tap);
+                                apply_craft_tap(game, &mut gathered.craft, tap);
+                            }
+                        } else if shop_open {
+                            // 사기·팔기·닫기: 마우스 클릭과 손가락 탭이 같은 길 (view::shop)
+                            if let Some(tap) = menu.tap.and_then(shop_tap_at) {
+                                shop_view.apply(game, tap);
                             }
                         } else {
+                            // 시험용 단축: 숫자 키 1~9·0, 또는 "QA" 표를 누르면 QA 창 (?qa일 때만)
+                            if ended.is_none() {
+                                if let Some(action) = qa.key_action() {
+                                    view::qa::apply(game, action);
+                                }
+                                if qa.badge_tapped(menu.tap.or(new_finger)) {
+                                    qa.open = true;
+                                    game.mine_held = false;
+                                }
+                            }
                             if fast_forward_pressed() {
                                 *fast_forward = !*fast_forward;
                             }
                             if ended.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
                                 game.switch_weapon();
                             }
+                            // R = 체력 포션, T = 독약, Y = 주사기총, G = 엔더열매. 폰은 정보판 그림 누르기. 쓸 수 있는지는 logic이 정한다
+                            if ended.is_none() {
+                                let tapped = touched.pocket_pressed.and_then(|i| pocket_spots.get(i)).map(|(p, _)| *p);
+                                for pocket in pockets_to_use(pocket_keys_pressed(), tapped) {
+                                    use_pocket(game, pocket);
+                                }
+                            }
                         }
-                        let (keys, lock) = hold_walk_until_released(*walk_lock || quiz_open || craft_open, merge_touch(player_input(), &touched));
+                        let (keys, lock) = hold_walk_until_released(*walk_lock || window_open, merge_touch(player_input(), &touched));
                         *walk_lock = lock;
-                        let input = if quiz_open || craft_open { PlayerInput::default() } else { keys };
+                        let input = if window_open { PlayerInput::default() } else { keys };
                         // 캐기·들어가기·만들기: E 키나 캐기 버튼을 누르고 있는 동안 (임시-16, 임시-17)
                         // 창이 열린 동안에도 실제 누름을 넘긴다: 멈춘 동안은 logic의 forget_mining이 막고, 닫은 뒤 꾹 누른 E를 새 누름으로 보지 않는다 (REVIEW-017 1번)
                         game.mine_held = mine_key_down() || touch.is_held(ButtonKind::Mine) || touched.mine_pressed;
-                        if input.attack_pressed && ended.is_none() {
+                        if shows_swing(input.attack_pressed, ended.is_none()) {
                             effects.start_swing(game.weapons.held());
                         }
                         let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
@@ -228,6 +388,9 @@ async fn main() {
                         };
                         // 2) 이벤트 처리: 효과와 쓰러진 화면. 낮/밤이 바뀌는 건 하늘 색과 정보판이 보여 준다.
                         //    (아침 인사 문구·소리는 아이와 정한 뒤에 — US-012, M7 사운드)
+                        // 상자 일은 먼저 받아 둔다: 상자에서 나온 몬스터는 "얍얍 공격하라" 없이 머리 위 "공격!"만 (부모님 결정 2026-11-14)
+                        let box_events = game.take_box_events();
+                        let box_spots = view::boxes::box_monster_spots(&box_events);
                         for event in events {
                             match event {
                                 GameEvent::CoinsPicked { count } => {
@@ -238,7 +401,7 @@ async fn main() {
                                     keep_record(game.clock.nights_survived(), &mut best_days);
                                     keep_score(game.score(), &mut best_score);
                                 }
-                                GameEvent::Combat(combat) => effects.on_combat(combat),
+                                GameEvent::Combat(combat) => effects.on_combat_near_boxes(combat, &box_spots),
                                 GameEvent::NightStarted | GameEvent::DayStarted { .. } => {}
                                 GameEvent::MissFound { at } => effects.on_miss_found(at),
                                 GameEvent::WeaponPicked { kind } => effects.show_message(kind.picked_text()),
@@ -250,12 +413,27 @@ async fn main() {
                                 GatherEvent::Mined { what, .. } => gathered.on_mined(what, !game.gathering.bag.has_pickaxe && game.world.workbench().is_some()),
                                 GatherEvent::PushedOutOfCave => effects.show_message(config::CAVE_NIGHT_OUT_TEXT),
                                 GatherEvent::CaveClosed => effects.show_message(config::CAVE_CLOSED_TEXT),
-                                GatherEvent::CraftingOpened => gathered.craft_pick = logic::gathering::Material::Wood,
+                                GatherEvent::CraftingOpened => gathered.craft = view::craft::CraftView::opened(game.crafting.chosen()),
                                 GatherEvent::CaveEntered | GatherEvent::CaveLeft => {}
                             }
                         }
+                        for event in game.take_shop_events() {
+                            show_shop_event(effects, event);
+                        }
+                        // 자동차·주사기총·엔더열매·쿵 (US-080~083)
+                        for event in game.take_item_events() {
+                            effects.on_item_event(event);
+                        }
+                        // 상자 부수기 (US-089): 금·나뭇조각·도끼 안내·"와우!"는 효과가, "○○을 얻었어요!"는 큰 문구로
+                        for event in box_events {
+                            if let Some(message) = effects.boxes.on_event(event) {
+                                effects.show_message(message);
+                            }
+                        }
+                        effects.watch_car(screens::car_is_moving(game.gathering.bag.riding_car, game.player.vel.x) && ended.is_none(), game.player.rect().center());
                         effects.watch_citizens(game.citizens.walkers.iter().map(|w| w.is_walking()));
-                        update_screen_effects(effects, gathered, dt, quiz_open || craft_open);
+                        // 이번 프레임에 상점이 열렸으면 그때부터 멈춘다
+                        update_screen_effects(effects, gathered, dt, window_open || game.shop.is_open());
                         None
                     }
                 }
@@ -271,19 +449,34 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, effects, ended, gathered, .. } => {
+            Scene::Play { game, fast_forward, effects, ended, gathered, shop_view, paused, .. } => {
                 screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode, gathered);
                 if ended.is_none() && game.math.is_open() {
                     draw_math(&text, &game.math, &assets.m6.miss);
-                    if touch_mode {
+                    if *paused {
+                        // 멈춤 창이 문제 창 위에 뜬다. 이어서 하면 문제 창이 그대로 보인다
+                        draw_pause(&text, touch_mode);
+                    } else if touch_mode {
                         draw_back_button(&text);
                     }
                 } else if ended.is_none() && game.crafting.is_open() {
-                    draw_craft(&text, game, gathered.craft_pick);
-                } else if touch_mode && ended.is_none() {
-                    let usable = game.usable_in_reach();
-                    let buttons = play_buttons_with_mine(!game.weapons.owned().is_empty(), usable.is_some());
-                    draw_touch_controls(&text, &touch, &buttons, usable.map_or("", |u| u.button_text()));
+                    draw_craft(&text, game, &gathered.craft, &assets.m6);
+                } else if ended.is_none() && game.shop.is_open() {
+                    draw_shop(&text, game, shop_view, touch_mode);
+                } else if ended.is_none() && *paused {
+                    draw_pause(&text, touch_mode);
+                } else if touch_mode && ended.is_none() && !qa.open {
+                    let label = mine_button_label(game);
+                    let buttons = play_buttons_with_mine(game.can_switch(), label.is_some());
+                    draw_touch_controls(&text, &touch, &buttons, label.unwrap_or(""));
+                }
+                if ended.is_none() {
+                    // 창(문제·제작대·상점·멈춤)이 열려 있으면 QA 표를 숨긴다: 그때는 눌러도 안 열리고 창의 칸을 가린다 (BUG-031)
+                    let window_or_pause = game.math.is_open() || game.crafting.is_open() || game.shop.is_open() || *paused;
+                    if !window_or_pause {
+                        view::qa::draw_badge(&text, &qa);
+                    }
+                    view::qa::draw_menu(&text, &qa);
                 }
             }
         }
@@ -306,6 +499,8 @@ async fn main() {
 mod tests {
     use super::*;
     use config::{COIN_RESPAWN_SECONDS, DAY_SECONDS, DEV_FAST_FORWARD_SCALE, PLAYER_WALK_SPEED};
+    use logic::game::ItemEvent;
+    use logic::shop::Potion;
     use logic::world::World;
 
     const FRAME: f32 = 1.0 / 60.0;
@@ -490,6 +685,118 @@ mod tests {
         let right = PlayerInput { right: true, ..Default::default() };
         assert!(update_with_time_scale(&mut g, &right, FRAME, DEV_FAST_FORWARD_SCALE).is_empty());
         assert_eq!((g.clock.seconds_left_in_phase(), g.player.pos.x), (left, x));
+    }
+
+    #[test]
+    fn attack_swings_only_while_playing() {
+        assert!(shows_swing(true, true));
+        assert!(!shows_swing(true, false), "끝난 화면에서는 안 보인다");
+        assert!(!shows_swing(false, true));
+    }
+
+    #[test]
+    fn pocket_keys_and_taps_use_each_thing_once() {
+        let health = Pocket::Potion(Potion::Health);
+        assert_eq!(pockets_to_use(vec![], None), vec![]);
+        assert_eq!(pockets_to_use(vec![health], None), vec![health]);
+        assert_eq!(pockets_to_use(vec![], Some(Pocket::EnderFruit)), vec![Pocket::EnderFruit]);
+        assert_eq!(pockets_to_use(vec![health], Some(health)), vec![health], "키와 탭이 같은 프레임이어도 하나만");
+        // R로 먹으면 체력이 오르고 포션이 하나 준다 (먹는 규칙은 logic)
+        let mut g = m1_game(CharacterKind::Niro);
+        g.wallet.add(100);
+        g.buy(logic::shop::ShopItem::HealthPotion).unwrap();
+        g.combat.health.lose_from_quiz(1);
+        for p in pockets_to_use(vec![health], None) {
+            assert!(use_pocket(&mut g, p));
+        }
+        assert_eq!(g.shop.potions(Potion::Health), 0);
+        assert!(matches!(g.take_shop_events()[..], [ShopEvent::HealthPotionUsed { .. }]));
+    }
+
+    #[test]
+    fn y_fires_the_syringe_gun_and_g_eats_an_ender_fruit() {
+        let mut g = night_game();
+        g.gathering.bag.has_syringe_gun = true;
+        g.gathering.bag.ender_fruits = 1;
+        g.combat.zombies.list = vec![logic::monster::Zombie::new(g.player.pos.x + 120.0, g.world.ground_y, false)];
+        assert!(use_pocket(&mut g, Pocket::SyringeGun), "화면에 몬스터가 있으면 쏜다");
+        assert!(!g.gathering.bag.has_syringe_gun);
+        assert!(use_pocket(&mut g, Pocket::EnderFruit));
+        assert!(g.gathering.bag.has_ender_power && g.gathering.bag.ender_fruits == 0);
+        let events = g.take_item_events();
+        assert!(matches!(events[..], [ItemEvent::SyringeGunFired { .. }, ItemEvent::EnderFruitEaten { .. }]), "{events:?}");
+        // 화면에서: 침 총알과 금빛 글
+        let mut effects = Effects::new();
+        for e in events {
+            effects.on_item_event(e);
+        }
+        assert_eq!(effects.message(), Some(config::ENDER_FRUIT_EATEN_TEXT));
+        assert!(!use_pocket(&mut g, Pocket::SyringeGun), "주사기총이 없으면 아무 일 없다");
+    }
+
+    #[test]
+    fn esc_pauses_and_pause_window_resumes_or_quits() {
+        use view::pause::{QUIT_BUTTON, RESUME_BUTTON};
+        assert_eq!(pause_choice(true, None), Some(PauseTap::Resume), "Esc를 다시 누르면 이어서");
+        assert_eq!(pause_choice(false, Some(RESUME_BUTTON.center())), Some(PauseTap::Resume));
+        assert_eq!(pause_choice(false, Some(QUIT_BUTTON.center())), Some(PauseTap::Quit));
+        assert_eq!(pause_choice(false, Some(vec2(5.0, 5.0))), None, "빈 곳을 눌러도 그대로 멈춰 있다");
+        assert_eq!(pause_choice(false, None), None);
+        // 폰 "멈춤" 버튼은 예전 "◀ 고르기" 자리: 누르면 back_pressed가 와서 멈춤 창이 뜬다
+        let mut t = TouchControls::new();
+        let p = BACK_BUTTON.center();
+        let o = t.update(&[view::touch::Finger { id: 1, phase: TouchPhase::Started, pos: p }], &view::touch::PLAY_BUTTONS, true);
+        assert!(o.back_pressed);
+    }
+
+    #[test]
+    fn esc_in_the_quiz_pauses_instead_of_leaving() {
+        // REVIEW-020 1번: 문제 창에서 Esc(또는 폰 "◀ 고르기")는 고르기로 나가지 않고 멈춤 창
+        assert_eq!(back_action(true, false, false, false), Some(BackAction::Pause), "게임 중·문제 창");
+        assert_eq!(back_action(true, false, true, false), Some(BackAction::CloseCraft));
+        assert_eq!(back_action(true, false, false, true), Some(BackAction::CloseShop));
+        assert_eq!(back_action(true, true, false, false), Some(BackAction::Leave), "끝난 화면만 바로 나간다");
+        assert_eq!(back_action(false, false, false, false), None);
+        assert_eq!(pause_choice(true, None), Some(PauseTap::Resume), "멈춤 창의 Esc는 이어서 하기 (문제 창으로 돌아온다)");
+    }
+
+    #[test]
+    fn mine_button_turns_into_slam_on_the_beach() {
+        let mut g = Game::new(CharacterKind::Niro, SEED);
+        assert_eq!(mine_button_label(&g), g.usable_in_reach().map(|u| u.button_text()));
+        g.gathering.bag.has_ender_power = true;
+        let beach = (config::SLAM_BEACH_LEFT + config::SLAM_BEACH_RIGHT) / 2.0;
+        g.player.pos.x = beach - g.player.size.x / 2.0;
+        if g.usable_in_reach().is_none() {
+            assert_eq!(mine_button_label(&g), Some(config::SLAM_BUTTON_TEXT), "쿵 할 수 있으면 캐기 버튼이 쿵!");
+            assert_eq!(play_buttons_with_mine(g.can_switch(), mine_button_label(&g).is_some()).len(), 2);
+        }
+        g.gathering.bag.has_ender_power = false;
+        assert_eq!(mine_button_label(&g), g.usable_in_reach().map(|u| u.button_text()));
+    }
+
+    #[test]
+    fn shop_events_become_effects() {
+        let mut effects = Effects::new();
+        show_shop_event(&mut effects, ShopEvent::ArmorOff);
+        assert_eq!(effects.message(), Some(config::ARMOR_OFF_TEXT));
+        show_shop_event(&mut effects, ShopEvent::SkatesOff);
+        assert_eq!(effects.message(), Some(config::SKATES_OFF_TEXT));
+        show_shop_event(&mut effects, ShopEvent::PoisonSprayed { at: vec2(10.0, 10.0), monsters: 2 });
+        assert_eq!(effects.poison_clouds(), 1);
+        show_shop_event(&mut effects, ShopEvent::HealthPotionUsed { at: vec2(10.0, 10.0), healed: 5 });
+        assert!(effects.heart_sparkle() > 0.0);
+    }
+
+    #[test]
+    fn switch_button_does_not_show_with_only_a_potion() {
+        let mut g = m1_game(CharacterKind::Niro);
+        assert!(!g.can_switch());
+        g.wallet.add(100);
+        g.buy(logic::shop::ShopItem::HealthPotion).unwrap();
+        assert!(g.weapons.owned().is_empty() && !g.can_switch(), "포션만 있으면 바꾸기 버튼이 없다 (포션은 그림을 눌러 먹는다)");
+        assert_eq!(play_buttons_with_mine(g.can_switch(), false).len(), 1);
+        assert_eq!(view::shop::pocket_tap_rects(&g, false).len(), 1, "대신 포션 그림을 누를 수 있다");
     }
 
     #[test]

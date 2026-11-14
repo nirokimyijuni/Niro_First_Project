@@ -1,6 +1,7 @@
 //! 판이 끝난 화면. 쓰러졌을 때 (D30, US-043, US-044): 머리가 퐁 튀어 오르고 몸이 털썩 주저앉는 만화 같은 움직임,
 //! 끝나면 "쓰러졌어요"와 기록, 크게 "다시 하기". 무섭지 않게, 피 없이.
-//! 클리어했을 때 (D63, US-068): 밝은 아침에 미스가 통통 뛰고 빙글 돌며 축하한다. 점수는 둘 다 보인다 (D64, US-069).
+//! 클리어했을 때 (D63, US-068): 밝은 아침에 고른 캐릭터가 통통 뛰고 좌우로 홱홱 돌며 축하 춤을 춘다.
+//! 쓰러진 끝 화면에도 고른 캐릭터가 다시 멀쩡히 서서 어질어질 흔들린다 (가족 피드백). 점수는 둘 다 보인다 (D64, US-069).
 
 use super::assets::head_share;
 use super::hud::draw_pill;
@@ -38,7 +39,7 @@ const RETRY_FILL: Color = Color::new(1.0, 0.66, 0.12, 1.0);
 const DIM: Color = Color::new(0.10, 0.13, 0.32, 0.55);
 const NEW_RECORD: Color = Color::new(1.0, 0.86, 0.22, 1.0);
 
-// ---- 기록 글자 자리: 왼쪽은 버틴 날, 오른쪽은 점수. 클리어 화면의 미스가 그 사이에 선다 ----
+// ---- 기록 글자 자리: 왼쪽은 버틴 날, 오른쪽은 점수. 끝 화면의 캐릭터가 그 사이에 선다 ----
 const LEFT_X: f32 = 250.0;
 const RIGHT_X: f32 = 710.0;
 const THIS_TIME_Y: f32 = 178.0;
@@ -46,11 +47,18 @@ const BEST_Y: f32 = 232.0;
 const NEW_Y: f32 = 284.0;
 const TALLY_Y: f32 = 342.0;
 
-/// 클리어 화면: 미스가 나오는 시간. 이 뒤에 버튼이 눌린다 (막 누르던 손가락이 바로 넘어가지 않게).
+/// 클리어 화면: 캐릭터가 나오는 시간. 이 뒤에 버튼이 눌린다 (막 누르던 손가락이 바로 넘어가지 않게).
 const CLEAR_ENTER_SECONDS: f32 = 0.8;
-/// 미스 키, 발 자리, 한 번 뛰는 시간, 뛰는 높이. 세 번째마다 두 배로 뛰며 한 바퀴 돈다.
-const MISS_HEIGHT: f32 = 150.0;
-const MISS_FEET: Vec2 = Vec2::new(VIRTUAL_WIDTH / 2.0, 318.0);
+/// 끝 화면 캐릭터 키(안테나까지 넣은 그림 전체), 발 자리.
+const HERO_HEIGHT: f32 = 150.0;
+const HERO_FEET: Vec2 = Vec2::new(VIRTUAL_WIDTH / 2.0, 318.0);
+/// 쓰러진 끝 화면: 어질어질 흔들리는 기울기와 빠르기, 머리 위를 도는 별 수·반지름·도는 빠르기
+const DIZZY_TILT: f32 = 0.12;
+const DIZZY_SWAYS_PER_SECOND: f32 = 0.8;
+const DIZZY_STARS: u32 = 3;
+const DIZZY_STAR_RADIUS: f32 = 34.0;
+const DIZZY_STAR_TURNS_PER_SECOND: f32 = 0.6;
+/// 춤: 한 번 뛰는 시간, 뛰는 높이. 세 번째마다 두 배로 뛰며 한 바퀴 돈다.
 const HOP_SECONDS: f32 = 0.5;
 const HOP_HEIGHT: f32 = 34.0;
 const BIG_HOP_EVERY: u32 = 3;
@@ -226,15 +234,48 @@ pub(super) fn miss_dance(t: f32) -> MissDance {
     MissDance { lift, spin, squash: LANDING_SQUASH * (1.0 - arc).powi(4) }
 }
 
-fn draw_dancing_miss(texture: &Texture2D, seconds: f32) {
+/// 춤추는 캐릭터가 왼쪽을 보는지. 한 번 뛸 때마다 좌우로 홱 돈다 (우스꽝스럽게).
+fn dance_faces_left(t: f32) -> bool {
+    (t / HOP_SECONDS) as u32 % 2 == 1
+}
+
+/// 고른 캐릭터(손그림 그대로, 안테나 포함)가 미스와 같은 춤을 춘다.
+fn draw_dancing_hero(texture: &Texture2D, seconds: f32) {
     let dance = miss_dance(seconds);
     // 처음에는 작게 퐁 커지며 나온다
     let grow = (seconds / CLEAR_ENTER_SECONDS).min(1.0);
-    let height = MISS_HEIGHT * grow * (1.0 - dance.squash);
-    let width = MISS_HEIGHT * grow * (1.0 + dance.squash) * texture.width() / texture.height();
-    let center = MISS_FEET - vec2(0.0, dance.lift + height / 2.0);
-    let params = DrawTextureParams { dest_size: Some(vec2(width, height)), rotation: dance.spin, pivot: Some(center), ..Default::default() };
+    let height = HERO_HEIGHT * grow * (1.0 - dance.squash);
+    let width = HERO_HEIGHT * grow * (1.0 + dance.squash) * texture.width() / texture.height();
+    let center = HERO_FEET - vec2(0.0, dance.lift + height / 2.0);
+    let params = DrawTextureParams {
+        dest_size: Some(vec2(width, height)),
+        rotation: dance.spin,
+        pivot: Some(center),
+        flip_x: dance_faces_left(seconds),
+        ..Default::default()
+    };
     draw_texture_ex(texture, center.x - width / 2.0, center.y - height / 2.0, WHITE, params);
+}
+
+/// 쓰러진 끝 화면 `t`초: (몸 기울기, 머리 위 별이 돈 각도). 천천히 좌우로 어질어질.
+fn dizzy(t: f32) -> (f32, f32) {
+    ((t * DIZZY_SWAYS_PER_SECOND * TAU).sin() * DIZZY_TILT, t * DIZZY_STAR_TURNS_PER_SECOND * TAU)
+}
+
+/// 머리가 빠졌던 캐릭터가 다시 멀쩡히 서서, 머리 위에 별이 빙글빙글 돈다. `t`: 끝 화면이 열린 뒤 흐른 초.
+fn draw_dizzy_hero(texture: &Texture2D, t: f32) {
+    let grow = (t / CLEAR_ENTER_SECONDS).min(1.0);
+    let (tilt, turn) = dizzy(t);
+    let height = HERO_HEIGHT * grow;
+    let width = height * texture.width() / texture.height();
+    let params = DrawTextureParams { dest_size: Some(vec2(width, height)), rotation: tilt, pivot: Some(HERO_FEET), ..Default::default() };
+    draw_texture_ex(texture, HERO_FEET.x - width / 2.0, HERO_FEET.y - height, WHITE, params);
+    let head = HERO_FEET - vec2(0.0, height + 8.0);
+    for i in 0..DIZZY_STARS {
+        let a = turn + i as f32 * TAU / DIZZY_STARS as f32;
+        let at = head + vec2(a.cos() * DIZZY_STAR_RADIUS * grow, a.sin() * DIZZY_STAR_RADIUS * 0.35 * grow);
+        draw_star(at, 10.0 * grow, turn * 2.0, NEW_RECORD);
+    }
 }
 
 /// 천천히 떨어지는 색 별. 맨 위 줄에서 맨 아래 줄까지 되풀이한다.
@@ -247,11 +288,12 @@ pub(super) fn draw_confetti(seconds: f32) {
 }
 
 /// 움직임이 끝나면: 큰 글, 버틴 날과 최고 기록, 점수와 내역과 최고 점수, "다시 하기".
-pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, miss: &Texture2D) {
+/// `hero`: 플레이어가 고른 캐릭터 그림.
+pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, hero: &Texture2D) {
     let mid = VIRTUAL_WIDTH / 2.0;
     if ended.cleared {
         draw_confetti(ended.seconds);
-        draw_dancing_miss(miss, ended.seconds);
+        draw_dancing_hero(hero, ended.seconds);
         text.centered(GAME_CLEAR_TEXT, mid, 92.0, 60.0, NEW_RECORD);
     }
     if !ended.ready() {
@@ -260,6 +302,7 @@ pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, miss: &Texture2D) {
     if !ended.cleared {
         draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
         text.centered("쓰러졌어요", mid, 100.0, 76.0, WHITE);
+        draw_dizzy_hero(hero, ended.seconds - ANIMATION_SECONDS);
     }
     text.centered(&format!("버틴 날 {}", ended.days), LEFT_X, THIS_TIME_Y, 50.0, WHITE);
     text.centered(&format!("최고 기록 {}", ended.best), LEFT_X, BEST_Y, 38.0, WHITE);
@@ -340,10 +383,29 @@ mod tests {
     }
 
     #[test]
-    fn miss_stays_below_the_title_and_above_the_tally() {
-        let top = MISS_FEET.y - HOP_HEIGHT * 2.0 - MISS_HEIGHT;
+    fn hero_stays_below_the_title_and_above_the_tally() {
+        let top = HERO_FEET.y - HOP_HEIGHT * 2.0 - HERO_HEIGHT;
         assert!(top > 92.0, "축하 글 아래: {top}");
-        const { assert!(MISS_FEET.y < TALLY_Y - 16.0) };
+        let stars_top = HERO_FEET.y - HERO_HEIGHT - 8.0 - DIZZY_STAR_RADIUS * 0.35 - 10.0;
+        assert!(stars_top > 100.0, "쓰러졌어요 글 아래: {stars_top}");
+        const { assert!(HERO_FEET.y < TALLY_Y - 16.0) };
+    }
+
+    #[test]
+    fn dancing_hero_turns_around_every_hop() {
+        assert!(!dance_faces_left(0.0));
+        assert!(dance_faces_left(HOP_SECONDS * 1.5));
+        assert!(!dance_faces_left(HOP_SECONDS * 2.5));
+    }
+
+    #[test]
+    fn dizzy_hero_sways_gently_and_stars_keep_turning() {
+        for i in 0..600 {
+            let (tilt, _) = dizzy(i as f32 * 0.01);
+            assert!(tilt.abs() <= DIZZY_TILT + 1e-4, "살짝만 기운다: {tilt}");
+        }
+        assert_eq!(dizzy(0.0), (0.0, 0.0), "똑바로 서서 시작");
+        assert!(dizzy(1.0).1 > dizzy(0.5).1);
     }
 
     #[test]

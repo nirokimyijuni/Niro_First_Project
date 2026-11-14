@@ -38,6 +38,30 @@ echo "버전 꼬리: ?v=${VERSION}"
 cp -r "$ROOT/game/assets" "$DIST/assets"
 find "$DIST/assets" -name .gitkeep -delete
 
+# 글꼴 줄이기 (부모 결정 2026-11-14): game/src와 web/의 글자 + 안전용 글자만 남긴 글꼴로
+# dist 쪽 파일을 같은 이름으로 바꾼다. 원본 game/assets/fonts/Jua-Regular.ttf는 그대로.
+# 빠진 글자가 있으면 스크립트가 실패해서 빌드도 멈춘다. 파이썬은 PYTHON으로 고른다.
+# (이 PC의 그냥 `python`은 가짜라서, 로컬에서는 진짜 파이썬 경로를 PYTHON에 넣어 준다.)
+if [ -z "${PYTHON:-}" ]; then
+    if [ -x /c/Users/SDS/AppData/Local/Programs/Python/Python313/python.exe ]; then
+        PYTHON=/c/Users/SDS/AppData/Local/Programs/Python/Python313/python.exe
+    else
+        PYTHON=python3
+    fi
+fi
+# fonttools가 없을 때: 로컬은 원래 글꼴로 계속, CI(GitHub Actions)는 실패 → 배포판은 늘 작은 글꼴.
+if "$PYTHON" -c "import fontTools.subset" >/dev/null 2>&1; then
+    "$PYTHON" "$ROOT/tools/font-subset/subset_font.py" \
+        "$ROOT/game/assets/fonts/Jua-Regular.ttf" \
+        "$DIST/assets/fonts/Jua-Regular.ttf" \
+        "$ROOT/game/src" "$ROOT/web"
+elif [ -n "${CI:-}" ]; then
+    echo "오류: fonttools 없음 (CI에서는 글꼴을 꼭 줄여야 해요. pip install fonttools)" >&2
+    exit 1
+else
+    echo "경고: fonttools 없음: 원래 글꼴을 그대로 씀" >&2
+fi
+
 SIZE=$(wc -c < "$DIST/miss-game.wasm")
 echo "dist 준비 완료: $DIST"
 echo "wasm 크기: $SIZE bytes"

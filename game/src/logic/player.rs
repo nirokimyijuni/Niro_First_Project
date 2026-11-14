@@ -52,6 +52,8 @@ pub struct Player {
     pub on_ground: bool,
     pub facing: Facing,
     pub motion: Motion,
+    /// 걷는 빠르기 (초당 픽셀). 보통 `PLAYER_WALK_SPEED`이고, 스케이트를 신으면 `Game`이 빠르게 바꾼다 (US-070).
+    pub walk_speed: f32,
 }
 
 impl Player {
@@ -65,6 +67,7 @@ impl Player {
             on_ground: false,
             facing: Facing::Right,
             motion: Motion::Idle,
+            walk_speed: PLAYER_WALK_SPEED,
         }
     }
 
@@ -81,7 +84,7 @@ impl Player {
             (false, true) => 1.0,
             _ => 0.0,
         };
-        self.vel.x = walk_direction * PLAYER_WALK_SPEED;
+        self.vel.x = walk_direction * self.walk_speed;
         if walk_direction < 0.0 {
             self.facing = Facing::Left;
         } else if walk_direction > 0.0 {

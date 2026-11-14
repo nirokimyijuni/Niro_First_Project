@@ -89,6 +89,14 @@
                 localStorage.setItem(BEST_SCORE_KEY, String(score));
             } catch (e) {}
         };
+        // 시험용 단축 (game/src/view/qa.rs): 주소에 ?qa가 있을 때만 1. 보통 주소에서는 0이라 아무 일 없다.
+        importObject.env.qa_mode_on = function () {
+            try {
+                return new URLSearchParams(window.location.search).has("qa") ? 1 : 0;
+            } catch (e) {
+                return 0;
+            }
+        };
         // macroquad는 window resize 때만 캔버스 버퍼를 맞춘다. 주소창·전체화면·회전으로 CSS 크기만 바뀌어도
         // 버퍼와 어긋나지 않게, 캔버스 크기가 바뀔 때마다 맞춘다 (어긋나면 그림과 터치 자리가 위아래로 벌어진다).
         var canvasEl = document.getElementById("glcanvas");

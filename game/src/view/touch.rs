@@ -91,10 +91,18 @@ const ATTACK_CENTER: Vec2 = Vec2::new(
 pub const PLAY_BUTTONS: [TouchButton; 1] = [TouchButton { kind: ButtonKind::Attack, center: ATTACK_CENTER, radius: BUTTON_RADIUS }];
 
 /// 무기가 있을 때의 버튼들. 바꾸기는 공격 왼쪽 위: 엄지를 조금 들면 닿고, 땅의 몬스터를 덜 가린다.
+/// 정보판 아래 물건 누르는 자리(`view::shop::pocket_tap_rects`)와 겹치지 않게 조금 아래에 둔다 (M8).
 const PLAY_BUTTONS_WITH_SWITCH: [TouchButton; 2] = [
     PLAY_BUTTONS[0],
-    TouchButton { kind: ButtonKind::Switch, center: Vec2::new(ATTACK_CENTER.x - 90.0, ATTACK_CENTER.y - 154.0), radius: SWITCH_BUTTON_RADIUS },
+    TouchButton { kind: ButtonKind::Switch, center: Vec2::new(ATTACK_CENTER.x - 110.0, ATTACK_CENTER.y - 120.0), radius: SWITCH_BUTTON_RADIUS },
 ];
+
+/// 버튼 원(손가락 여유 포함)이 네모와 겹치는지. 포션 누르는 자리 시험에 쓴다.
+#[cfg(test)]
+pub fn button_touches_rect(b: &TouchButton, r: Rect) -> bool {
+    let nearest = vec2(b.center.x.clamp(r.x, r.right()), b.center.y.clamp(r.y, r.bottom()));
+    nearest.distance(b.center) <= b.radius + BUTTON_TOUCH_SLOP
+}
 
 /// 지금 쓸 버튼 목록. 무기가 하나도 없으면 바꾸기 버튼을 숨긴다 (US-053).
 pub fn play_buttons(has_weapon: bool) -> &'static [TouchButton] {
@@ -204,6 +212,9 @@ pub struct TouchFrame {
     /// 캐기 버튼을 새로 눌렀다. 누르고 있는지는 `TouchControls::is_held(ButtonKind::Mine)`로 본다.
     pub mine_pressed: bool,
     pub back_pressed: bool,
+    /// 정보판의 포션·주사기총·엔더열매 그림을 새로 눌렀다 (부모님 결정: 핸드폰에서는 그림을 누르면 쓴다).
+    /// `update_with_pockets`에 넘긴 자리 목록의 번호다 (touch.rs가 물건 종류를 몰라도 되게).
+    pub pocket_pressed: Option<usize>,
 }
 
 /// 손가락들을 기억하며 조이스틱·버튼을 판정한다.
@@ -236,8 +247,15 @@ impl TouchControls {
         tap
     }
 
-    /// 플레이 화면에서 한 프레임.
+    /// 플레이 화면에서 한 프레임 (물건 자리 없이). 게임은 `update_with_pockets`를 쓰고, 시험이 이걸 쓴다.
+    #[cfg(test)]
     pub fn update(&mut self, fingers: &[Finger], buttons: &[TouchButton], show_back: bool) -> TouchFrame {
+        self.update_with_pockets(fingers, buttons, &[], show_back)
+    }
+
+    /// 플레이 화면에서 한 프레임. `pockets`는 누르면 쓰는 물건 자리 (`view::shop::pocket_tap_rects`).
+    /// 물건은 새로 댄 손가락만 한 번 쓴다: 꾹 누르고 있어도 하나만 쓰인다.
+    pub fn update_with_pockets(&mut self, fingers: &[Finger], buttons: &[TouchButton], pockets: &[Rect], show_back: bool) -> TouchFrame {
         let mut out = TouchFrame::default();
         for f in fingers {
             // 같은 번호가 이번 프레임에 다시 "대기 시작"이면, 예전 손가락은 떼어졌고 새 손가락이다
@@ -263,6 +281,8 @@ impl TouchControls {
                     if !f.lifted() {
                         self.held.push((f.id, kind));
                     }
+                } else if let Some(i) = pockets.iter().position(|r| r.contains(f.pos)) {
+                    out.pocket_pressed = Some(i);
                 } else if f.pos.x < JOYSTICK_AREA_RIGHT && self.joystick.is_none() && !f.lifted() {
                     self.joystick = Some(Joystick { finger: f.id, base: joystick_base(f.pos), start: f.pos, knob: Vec2::ZERO });
                 }
@@ -381,10 +401,24 @@ fn draw_button(text: &TextPainter, b: &TouchButton, held: bool, mine_label: &str
                 draw_arrow_head(c + vec2(side * r * 0.5, -r * 0.3), vec2(side, 0.0), r * 0.36, BUTTON_ICON);
             }
         }
+        // 쿵 (US-081/082): 캐기 버튼 자리에 "쿵!"과 터지는 큰 별
+        ButtonKind::Mine if mine_label == crate::config::SLAM_BUTTON_TEXT => draw_star(c + vec2(0.0, -r * 0.28), r * 0.5, 0.3, Color::new(1.0, 0.86, 0.22, 0.95)),
         ButtonKind::Mine => draw_pickaxe_shape(c + vec2(0.0, -r * 0.3), r * 0.8, BUTTON_ICON, BUTTON_ICON),
     }
     let label = if b.kind == ButtonKind::Mine { mine_label } else { b.kind.label() };
     text.centered(label, c.x, c.y + r * 0.42, if label.chars().count() > 3 { 26.0 } else { 32.0 }, BUTTON_ICON);
+}
+
+/// 플레이 중 "고르기" 자리(`BACK_BUTTON`)에 나오는 "멈춤" 버튼 (부모님 요청): 누르면 멈춤 창이 뜬다.
+/// 멈춤 막대 두 개 + 글. 수학 문제 창에서는 예전처럼 "◀ 고르기"(`draw_back_button`)다.
+pub fn draw_pause_button(text: &TextPainter) {
+    let r = BACK_BUTTON;
+    draw_pill(r.x, r.y, r.w, r.h, BACK_FILL);
+    let mid_y = r.y + r.h / 2.0;
+    for dx in [16.0, 30.0] {
+        draw_rectangle(r.x + dx, mid_y - 14.0, 8.0, 28.0, BUTTON_ICON);
+    }
+    text.centered("멈춤", r.x + r.w / 2.0 + 18.0, mid_y + 11.0, 32.0, BUTTON_ICON);
 }
 
 pub fn draw_back_button(text: &TextPainter) {
@@ -395,7 +429,7 @@ pub fn draw_back_button(text: &TextPainter) {
     text.centered("고르기", r.x + r.w / 2.0 + 16.0, mid_y + 11.0, 32.0, BUTTON_ICON);
 }
 
-/// 플레이 화면 위에 조이스틱·버튼·"고르기" 버튼 (터치 모드일 때만 부른다).
+/// 플레이 화면 위에 조이스틱·버튼·"멈춤" 버튼 (터치 모드일 때만 부른다).
 /// `mine_label`은 캐기 버튼 글 (`Usable::button_text`). 버튼이 없으면 쓰지 않는다.
 pub fn draw_touch_controls(text: &TextPainter, controls: &TouchControls, buttons: &[TouchButton], mine_label: &str) {
     match &controls.joystick {
@@ -408,7 +442,7 @@ pub fn draw_touch_controls(text: &TextPainter, controls: &TouchControls, buttons
     for b in buttons {
         draw_button(text, b, controls.is_held(b.kind), mine_label);
     }
-    draw_back_button(text);
+    draw_pause_button(text);
 }
 
 /// 폰 모양 (둥근 테두리 + 화면 + 아래 동그라미). `size`는 (가로, 세로).
@@ -510,6 +544,26 @@ mod tests {
         assert!(!o.mine_pressed && o.right && t.is_held(ButtonKind::Mine));
         t.update(&[finger(1, TouchPhase::Stationary, 220.0, 400.0), finger(2, TouchPhase::Ended, mine.center.x, mine.center.y)], &buttons, true);
         assert!(!t.is_held(ButtonKind::Mine));
+    }
+
+    #[test]
+    fn tapping_a_pocket_uses_it_once_and_walking_goes_on() {
+        let spot = Rect::new(800.0, 180.0, 80.0, 80.0);
+        let potions = [spot];
+        let p = spot.center();
+        let mut t = TouchControls::new();
+        t.update_with_pockets(&[finger(1, TouchPhase::Started, 150.0, 400.0)], &PLAY_BUTTONS, &potions, true);
+        let o = t.update_with_pockets(&[finger(1, TouchPhase::Moved, 220.0, 400.0), finger(2, TouchPhase::Started, p.x, p.y)], &PLAY_BUTTONS, &potions, true);
+        assert_eq!(o.pocket_pressed, Some(0));
+        assert!(o.right && !o.attack_pressed && !o.jump_pressed, "걷던 엄지는 그대로");
+        let o = t.update_with_pockets(&[finger(1, TouchPhase::Stationary, 220.0, 400.0), finger(2, TouchPhase::Stationary, p.x, p.y)], &PLAY_BUTTONS, &potions, true);
+        assert_eq!(o.pocket_pressed, None, "꾹 눌러도 한 번");
+        // 포션이 없으면 같은 자리는 아무 일이 없다
+        let mut t = TouchControls::new();
+        assert_eq!(t.update(&[finger(3, TouchPhase::Started, p.x, p.y)], &PLAY_BUTTONS, true), TouchFrame::default());
+        // 한 프레임 안의 짧은 톡도 먹는다
+        let mut t = TouchControls::new();
+        assert_eq!(t.update_with_pockets(&[finger(4, TouchPhase::Ended, p.x, p.y)], &PLAY_BUTTONS, &potions, true).pocket_pressed, Some(0));
     }
 
     #[test]

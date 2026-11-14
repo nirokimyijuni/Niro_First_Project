@@ -6,7 +6,7 @@ use super::player::Facing;
 use crate::config::{
     BOX_AREA_LEFT, BOX_AREA_RIGHT, BOX_BIG_CHANCE, BOX_BIG_SIZE, BOX_COUNT_MAX, BOX_COUNT_MIN, BOX_GAP_CHANCE,
     BOX_MIN_GAP, BOX_SMALL_SIZE, CAVE_ENTRANCE_HEIGHT, CAVE_ENTRANCE_WIDTH, CAVE_ENTRANCE_X, CAVE_EXIT_X, CITIZEN_RUN_UP_ROOM, CITIZEN_XS,
-    GROUND_Y, HIDE_SPOTS, HOLE_DEPTH, HOLE_LEFT, HOLE_WIDTH, MAP_WIDTH, NO_BOX_MARGIN, PLACE_NAMES, ROCK_STEPS, SCREEN_WIDTH,
+    GROUND_Y, HIDE_SPOTS, HOUSE_DOOR_HEIGHT, HOUSE_DOOR_WIDTH, HOUSE_DOOR_X, HOLE_DEPTH, HOLE_LEFT, HOLE_WIDTH, MAP_WIDTH, NO_BOX_MARGIN, PLACE_NAMES, ROCK_STEPS, SCREEN_WIDTH,
     TREE_BRANCHES, TREE_HEIGHT, TREE_WIDTH, TREE_XS, WORKBENCH_HEIGHT, WORKBENCH_WIDTH, WORKBENCH_X,
 };
 #[cfg(test)]
@@ -131,6 +131,11 @@ impl World {
     /// 임시-18 집의 제작대. 캐릭터를 막지 않는다.
     pub fn workbench(&self) -> Option<Rect> {
         self.is_long_map().then(|| self.thing_on_ground(WORKBENCH_X, WORKBENCH_WIDTH, WORKBENCH_HEIGHT))
+    }
+
+    /// 임시-22 집 문 (상점 입구). 캐릭터를 막지 않는다. 긴 맵에만 있다.
+    pub fn house_door(&self) -> Option<Rect> {
+        self.is_long_map().then(|| self.thing_on_ground(HOUSE_DOOR_X, HOUSE_DOOR_WIDTH, HOUSE_DOOR_HEIGHT))
     }
 
     /// 구멍·구조물·미스·시민과 고리(D61)는 긴 맵에만 있다. M1 연습 맵은 옛 규칙 그대로다.
@@ -280,8 +285,8 @@ impl World {
     fn no_box_zones(&self) -> Vec<(f32, f32)> {
         let spots = HIDE_SPOTS.iter().map(|spot| (spot.1, spot.1));
         let solids = self.tree_branches().into_iter().chain(self.rock_steps()).chain(self.hole());
-        // M7 쓸 것: 양옆 `NO_BOX_MARGIN` 안에 상자가 없다 (임시-14, 임시-11, 임시-18).
-        let solids = solids.chain(self.trees()).chain(self.cave_entrance()).chain(self.workbench());
+        // M7·M8 쓸 것: 양옆 `NO_BOX_MARGIN` 안에 상자가 없다 (임시-14, 임시-11, 임시-18, 임시-22).
+        let solids = solids.chain(self.trees()).chain(self.cave_entrance()).chain(self.workbench()).chain(self.house_door());
         let citizens = CITIZEN_XS.iter().map(|x| (x - CITIZEN_RUN_UP_ROOM, x + CITIZEN_RUN_UP_ROOM));
         spots
             .chain(solids.map(|r| (r.x, r.x + r.w)))

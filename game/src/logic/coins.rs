@@ -15,6 +15,10 @@ pub struct Coin {
     pub rect: Rect,
     /// 다시 생길 때까지 남은 초. 0이면 지금 보인다.
     respawn_seconds_left: f32,
+    /// 상자 위 제자리.
+    home: Rect,
+    /// 밑의 상자가 부서져 없으면 true (D87). 이동안 주운 코인은 다시 생기지 않는다.
+    box_is_gone: bool,
 }
 
 impl Coin {
@@ -22,7 +26,20 @@ impl Coin {
     pub fn above_box(box_: Rect) -> Coin {
         let x = box_.x + (box_.w - COIN_SIZE) / 2.0;
         let y = box_.y - COIN_GAP_ABOVE_BOX - COIN_SIZE;
-        Coin { rect: Rect::new(x, y, COIN_SIZE, COIN_SIZE), respawn_seconds_left: 0.0 }
+        let home = Rect::new(x, y, COIN_SIZE, COIN_SIZE);
+        Coin { rect: home, respawn_seconds_left: 0.0, home, box_is_gone: false }
+    }
+
+    /// 밑의 상자가 부서졌다 (임시-66): 보이던 코인은 땅(`ground_y`)으로 떨어져 주울 수 있다.
+    pub fn fall_to_ground(&mut self, ground_y: f32) {
+        self.box_is_gone = true;
+        self.rect.y = ground_y - COIN_GAP_ABOVE_BOX - COIN_SIZE;
+    }
+
+    /// 상자가 돌아왔다: 제자리(상자 위)로 돌아간다. 다시 생길 시간은 이어서 센다.
+    pub fn go_back_on_box(&mut self) {
+        self.box_is_gone = false;
+        self.rect = self.home;
     }
 
     /// 지금 보이는지 (주울 수 있는지).
@@ -49,7 +66,7 @@ impl Coins {
     pub fn update(&mut self, dt: f32, player_rect: Rect) -> u32 {
         let mut picked = 0;
         for coin in &mut self.list {
-            if !coin.is_visible() {
+            if !coin.is_visible() && !coin.box_is_gone {
                 coin.respawn_seconds_left = (coin.respawn_seconds_left - dt.max(0.0)).max(0.0);
             }
             if coin.is_visible() && touches(player_rect, coin.rect) {
@@ -87,8 +104,6 @@ impl Wallet {
     }
 
     /// 코인을 쓴다. 모자라면 쓰지 않고 false.
-    // 상점(M8)에서 쓸 함수라 아직 부르는 곳이 없다. 상점을 붙이면 이 줄을 지운다.
-    #[allow(dead_code)]
     pub fn spend(&mut self, amount: u32) -> bool {
         if amount > self.coins {
             return false;

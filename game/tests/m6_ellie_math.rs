@@ -39,10 +39,10 @@ fn us074_each_kind_at_least_15_percent() {
 
 #[test]
 fn us074_subtract_follows_story_range() {
-    // 표: 빼지는 수 100~999, 빼는 수 10 이상, 답 1 이상
+    // 표 (부모님 결정 2026-11-14로 바뀜): 두 수 모두 10~99, 답 1 이상 (D88)
     let bad: Vec<String> = many().into_iter().filter(|q| q.kind == MathKind::Subtract).filter(|q| {
         let n = numbers_in(&q.text);
-        !(100..=999).contains(&n[0]) || n[1] < 10 || q.answer < 1
+        !(10..=99).contains(&n[0]) || !(10..=99).contains(&n[1]) || q.answer < 1
     }).map(|q| q.text).take(5).collect();
     assert!(bad.is_empty(), "표 범위를 벗어난 뺄셈: {bad:?}");
 }

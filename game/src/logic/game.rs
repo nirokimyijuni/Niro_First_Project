@@ -2,6 +2,7 @@
 //! Esc로 나갔다가 새 게임을 하면 `Game::new`로 새로 만든다.
 
 
+use super::boxes::{BoxEvent, BoxMonster, Boxes, Surprise, SurpriseItem};
 use super::character::CharacterKind;
 use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
@@ -12,12 +13,16 @@ use super::gathering::{Gathering, Material, Mineable};
 use super::math::{MathQuiz, MathResult};
 use super::miss::Miss;
 use super::player::{Facing, Player, PlayerInput};
+use super::shop::{sell_price, Armor, BuyRow, CantBuy, CantSell, Potion, SellRow, Shop, ShopEvent, ShopItem, SELLABLE};
 use super::weapon::{Weapon, Weapons};
 use super::world::{really_overlaps, shortest_dx, World};
 use crate::config::{
     CAVE_AWAY_Y, CAVE_ENTER_BUTTON_TEXT, CAVE_ENTRANCE_X, CAVE_EXIT_BUTTON_TEXT, CAVE_NAME, CAVE_OPEN_AT_NIGHT, CRAFTING_PAUSES_GAME,
     DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MATH_WRONG_HP_LOSS, MINE_BUTTON_TEXT, MINE_REACH, PLAYER_HEIGHT, PLAYER_SPAWN_X,
-    PLAYER_WIDTH, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT,
+    PLAYER_WIDTH, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT, HEALTH_POTION_HEAL,
+    HOUSE_DOOR_BUTTON_TEXT, PLAYER_WALK_SPEED, SHOP_PAUSES_GAME, CAR_SPEED_MULTIPLIER, DIAMOND_PICKAXE_SLAM_DIAMONDS,
+    DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT, DIAMOND_PICKAXE_SLAM_SCORE, ENDER_FRUIT_SLAM_DIAMONDS, ENDER_FRUIT_SLAM_DIAMONDS_TEXT,
+    ENDER_FRUIT_SLAM_SCORE, SLAM_BEACH_LEFT, SLAM_BEACH_RIGHT, SYRINGE_GUN_SCORE,
 };
 use macroquad::math::{Rect, Vec2};
 
@@ -59,6 +64,56 @@ pub enum GatherEvent {
     CraftingOpened,
 }
 
+/// 바다에 쿵 하는 힘 (임시-42). 둘 다 있으면 엔더열매가 먼저 쓰인다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlamPower {
+    EnderFruit,
+    DiamondPickaxe,
+}
+
+impl SlamPower {
+    /// 쿵 하면 얻는 다이아몬드 수.
+    pub fn diamonds(self) -> u32 {
+        match self {
+            SlamPower::EnderFruit => ENDER_FRUIT_SLAM_DIAMONDS,
+            SlamPower::DiamondPickaxe => DIAMOND_PICKAXE_SLAM_DIAMONDS,
+        }
+    }
+
+    /// 몬스터가 1마리 이상 쓰러졌을 때 점수에 한 번 더하는 수 (임시-47).
+    pub fn score(self) -> u32 {
+        match self {
+            SlamPower::EnderFruit => ENDER_FRUIT_SLAM_SCORE,
+            SlamPower::DiamondPickaxe => DIAMOND_PICKAXE_SLAM_SCORE,
+        }
+    }
+
+    /// "다이아몬드를 10개 얻었어요!" 같은 문구.
+    pub fn diamonds_text(self) -> &'static str {
+        match self {
+            SlamPower::EnderFruit => ENDER_FRUIT_SLAM_DIAMONDS_TEXT,
+            SlamPower::DiamondPickaxe => DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT,
+        }
+    }
+}
+
+/// 새 조합 물건(자동차, 주사기총, 엔더열매, 다이아래더라이트 곡괭이)에 생긴 일. `Game::take_item_events`로 받는다.
+/// 쓰러진 몬스터마다의 "쓰러졌어요"는 따로 `GameEvent::Combat(ZombieDefeated / SkeletonDefeated)`로 온다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ItemEvent {
+    /// 06:00가 되어 자동차에서 내렸다 (`CAR_OFF_TEXT`).
+    CarOff,
+    /// 주사기총을 쐈다. `at`은 주인공 몸 가운데, `monsters`는 쓰러진 수 (1 이상). 주사기총은 없어졌다.
+    SyringeGunFired { at: Vec2, monsters: u32 },
+    /// 엔더열매를 먹었다 (`ENDER_FRUIT_EATEN_TEXT`). 엔더열매 힘이 생겼다.
+    EnderFruitEaten { at: Vec2 },
+    /// 힘이 있는데 또 먹으려 했다 (`ENDER_FRUIT_ALREADY_EATEN_TEXT`). 개수는 그대로다.
+    EnderFruitAlreadyEaten,
+    /// 바다에 쿵 했다 (`SLAM_TEXT`, 화면 흔들기). `diamonds`개를 얻었다 (`SlamPower::diamonds_text`).
+    /// `power`가 `DiamondPickaxe`면 곡괭이가 없어졌다 (`DIAMOND_PICKAXE_GONE_TEXT`). `monsters`는 쓰러진 수 (0일 수 있다).
+    Slammed { power: SlamPower, at: Vec2, monsters: u32, diamonds: u32 },
+}
+
 /// E 키와 캐기 버튼으로 쓰는 것 (임시-17, 임시-36). 번호는 `gathering.trees`·`gathering.ore_lumps` 순서다.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Usable {
@@ -67,6 +122,8 @@ pub enum Usable {
     CaveEntrance,
     CaveExit,
     Workbench,
+    /// 집 문 (상점, 임시-22).
+    HouseDoor,
 }
 
 impl Usable {
@@ -77,6 +134,7 @@ impl Usable {
             Usable::CaveEntrance => CAVE_ENTER_BUTTON_TEXT,
             Usable::CaveExit => CAVE_EXIT_BUTTON_TEXT,
             Usable::Workbench => WORKBENCH_BUTTON_TEXT,
+            Usable::HouseDoor => HOUSE_DOOR_BUTTON_TEXT,
         }
     }
 }
@@ -105,6 +163,15 @@ pub struct Game {
     pub mine_held: bool,
     mine_was_held: bool,
     gather_events: Vec<GatherEvent>,
+    /// 상점 화면과 산 물건 (포션 개수, 스케이트, 갑옷). 열려 있는 동안 게임 속 시간이 모두 멈춘다 (임시-24).
+    pub shop: Shop,
+    shop_events: Vec<ShopEvent>,
+    item_events: Vec<ItemEvent>,
+    /// 주사기총처럼 `update` 밖에서 생긴 일 (몬스터 쓰러짐). 다음 `update`가 맨 앞에 돌려준다.
+    waiting_events: Vec<GameEvent>,
+    /// 부술 수 있는 상자와 상자에서 나온 깜짝 아이템 (D87, US-089). 부서진 상자는 `world.obstacles`에서 빠진다.
+    pub boxes: Boxes,
+    box_events: Vec<BoxEvent>,
 }
 
 impl Game {
@@ -126,8 +193,14 @@ impl Game {
             mine_held: false,
             mine_was_held: false,
             gather_events: Vec::new(),
+            shop: Shop::default(),
+            shop_events: Vec::new(),
+            item_events: Vec::new(),
+            waiting_events: Vec::new(),
             player: Player::new(kind, spawn),
             coins: Coins::on_boxes(&world),
+            boxes: Boxes::on_world(&world, seed),
+            box_events: Vec::new(),
             miss: world.is_long_map().then(|| Miss::new(seed)),
             weapons: Weapons::new(seed),
             citizens: Citizens::on_world(&world, seed),
@@ -150,9 +223,10 @@ impl Game {
     /// 수학 문제가 열려 있으면 결과 글 시간만 흐르고 나머지는 모두 멈춘다 (임시-31). 빨리감기여도 같다.
     /// 제작대가 열려 있으면 모두 멈춘다 (임시-18, 임시-37: 18:00도 오지 않는다).
     pub fn update_with_time_scale(&mut self, input: &PlayerInput, dt: f32, time_scale: f32) -> Vec<GameEvent> {
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.waiting_events);
         let crafting = self.crafting.is_open();
-        if self.is_over() || (crafting && CRAFTING_PAUSES_GAME) {
+        let shopping = self.shop.is_open();
+        if self.is_over() || (crafting && CRAFTING_PAUSES_GAME) || (shopping && SHOP_PAUSES_GAME) {
             self.forget_mining();
             return events;
         }
@@ -163,16 +237,35 @@ impl Game {
         }
         let world_dt = dt * time_scale;
         let stand_still = PlayerInput::default();
-        let input = if crafting { &stand_still } else { input };
+        let input = if crafting || shopping { &stand_still } else { input };
 
+        self.player.walk_speed = self.walk_speed();
         self.player.update(input, dt, if self.in_cave { &self.cave_world } else { &self.world });
 
         for clock_event in self.clock.update(world_dt) {
             events.push(match clock_event {
                 ClockEvent::NightStarted => GameEvent::NightStarted,
-                ClockEvent::DayStarted { day_number } => GameEvent::DayStarted { day_number },
+                ClockEvent::DayStarted { day_number } => {
+                    // 스케이트는 산 뒤 처음 오는 06:00에 벗겨진다 (임시-25).
+                    if self.shop.take_off_skates() {
+                        self.shop_events.push(ShopEvent::SkatesOff);
+                    }
+                    // 자동차도 탄 뒤 처음 오는 06:00에 내린다 (임시-41).
+                    if std::mem::replace(&mut self.gathering.bag.riding_car, false) {
+                        self.item_events.push(ItemEvent::CarOff);
+                    }
+                    // 부서진 상자는 06:00에 돌아오고, 금 간 상자는 새것이 된다 (임시-67).
+                    self.boxes.morning_came();
+                    GameEvent::DayStarted { day_number }
+                }
             });
         }
+
+        // 갑옷 시간은 게임 속 시간이다: 빨리감기 배수만큼 빨리 준다 (임시-26).
+        if self.shop.wear_armor(world_dt) {
+            self.shop_events.push(ShopEvent::ArmorOff);
+        }
+        self.combat.health.set_armored(self.shop.armor().is_some());
 
         // 밤 문제(update_combat)보다 먼저 입구 앞으로 나온다 (임시-37).
         if self.in_cave && !self.cave_is_open() {
@@ -187,7 +280,8 @@ impl Game {
         }
 
         self.update_combat(input, dt, &mut events);
-        self.update_gathering(dt, &events);
+        self.update_boxes(dt);
+        self.update_gathering(dt, &mut events);
         events
     }
 
@@ -215,13 +309,29 @@ impl Game {
             let held = self.weapons.held();
             let reach = self.attack_reach();
             let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), reach);
+            // 닿는 몬스터가 있으면 몬스터만 맞고 상자는 그대로다 (임시-64).
+            let hit_a_monster = hits.iter().any(|hit| {
+                matches!(
+                    hit,
+                    CombatEvent::ZombieHit { .. }
+                        | CombatEvent::ZombieDefeated { .. }
+                        | CombatEvent::SkeletonHit { .. }
+                        | CombatEvent::SkeletonDefeated { .. }
+                )
+            });
             events.extend(hits.into_iter().map(GameEvent::Combat));
+            if !hit_a_monster {
+                self.attack_box(player_rect, events);
+            }
             let facing = self.player.facing;
             let knocked_down = self.citizens.knock_down_reached(|body| is_reached(player_rect, facing, reach, body));
             events.extend(knocked_down.into_iter().map(|at| GameEvent::Combat(CombatEvent::CitizenDefeated { at })));
         }
-        let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
-        events.extend(happened.into_iter().map(GameEvent::Combat));
+        // 동굴 안에 있는 동안 몬스터(상자 몬스터도)는 모두 멈춘다 (부모님 결정 2026-11-14, REVIEW-021 2번).
+        if !self.in_cave {
+            let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
+            events.extend(happened.into_iter().map(GameEvent::Combat));
+        }
         if !self.combat.health.is_down() {
             self.update_miss_and_weapons(dt, events);
             self.update_citizens(dt, events);
@@ -313,8 +423,242 @@ impl Game {
     }
 
     /// W 키나 바꾸기 버튼을 "새로" 눌렀을 때 부른다 (US-053).
+    /// 순서: 맨손 → 칼 → 도끼 → 총 → 맨손. 없는 무기는 건너뛴다.
+    /// 포션·주사기총·엔더열매는 손에 들지 않고 따로 쓴다 (부모님 결정 2026-11-14).
     pub fn switch_weapon(&mut self) {
-        self.weapons.switch();
+        let choices: Vec<Weapon> = Weapon::ORDER.into_iter().filter(|w| self.weapons.has(*w)).collect();
+        let now = choices.iter().position(|w| *w == self.weapons.held()).unwrap_or(0);
+        self.weapons.hold(choices[(now + 1) % choices.len()]);
+    }
+
+    /// 가진 무기가 있으면 true. 폰 바꾸기 버튼은 이때만 보인다.
+    pub fn can_switch(&self) -> bool {
+        !self.weapons.owned().is_empty()
+    }
+
+    /// 지금 걷는 빠르기 (초당 픽셀). 자동차를 타면 자동차 빠르기만 쓰고 스케이트와 겹쳐 곱하지 않는다 (임시-41).
+    pub fn walk_speed(&self) -> f32 {
+        if self.gathering.bag.riding_car {
+            PLAYER_WALK_SPEED * CAR_SPEED_MULTIPLIER
+        } else {
+            PLAYER_WALK_SPEED * self.shop.walk_speed_multiplier()
+        }
+    }
+
+    /// 주사기총 쏘기 (US-083, 임시-46). 포션처럼 손에 들지 않고 따로 쓴다 (부모님 결정 2026-11-14).
+    /// 화면 안 몬스터가 모두 쓰러지고 주사기총이 없어진다: `ItemEvent::SyringeGunFired`, true.
+    /// 쓰러진 몬스터마다의 `GameEvent::Combat`은 다음 `update`가 돌려준다. 경험치는 없다.
+    /// 화면에 몬스터가 없거나(동굴 안 포함), 주사기총이 없거나, 상점·제작대·문제 창이 열렸거나, 판이 끝났으면 false이고 그대로다.
+    pub fn fire_syringe_gun(&mut self) -> bool {
+        if !self.gathering.bag.has_syringe_gun || !self.can_use_potion_now() {
+            return false;
+        }
+        let mut swept = Vec::new();
+        let monsters = self.sweep_monsters_on_screen(&mut swept);
+        if monsters == 0 {
+            return false;
+        }
+        self.waiting_events.extend(swept);
+        self.gathering.bag.has_syringe_gun = false;
+        self.combat.add_sweep_score(SYRINGE_GUN_SCORE);
+        self.item_events.push(ItemEvent::SyringeGunFired { at: self.player.rect().center(), monsters });
+        true
+    }
+
+    /// 엔더열매 먹기 (US-081). 포션처럼 손에 들지 않고 따로 쓴다 (부모님 결정 2026-11-14).
+    /// 힘이 생기고 하나 준다: `ItemEvent::EnderFruitEaten`, true.
+    /// 힘이 벌써 있으면 `ItemEvent::EnderFruitAlreadyEaten`이고 개수 그대로 false.
+    /// 엔더열매가 없거나, 상점·제작대·문제 창이 열렸거나, 판이 끝났으면 아무 일 없이 false.
+    pub fn eat_ender_fruit(&mut self) -> bool {
+        if self.gathering.bag.ender_fruits == 0 || !self.can_use_potion_now() {
+            return false;
+        }
+        let bag = &mut self.gathering.bag;
+        if bag.has_ender_power {
+            self.item_events.push(ItemEvent::EnderFruitAlreadyEaten);
+            return false;
+        }
+        bag.ender_fruits -= 1;
+        bag.has_ender_power = true;
+        self.item_events.push(ItemEvent::EnderFruitEaten { at: self.player.rect().center() });
+        true
+    }
+
+    /// 지금 화면 안 몬스터를 모두 쓰러뜨리고 그 수를 돌려준다 (임시-43). 동굴 안이면 0이다.
+    fn sweep_monsters_on_screen(&mut self, events: &mut Vec<GameEvent>) -> u32 {
+        if self.in_cave {
+            return 0;
+        }
+        let swept = self.combat.sweep_monsters_on_screen(self.camera_left());
+        let monsters = swept.len() as u32;
+        events.extend(swept.into_iter().map(GameEvent::Combat));
+        monsters
+    }
+
+    /// 여기서 쿵을 할 수 있으면 그 힘 (임시-42): 긴 맵 해변 모래밭(몸 가운데 x가 `SLAM_BEACH_LEFT`~`SLAM_BEACH_RIGHT`)이고,
+    /// 엔더열매 힘이나 다이아래더라이트 곡괭이가 있고, E 키로 쓸 다른 것(`usable_in_reach`)이 닿지 않을 때.
+    /// 둘 다 있으면 엔더열매가 먼저다. 폰 쿵 버튼(`SLAM_BUTTON_TEXT`)과 머리 위 E는 Some일 때만 보인다.
+    /// 쿵은 E 키나 캐기 버튼(`mine_held`)을 새로 누르면 일어난다.
+    pub fn slam_power_here(&self) -> Option<SlamPower> {
+        if self.is_over() || self.math.is_open() || self.crafting.is_open() || self.shop.is_open() || self.in_cave {
+            return None;
+        }
+        if !self.world.is_long_map() || self.usable_in_reach().is_some() {
+            return None;
+        }
+        let x = self.player.rect().center().x.rem_euclid(self.world.width);
+        if !(SLAM_BEACH_LEFT..=SLAM_BEACH_RIGHT).contains(&x) {
+            return None;
+        }
+        let bag = &self.gathering.bag;
+        if bag.has_ender_power {
+            Some(SlamPower::EnderFruit)
+        } else if bag.has_diamond_pickaxe {
+            Some(SlamPower::DiamondPickaxe)
+        } else {
+            None
+        }
+    }
+
+    /// 바다에 쿵 (US-081, US-082): 화면 안 몬스터가 모두 쓰러지고 다이아몬드를 얻는다. 몬스터가 없어도 쓰인다.
+    /// 엔더열매 힘이나 다이아래더라이트 곡괭이가 없어진다. 점수는 몬스터가 1마리 이상일 때만 (임시-47).
+    fn slam(&mut self, power: SlamPower, events: &mut Vec<GameEvent>) {
+        let monsters = self.sweep_monsters_on_screen(events);
+        let bag = &mut self.gathering.bag;
+        match power {
+            SlamPower::EnderFruit => bag.has_ender_power = false,
+            SlamPower::DiamondPickaxe => bag.has_diamond_pickaxe = false,
+        }
+        for _ in 0..power.diamonds() {
+            bag.add(Material::Diamond);
+        }
+        if monsters > 0 {
+            self.combat.add_sweep_score(power.score());
+        }
+        let at = self.player.rect().center();
+        self.item_events.push(ItemEvent::Slammed { power, at, monsters, diamonds: power.diamonds() });
+    }
+
+    /// 지난번 뒤로 생긴 자동차·주사기총·엔더열매·쿵 일을 모두 받는다. 화면이 `update` 뒤에 부른다.
+    pub fn take_item_events(&mut self) -> Vec<ItemEvent> {
+        std::mem::take(&mut self.item_events)
+    }
+
+    /// 지금 포션·주사기총·엔더열매를 쓸 수 있는 때인지: 판이 끝났거나, 상점·제작대·수학 문제 창이 열려 있으면 false.
+    fn can_use_potion_now(&self) -> bool {
+        !self.is_over() && !self.shop.is_open() && !self.crafting.is_open() && !self.math.is_open()
+    }
+
+    /// 포션 키(R·T)나 폰 포션 버튼을 눌렀을 때 부른다 (US-071, 부모님 결정: 포션은 다른 키로 먹는다).
+    /// 체력 포션: 체력이 가득이면 안 쓰인다. 독약 포션: 200픽셀 안에 몬스터가 없으면 안 쓰인다.
+    /// 쓰였으면 하나 줄고 `ShopEvent`가 생기고 true. 안 쓰였으면 개수 그대로 false.
+    /// 손에 든 무기는 바뀌지 않는다.
+    pub fn use_potion(&mut self, potion: Potion) -> bool {
+        if self.shop.potions(potion) == 0 || !self.can_use_potion_now() {
+            return false;
+        }
+        let at = self.player.rect().center();
+        let used = match potion {
+            Potion::Health => {
+                let healed = self.combat.health.heal(HEALTH_POTION_HEAL);
+                (healed > 0).then_some(ShopEvent::HealthPotionUsed { at, healed })
+            }
+            Potion::Poison => {
+                let monsters = if self.in_cave { 0 } else { self.combat.spray_poison(at) };
+                (monsters > 0).then_some(ShopEvent::PoisonSprayed { at, monsters })
+            }
+        };
+        let Some(event) = used else {
+            return false;
+        };
+        self.shop_events.push(event);
+        self.shop.take_potion(potion);
+        true
+    }
+
+    /// 상점 물건을 살 수 없는 이유. 살 수 있으면 None이다.
+    /// 신고 있는 스케이트는 다시 사지 않는다. 갑옷과 포션은 언제나 또 살 수 있다.
+    pub fn why_cant_buy(&self, item: ShopItem) -> Option<CantBuy> {
+        let already_have = item == ShopItem::Skates && self.shop.has_skates();
+        if already_have {
+            Some(CantBuy::AlreadyHave)
+        } else if self.wallet.coins() < item.price() {
+            Some(CantBuy::NotEnoughCoins)
+        } else {
+            None
+        }
+    }
+
+    /// 상점 화면의 사기 줄들 (`ShopItem::ALL` 순서).
+    pub fn buy_rows(&self) -> Vec<BuyRow> {
+        ShopItem::ALL
+            .into_iter()
+            .map(|item| {
+                let reason = self.why_cant_buy(item);
+                BuyRow { item, name: item.name(), price: item.price(), can_buy: reason.is_none(), reason }
+            })
+            .collect()
+    }
+
+    /// 물건을 산다. 못 사면 코인도 물건도 그대로다.
+    /// 포션은 가방에 넣고, 스케이트와 갑옷은 바로 입는다. 무기는 팔지 않는다 (부모님 결정 2026-11-14).
+    /// 산 물건은 수학 문제 "아이템"으로 세지 않는다 (임시). 점수도 줄지 않는다 (US-069).
+    pub fn buy(&mut self, item: ShopItem) -> Result<(), CantBuy> {
+        if let Some(reason) = self.why_cant_buy(item) {
+            return Err(reason);
+        }
+        self.wallet.spend(item.price());
+        match item {
+            ShopItem::HealthPotion => self.shop.add_potion(Potion::Health),
+            ShopItem::PoisonPotion => self.shop.add_potion(Potion::Poison),
+            ShopItem::Skates => self.shop.put_on_skates(),
+            ShopItem::RainbowArmor => self.shop.put_on_armor(Armor::Rainbow),
+            ShopItem::DiamondArmor => self.shop.put_on_armor(Armor::Diamond),
+        }
+        self.combat.health.set_armored(self.shop.armor().is_some());
+        Ok(())
+    }
+
+    /// 광물을 팔 수 없는 이유. 팔 수 있으면 None이다. 철광석·나무는 팔지 않아서 `NoneToSell`이다.
+    /// 코인이 `COIN_MAX`를 넘게 되어도 판다. 지갑이 `COIN_MAX`에서 멈춘다 (부모님 결정).
+    pub fn why_cant_sell(&self, material: Material) -> Option<CantSell> {
+        if sell_price(material).is_none() || self.gathering.bag.count(material) == 0 {
+            return Some(CantSell::NoneToSell);
+        }
+        None
+    }
+
+    /// 상점 화면의 팔기 줄들: 금, 은, 동 (임시-38).
+    pub fn sell_rows(&self) -> Vec<SellRow> {
+        SELLABLE
+            .into_iter()
+            .map(|material| {
+                let reason = self.why_cant_sell(material);
+                let price = sell_price(material).unwrap_or(0);
+                let count = self.gathering.bag.count(material);
+                SellRow { material, name: material.name(), price, count, can_sell: reason.is_none(), reason }
+            })
+            .collect()
+    }
+
+    /// 광물 하나를 판다. 돌려주는 값: 지갑에 실제로 들어간 코인.
+    /// 판 코인은 점수의 "주운 코인"(`coins.picked_total`)에 넣지 않는다 (니로 해석, US-069).
+    pub fn sell(&mut self, material: Material) -> Result<u32, CantSell> {
+        if let Some(reason) = self.why_cant_sell(material) {
+            return Err(reason);
+        }
+        self.gathering.bag.take_one(material);
+        Ok(self.wallet.add(sell_price(material).unwrap_or(0)))
+    }
+
+    /// 상점 화면을 닫는다 (Esc, 나가기 버튼). 문 앞에 그대로 서 있고, 멈춘 때부터 이어진다.
+    pub fn close_shop(&mut self) {
+        self.shop.close();
+    }
+
+    /// 지난번 뒤로 생긴 상점·포션·스케이트·갑옷 일을 모두 받는다. 화면이 `update` 뒤에 부른다.
+    pub fn take_shop_events(&mut self) -> Vec<ShopEvent> {
+        std::mem::take(&mut self.shop_events)
     }
 
     /// 지난번 뒤로 생긴 캐기·동굴·제작대 일을 모두 받는다. 화면이 `update` 뒤에 부른다.
@@ -331,7 +675,7 @@ impl Game {
     /// 거리가 같으면 바라보는 쪽을 먼저 쓴다.
     /// 판이 끝났거나 수학 문제·제작대가 열려 있으면 None이다. 폰 버튼은 Some일 때만 보인다 (글은 `button_text`).
     pub fn usable_in_reach(&self) -> Option<Usable> {
-        if self.is_over() || self.math.is_open() || self.crafting.is_open() {
+        if self.is_over() || self.math.is_open() || self.crafting.is_open() || self.shop.is_open() {
             return None;
         }
         let ready = |list: &[Mineable]| -> Vec<(usize, Rect)> {
@@ -344,6 +688,7 @@ impl Game {
         } else {
             spots.extend(self.world.cave_entrance().map(|rect| (Usable::CaveEntrance, rect)));
             spots.extend(self.world.workbench().map(|rect| (Usable::Workbench, rect)));
+            spots.extend(self.world.house_door().map(|rect| (Usable::HouseDoor, rect)));
             spots.extend(ready(&self.gathering.trees).into_iter().map(|(i, rect)| (Usable::Tree(i), rect)));
         }
         let body = self.player.rect();
@@ -392,6 +737,11 @@ impl Game {
                 self.crafting.open();
                 self.gather_events.push(GatherEvent::CraftingOpened);
             }
+            // 낮에도 밤에도 들어간다 (임시-24).
+            Usable::HouseDoor => {
+                self.shop.open();
+                self.shop_events.push(ShopEvent::Opened);
+            }
         }
     }
 
@@ -416,7 +766,7 @@ impl Game {
     /// 캐기 버튼을 처리하고 나무와 덩이 시간(실제 시간)을 흘린다. 싸움이 끝난 뒤에 불러야 이번 프레임에 맞은 것을 본다.
     /// 시작은 "새로" 눌렀을 때뿐이라 꾹 누르고 있으면 다음 것을 캐지 않는다.
     /// 캐기와 곡괭이는 수학 문제 "아이템"으로 세지 않는다 (임시-37).
-    fn update_gathering(&mut self, dt: f32, happened: &[GameEvent]) {
+    fn update_gathering(&mut self, dt: f32, happened: &mut Vec<GameEvent>) {
         self.gathering.grow_back(dt);
         let newly_pressed = self.mine_held && !self.mine_was_held;
         self.mine_was_held = self.mine_held;
@@ -424,6 +774,11 @@ impl Game {
         let got_hurt = happened.iter().any(|e| matches!(e, GameEvent::Combat(CombatEvent::PlayerHurt { .. })));
         if !self.mine_held || got_hurt || self.is_over() || self.math.is_open() {
             self.gathering.stop_mining();
+            return;
+        }
+        // 해변에서 E 키·쿵 버튼을 새로 누르면 쿵 (임시-42). 다른 쓸 것이 닿으면 그것이 먼저라 쿵이 없다.
+        if let Some(power) = self.slam_power_here().filter(|_| newly_pressed) {
+            self.slam(power, happened);
             return;
         }
         if newly_pressed {
@@ -437,6 +792,165 @@ impl Game {
         let mined = self.gathering.keep_mining(dt, self.in_cave, self.player.rect());
         if let Some((what, at)) = mined {
             self.gather_events.push(GatherEvent::Mined { what, at });
+        }
+    }
+
+    /// 지난번 뒤로 생긴 상자 일(금 감, 부서짐, 깜짝 아이템, 와우!, 공격!, 도끼 안내)을 모두 받는다.
+    /// 화면이 `update` 뒤에 부른다. 상자에서 나온 몬스터의 `ZombieAppeared`·`SkeletonAppeared`는 `GameEvent::Combat`으로도 온다.
+    pub fn take_box_events(&mut self) -> Vec<BoxEvent> {
+        std::mem::take(&mut self.box_events)
+    }
+
+    /// 공격 버튼으로 상자를 친다 (임시-63, 임시-64). 몬스터가 맞지 않았을 때만 부른다.
+    /// 도끼면 바라보는 쪽 가장 가까운 상자 하나가 맞는다. 다른 것이면 상자는 그대로이고 처음 한 번만 도끼 안내가 나온다.
+    fn attack_box(&mut self, body: Rect, events: &mut Vec<GameEvent>) {
+        if self.in_cave {
+            return;
+        }
+        let facing = self.player.facing;
+        let held = self.weapons.held();
+        let Some(index) = self.boxes.box_in_reach(body, facing, Weapon::Axe.range()) else {
+            return;
+        };
+        if held != Weapon::Axe {
+            if self.boxes.take_need_axe_hint() {
+                self.box_events.push(BoxEvent::NeedAxe { at: self.boxes.list[index].rect.center() });
+            }
+            return;
+        }
+        let at = self.boxes.list[index].rect.center();
+        if self.boxes.hit(index) {
+            self.break_box(index, events);
+        } else {
+            self.box_events.push(BoxEvent::Cracked { index, at, cracks: self.boxes.list[index].cracks() });
+        }
+    }
+
+    /// 상자 `index`가 부서졌다: 맵에서 빠지고 (길·총·몬스터 나오는 자리에서 없는 것, D48·D66·D62),
+    /// 위에 있던 코인·무기·아이템은 땅으로 떨어진다 (임시-66). 그다음 깜짝 아이템이나 몬스터가 나올 수 있다 (둘이 함께는 없다).
+    /// 점수와 수학 문제 아이템 수는 늘지 않는다.
+    pub(crate) fn break_box(&mut self, index: usize, events: &mut Vec<GameEvent>) {
+        let rect = self.boxes.list[index].rect;
+        self.boxes.mark_broken(index);
+        self.world.obstacles.retain(|obstacle| *obstacle != rect);
+        if let Some(coin) = self.coins.list.get_mut(index) {
+            coin.fall_to_ground(self.world.ground_y);
+        }
+        self.land_things_again();
+        self.box_events.push(BoxEvent::Broken { index, at: rect.center() });
+
+        match self.boxes.dice.roll_surprise() {
+            Surprise::Item => {
+                let have: Vec<SurpriseItem> = SurpriseItem::ALL.into_iter().filter(|item| self.has_the_only_one(*item)).collect();
+                let item = self.boxes.dice.roll_item(&have);
+                let at = self.boxes.drop_item(item, rect, &self.world);
+                self.box_events.push(BoxEvent::ItemDropped { item, at });
+                if item.is_very_strong() {
+                    self.box_events.push(BoxEvent::Wow { at: self.player.rect().center() });
+                }
+            }
+            Surprise::Monster => {
+                let monster = self.boxes.dice.roll_monster();
+                if let Some(appeared) = self.combat.spawn_from_box(rect.center().x, self.world.ground_y, monster) {
+                    let at = match appeared {
+                        CombatEvent::ZombieAppeared { at } | CombatEvent::SkeletonAppeared { at, .. } => at,
+                        _ => rect.center(),
+                    };
+                    let monster = if matches!(appeared, CombatEvent::SkeletonAppeared { .. }) {
+                        BoxMonster::Skeleton
+                    } else {
+                        BoxMonster::Zombie
+                    };
+                    events.push(GameEvent::Combat(appeared));
+                    self.box_events.push(BoxEvent::MonsterJumpedOut { monster, at });
+                }
+            }
+            Surprise::Nothing => {}
+        }
+    }
+
+    /// 상자가 빠지거나 돌아온 뒤: 땅의 무기와 깜짝 아이템이 멈출 곳을 다시 정한다. 공중에 뜨거나 상자에 묻히지 않는다.
+    fn land_things_again(&mut self) {
+        for weapon in &mut self.weapons.dropped {
+            weapon.land_again(&self.world);
+        }
+        for dropped in &mut self.boxes.items {
+            dropped.land_again(&self.world);
+        }
+    }
+
+    /// 이미 가진 "하나뿐인 것"이면 true (임시-65): 칼, 도끼, 총, 신고 있는 스케이트, 타고 있는 자동차,
+    /// 다이아래더라이트 곡괭이, 주사기총, 지금 입고 있는 갑옷. 포션·엔더열매는 가지고 있어도 또 나온다.
+    /// 갑옷은 입고 있는 것만 빠진다 (무지개를 입으면 다이아 갑옷은 나온다).
+    fn has_the_only_one(&self, item: SurpriseItem) -> bool {
+        let bag = &self.gathering.bag;
+        match item {
+            SurpriseItem::Sword => self.weapons.has(Weapon::Sword),
+            SurpriseItem::Axe => self.weapons.has(Weapon::Axe),
+            SurpriseItem::Gun => self.weapons.has(Weapon::Gun),
+            SurpriseItem::Skates => self.shop.has_skates(),
+            SurpriseItem::Car => bag.riding_car,
+            SurpriseItem::DiamondPickaxe => bag.has_diamond_pickaxe,
+            SurpriseItem::SyringeGun => bag.has_syringe_gun,
+            SurpriseItem::RainbowArmor => self.shop.armor() == Some(Armor::Rainbow),
+            SurpriseItem::DiamondArmor => self.shop.armor() == Some(Armor::Diamond),
+            SurpriseItem::HealthPotion | SurpriseItem::PoisonPotion | SurpriseItem::EnderFruit => false,
+        }
+    }
+
+    /// 주운 깜짝 아이템을 상점에서 산 것·만든 것과 똑같이 넣는다. 무기는 손에 든다 (미스 무기처럼).
+    /// 스케이트·갑옷은 바로 신고 입고, 자동차는 바로 탄다. 이미 가진 하나뿐인 것이면 그대로다.
+    fn get_surprise_item(&mut self, item: SurpriseItem) {
+        let bag = &mut self.gathering.bag;
+        match item {
+            SurpriseItem::Sword | SurpriseItem::Axe | SurpriseItem::Gun => {
+                let weapon = match item {
+                    SurpriseItem::Sword => Weapon::Sword,
+                    SurpriseItem::Axe => Weapon::Axe,
+                    _ => Weapon::Gun,
+                };
+                if !self.weapons.has(weapon) {
+                    self.weapons.add_bought(weapon);
+                }
+            }
+            SurpriseItem::HealthPotion => self.shop.add_potion(Potion::Health),
+            SurpriseItem::PoisonPotion => self.shop.add_potion(Potion::Poison),
+            SurpriseItem::Skates => self.shop.put_on_skates(),
+            SurpriseItem::RainbowArmor => self.shop.put_on_armor(Armor::Rainbow),
+            SurpriseItem::DiamondArmor => self.shop.put_on_armor(Armor::Diamond),
+            SurpriseItem::SyringeGun => bag.has_syringe_gun = true,
+            SurpriseItem::EnderFruit => bag.ender_fruits += 1,
+            SurpriseItem::Car => bag.riding_car = true,
+            SurpriseItem::DiamondPickaxe => bag.has_diamond_pickaxe = true,
+        }
+        self.combat.health.set_armored(self.shop.armor().is_some());
+    }
+
+    /// 상자 시간을 흘린다: 06:00 뒤 자리가 빈 상자는 돌아오고 (임시-67), 깜짝 아이템은 떨어지고 주워진다.
+    /// 판이 끝났으면 멈춘다.
+    fn update_boxes(&mut self, dt: f32) {
+        if self.is_over() {
+            return;
+        }
+        for index in self.boxes.waiting_for_space() {
+            let rect = self.boxes.list[index].rect;
+            let someone_there = really_overlaps(rect, self.body_on_map())
+                || self.combat.any_monster_touches(rect)
+                || self.citizens.list.iter().any(|citizen| really_overlaps(citizen.rect, rect));
+            if someone_there {
+                continue;
+            }
+            self.boxes.stand_again(index);
+            self.world.obstacles.push(rect);
+            if let Some(coin) = self.coins.list.get_mut(index) {
+                coin.go_back_on_box();
+            }
+            self.land_things_again();
+            self.box_events.push(BoxEvent::CameBack { index });
+        }
+        for item in self.boxes.update_items(dt, self.body_on_map()) {
+            self.get_surprise_item(item);
+            self.box_events.push(BoxEvent::ItemPicked { item });
         }
     }
 

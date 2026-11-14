@@ -1,5 +1,5 @@
 //! 한글 글자 그리기 (Jua 글꼴). 크기는 가상 화면(960×540) 기준 픽셀.
-//! 창이 커지면 글꼴을 그만큼 크게 그려서 확대해도 흐려지지 않게 한다.
+//! 창이 커지면 글꼴을 크게 그려서 확대해도 흐려지지 않게 한다. 단, 글꼴 크기는 정해진 몇 단계(`FONT_PIXEL_STEPS`)만 쓴다.
 //! 모든 글자에 진한 테두리를 둘러서 하늘·바다·모래 어디서나 또렷하게 보이게 한다.
 
 use macroquad::prelude::*;
@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 thread_local! {
-    /// 이미 쓴 (글자, 글꼴 크기, 화면 배율). [`TextPainter::flush_before_new_glyphs`]만 쓴다.
-    static SEEN_GLYPHS: RefCell<HashSet<(char, u16, u32)>> = RefCell::new(HashSet::new());
+    /// 이미 쓴 (글자, 글꼴 단계 크기). [`TextPainter::flush_before_new_glyphs`]만 쓴다.
+    static SEEN_GLYPHS: RefCell<HashSet<(char, u16)>> = RefCell::new(HashSet::new());
 }
 
 /// 글자 테두리 색 (진한 남색)
@@ -33,23 +33,41 @@ pub fn draw_outline_rings(radius: f32, mut draw: impl FnMut(Vec2)) {
 
 pub struct TextPainter<'a> {
     font: &'a Font,
-    /// 가상 1픽셀이 창에서 몇 픽셀인지 (Letterbox::scale)
+    /// 가상 1픽셀이 창에서 몇 픽셀인지 (Letterbox::scale). `MAX_TEXT_SCALE`에서 멈춘다.
     scale: f32,
+}
+
+/// 글꼴을 실제로 그려 두는 크기(픽셀)는 이 몇 단계뿐이다. 사이 크기는 `font_scale`로 늘리고 줄인다.
+/// 크기마다 글자를 새로 그려 두면 글꼴 그림(아틀라스)이 8192까지 커지고, 새 글자마다 그 그림을 통째로
+/// GPU에 올려서 최대 950ms 끊겼다 (qa/perf-2026-11-14.md). 단계가 정해져 있으면 창 크기를 바꿔도 늘지 않는다.
+pub const FONT_PIXEL_STEPS: [u16; 7] = [16, 24, 32, 48, 64, 96, 128];
+/// 글자를 그릴 때 쓰는 화면 배율 상한. 큰 화면에서는 조금 부드러워질 뿐 크기는 맞다.
+pub const MAX_TEXT_SCALE: f32 = 2.0;
+/// 글 한 줄이 바닥선 위로, 아래로 차지하는 높이 (글자 크기에 대한 비율, 테두리·그림자 포함 넉넉히).
+/// 큰 알림 글끼리, 정보판과 겹치지 않게 자리를 잡을 때 쓴다 (BUG-031).
+pub const TEXT_ABOVE: f32 = 1.0;
+pub const TEXT_BELOW: f32 = 0.22;
+/// 원하는 픽셀보다 이만큼까지 작은 단계는 그대로 써서 키운다 (거의 티가 안 난다).
+const STEP_STRETCH: f32 = 1.15;
+
+/// 실제 픽셀 `pixels`를 그릴 글꼴 단계: `pixels`를 (조금 키워서라도) 덮는 가장 작은 단계. 아주 크면 가장 큰 단계.
+pub fn font_step(pixels: f32) -> u16 {
+    FONT_PIXEL_STEPS.iter().copied().find(|step| *step as f32 * STEP_STRETCH >= pixels).unwrap_or(FONT_PIXEL_STEPS[FONT_PIXEL_STEPS.len() - 1])
 }
 
 impl<'a> TextPainter<'a> {
     pub fn new(font: &'a Font, letterbox_scale: f32) -> TextPainter<'a> {
-        // 창 크기를 끌어서 바꿀 때 글꼴 크기가 너무 많이 생기지 않게 0.1 단위로 맞춘다.
-        let scale = ((letterbox_scale * 10.0).round() / 10.0).max(0.1);
-        TextPainter { font, scale }
+        TextPainter { font, scale: letterbox_scale.clamp(0.1, MAX_TEXT_SCALE) }
     }
 
-    fn params(&self, size: f32, color: Color) -> TextParams<'a> {
-        let font_size = (size * self.scale).round().max(1.0) as u16;
+    /// 글꼴 단계는 `size`로 고르고, 보이는 크기는 `size × zoom`. 커졌다 작아지는 글자("쿵!", "부릉!")가
+    /// 프레임마다 새 글꼴 크기를 만들지 않게 한다.
+    fn params_zoomed(&self, size: f32, zoom: f32, color: Color) -> TextParams<'a> {
+        let font_size = font_step(size * self.scale);
         TextParams {
             font: Some(self.font),
             font_size,
-            font_scale: size / font_size as f32,
+            font_scale: size * zoom / font_size as f32,
             color,
             ..Default::default()
         }
@@ -59,10 +77,9 @@ impl<'a> TextPainter<'a> {
     /// 이번 프레임에 쌓아 둔 글자는 아직 옛 그림을 가리켜서 까만 네모가 된다.
     /// 그래서 처음 쓰는 글자가 있으면, 쌓인 그리기를 먼저 끝내고 넘어간다.
     fn flush_before_new_glyphs(&self, text: &str, font_size: u16) {
-        let dpi = screen_dpi_scale();
         let is_new = SEEN_GLYPHS.with_borrow_mut(|seen| {
             // 모두 넣어야 해서 `any`로 줄이지 않는다
-            text.chars().fold(false, |new, c| seen.insert((c, font_size, dpi.to_bits())) || new)
+            text.chars().fold(false, |new, c| seen.insert((c, font_size)) || new)
         });
         if is_new {
             // miniquad는 지운 그림을 "지금 묶인 그림"으로 기억했다가 다시 묶으려 한다 (콘솔의 glBindTexture 오류).
@@ -74,7 +91,11 @@ impl<'a> TextPainter<'a> {
     }
 
     pub fn width(&self, text: &str, size: f32) -> f32 {
-        let p = self.params(size, WHITE);
+        self.width_zoomed(text, size, 1.0)
+    }
+
+    fn width_zoomed(&self, text: &str, size: f32, zoom: f32) -> f32 {
+        let p = self.params_zoomed(size, zoom, WHITE);
         self.flush_before_new_glyphs(text, p.font_size);
         measure_text(text, p.font, p.font_size, p.font_scale).width
     }
@@ -87,13 +108,50 @@ impl<'a> TextPainter<'a> {
     /// `center_x`를 가운데로, `baseline_y`를 글자 바닥선으로 그린다.
     /// 그림자 → 진한 테두리 → 글자 순서. 테두리·그림자도 `color`의 투명도를 따른다.
     pub fn centered(&self, text: &str, center_x: f32, baseline_y: f32, size: f32, color: Color) {
-        let x = center_x - self.width(text, size) / 2.0;
-        let shadow = (size * 0.06).max(2.0);
-        draw_text_ex(text, x + shadow, baseline_y + shadow, self.params(size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a)));
+        self.centered_zoomed(text, center_x, baseline_y, size, 1.0, color);
+    }
+
+    /// `centered`와 같은데 `size × zoom` 크기로 보인다. 크기가 움직이는 글자는 `size`를 고정하고 `zoom`만 바꾼다.
+    pub fn centered_zoomed(&self, text: &str, center_x: f32, baseline_y: f32, size: f32, zoom: f32, color: Color) {
+        let shown = size * zoom;
+        let x = center_x - self.width_zoomed(text, size, zoom) / 2.0;
+        let shadow = (shown * 0.06).max(2.0);
+        draw_text_ex(text, x + shadow, baseline_y + shadow, self.params_zoomed(size, zoom, Color::new(0.0, 0.0, 0.0, 0.35 * color.a)));
         let outline = Color { a: color.a, ..OUTLINE_COLOR };
-        draw_outline_rings(size * TITLE_OUTLINE_RATIO * TEXT_OUTLINE_SHARE, |d| {
-            draw_text_ex(text, x + d.x, baseline_y + d.y, self.params(size, outline));
+        draw_outline_rings(shown * TITLE_OUTLINE_RATIO * TEXT_OUTLINE_SHARE, |d| {
+            draw_text_ex(text, x + d.x, baseline_y + d.y, self.params_zoomed(size, zoom, outline));
         });
-        draw_text_ex(text, x, baseline_y, self.params(size, color));
+        draw_text_ex(text, x, baseline_y, self.params_zoomed(size, zoom, color));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_sizes_use_only_a_few_steps_on_any_screen() {
+        // 화면 배율이 얼마든, 글자 크기가 얼마든 글꼴 단계는 정해진 7개 안이다 (아틀라스가 끝없이 크지 않게)
+        let mut used = std::collections::BTreeSet::new();
+        for scale_x100 in 30..=400 {
+            let scale = (scale_x100 as f32 / 100.0).clamp(0.1, MAX_TEXT_SCALE);
+            for size in 14..=120 {
+                used.insert(font_step(size as f32 * scale));
+            }
+        }
+        assert!(used.iter().all(|s| FONT_PIXEL_STEPS.contains(s)));
+        assert!(used.len() <= FONT_PIXEL_STEPS.len());
+    }
+
+    #[test]
+    fn step_covers_the_wanted_pixels_so_text_stays_sharp() {
+        for px in 1..=128 {
+            let step = font_step(px as f32) as f32;
+            assert!(step * STEP_STRETCH >= px as f32, "{px}px → {step}");
+        }
+        assert_eq!(font_step(30.0), 32);
+        assert_eq!(font_step(50.0), 48, "조금 넘는 건 키워서 쓴다");
+        assert_eq!(font_step(70.0), 64);
+        assert_eq!(font_step(500.0), 128, "아주 크면 가장 큰 단계");
     }
 }

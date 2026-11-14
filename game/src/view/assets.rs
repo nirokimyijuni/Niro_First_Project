@@ -25,6 +25,28 @@ pub const MISS_CITIZEN_BOMB_PATH: &str = "assets/sprites/miss-citizen-bomb.png";
 pub const WEAPON_SWORD_PATH: &str = "assets/sprites/weapon-sword.png";
 pub const WEAPON_AXE_PATH: &str = "assets/sprites/weapon-axe.png";
 pub const WEAPON_GUN_PATH: &str = "assets/sprites/weapon-gun.png";
+/// 새 아이템 그림 4개 (헤일리, `art/spritecook/items/`). 옛 `assets/sprites/item-*.png`는 쓰지 않는다.
+/// `ItemPicture::ALL` 순서.
+pub const ITEM_PATHS: [&str; 4] = [
+    "assets/sprites/items/item-diamond-pickaxe.png",
+    "assets/sprites/items/item-syringe-gun.png",
+    "assets/sprites/items/item-ender-fruit.png",
+    "assets/sprites/items/item-car.png",
+];
+
+/// 새 아이템 그림 (제작대 버튼, 정보판, 맵의 자동차·곡괭이). `view::items`가 그린다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemPicture {
+    DiamondPickaxe,
+    SyringeGun,
+    EnderFruit,
+    Car,
+}
+
+#[allow(dead_code)]
+impl ItemPicture {
+    pub const ALL: [ItemPicture; 4] = [ItemPicture::DiamondPickaxe, ItemPicture::SyringeGun, ItemPicture::EnderFruit, ItemPicture::Car];
+}
 
 /// 원화에서 캐릭터별로 잘라 낼 네모 (x, y, 가로, 세로), 원화 픽셀 기준.
 /// 위쪽 손글씨 이름은 빼고, 머리 위 안테나(T자 선, docs/04-scenario.md)와 모자·머리·왕관은 넣었다.
@@ -121,9 +143,16 @@ pub struct M6Art {
     pub weapon_sword: Texture2D,
     pub weapon_axe: Texture2D,
     pub weapon_gun: Texture2D,
+    /// `ItemPicture::ALL` 순서
+    items: Vec<Texture2D>,
 }
 
 impl M6Art {
+    /// 새 아이템 그림.
+    pub fn item(&self, picture: ItemPicture) -> &Texture2D {
+        &self.items[picture as usize]
+    }
+
     /// 무기 그림. 맨손은 없다.
     pub fn weapon(&self, kind: Weapon) -> Option<&Texture2D> {
         match kind {
@@ -148,6 +177,13 @@ impl M6Art {
             weapon_sword: load(WEAPON_SWORD_PATH, FilterMode::Nearest).await,
             weapon_axe: load(WEAPON_AXE_PATH, FilterMode::Nearest).await,
             weapon_gun: load(WEAPON_GUN_PATH, FilterMode::Nearest).await,
+            items: {
+                let mut items = Vec::new();
+                for path in ITEM_PATHS {
+                    items.push(load(path, FilterMode::Nearest).await);
+                }
+                items
+            },
         }
     }
 }
@@ -408,7 +444,7 @@ mod tests {
 
     #[test]
     fn cut_pictures_have_no_empty_edges() {
-        for path in SKELETON_PATHS.into_iter().chain([MISS_PATH, MISS_CITIZEN_BOMB_PATH, WEAPON_SWORD_PATH, WEAPON_AXE_PATH, WEAPON_GUN_PATH]) {
+        for path in SKELETON_PATHS.into_iter().chain([MISS_PATH, MISS_CITIZEN_BOMB_PATH, WEAPON_SWORD_PATH, WEAPON_AXE_PATH, WEAPON_GUN_PATH]).chain(ITEM_PATHS) {
             let bytes = std::fs::read(format!("{}/{path}", env!("CARGO_MANIFEST_DIR"))).expect("그림");
             let img = cut_to_ink(&bytes);
             let (w, h) = (img.width as usize, img.height as usize);
@@ -417,6 +453,15 @@ mod tests {
             assert!(data[(h - 1) * w..].iter().any(|p| p[3] > 0), "{path} 맨 아래 줄에 발이 있다");
             assert!(data[..w].iter().any(|p| p[3] > 0), "{path} 맨 위");
             assert!((0..h).any(|y| data[y * w][3] > 0) && (0..h).any(|y| data[y * w + w - 1][3] > 0), "{path} 양옆");
+        }
+    }
+
+    #[test]
+    fn every_item_picture_has_a_file_in_the_new_folder() {
+        assert_eq!(ITEM_PATHS.len(), ItemPicture::ALL.len());
+        for (i, picture) in ItemPicture::ALL.iter().enumerate() {
+            assert_eq!(*picture as usize, i, "그림 순서와 파일 순서가 같다");
+            assert!(ITEM_PATHS[i].starts_with("assets/sprites/items/"), "옛 item-*.png가 아니라 새 폴더 그림");
         }
     }
 

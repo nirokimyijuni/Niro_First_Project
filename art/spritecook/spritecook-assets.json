@@ -59,5 +59,45 @@
   "weapon-axe": {
     "based_on": "local-pillow",
     "sha12": "d295bb431b63"
+  },
+  "item-diamond-pickaxe": {
+    "based_on": "art/concept/items-pickaxe-car.jpg",
+    "file": "art/spritecook/items/item-diamond-pickaxe.png",
+    "sha12": "8932b9a51db9",
+    "credits": 0,
+    "note": "2026-11-14 아이 그림을 바탕으로 이 PC에서 새로 그림, 0크레딧 (items/draw_items.py). 다이아래더라이트 곡괭이",
+    "approval": "부모 승인: 아이가 매우 좋아함 2026-11-14",
+    "parent_permission": "업로드 없음 (로컬 작업 지시)",
+    "child_consent": "아이가 직접 그린 그림"
+  },
+  "item-car": {
+    "based_on": "art/concept/items-pickaxe-car.jpg",
+    "file": "art/spritecook/items/item-car.png",
+    "sha12": "bb2360b16c2f",
+    "credits": 0,
+    "note": "2026-11-14 아이 그림을 바탕으로 이 PC에서 새로 그림, 0크레딧 (items/draw_items.py). 자동차",
+    "approval": "부모 승인: 아이가 매우 좋아함 2026-11-14",
+    "parent_permission": "업로드 없음 (로컬 작업 지시)",
+    "child_consent": "아이가 직접 그린 그림"
+  },
+  "item-syringe-gun": {
+    "based_on": "art/concept/items-syringe-gun-ender-fruit.jpg",
+    "file": "art/spritecook/items/item-syringe-gun.png",
+    "sha12": "db288044b480",
+    "credits": 0,
+    "note": "2026-11-14 아이 그림을 바탕으로 이 PC에서 새로 그림, 0크레딧 (items/draw_items.py). 주사기총",
+    "approval": "부모 승인: 아이가 매우 좋아함 2026-11-14",
+    "parent_permission": "업로드 없음 (로컬 작업 지시)",
+    "child_consent": "아이가 직접 그린 그림"
+  },
+  "item-ender-fruit": {
+    "based_on": "art/concept/items-syringe-gun-ender-fruit.jpg",
+    "file": "art/spritecook/items/item-ender-fruit.png",
+    "sha12": "d72486dc85aa",
+    "credits": 0,
+    "note": "2026-11-14 아이 그림을 바탕으로 이 PC에서 새로 그림, 0크레딧 (items/draw_items.py). 엔더열매",
+    "approval": "부모 승인: 아이가 매우 좋아함 2026-11-14",
+    "parent_permission": "업로드 없음 (로컬 작업 지시)",
+    "child_consent": "아이가 직접 그린 그림"
   }
 }

@@ -10,7 +10,7 @@ mod logic;
 
 use config::*;
 use logic::character::CharacterKind;
-use logic::crafting::Crafting;
+use logic::crafting::{Crafting, Recipe};
 use logic::game::{Game, GameEvent, GatherEvent, Usable};
 use logic::gathering::{Bag, Material};
 use logic::player::{Facing, PlayerInput};
@@ -99,7 +99,8 @@ fn wood(g: &Game) -> u32 {
 }
 
 fn ores(g: &Game) -> u32 {
-    [Material::Iron, Material::Copper, Material::Silver, Material::Gold].iter().map(|m| g.gathering.bag.count(*m)).sum()
+    // D75(US-079)로 루비·에메랄드·다이아몬드도 광석이다.
+    Material::ALL.iter().filter(|m| **m != Material::Wood).map(|m| g.gathering.bag.count(*m)).sum()
 }
 
 // ---- US-022 캐기 입력과 닿는 거리 ----
@@ -367,7 +368,9 @@ fn trees_can_be_mined_at_night() {
 
 #[test]
 fn ore_chances_add_up_to_one() {
-    let sum = ORE_IRON_CHANCE + ORE_COPPER_CHANCE + ORE_SILVER_CHANCE + ORE_GOLD_CHANCE;
+    // D75(US-079)로 일곱 가지가 되었다.
+    let sum = ORE_IRON_CHANCE + ORE_COPPER_CHANCE + ORE_SILVER_CHANCE + ORE_GOLD_CHANCE + ORE_RUBY_CHANCE + ORE_EMERALD_CHANCE
+        + ORE_DIAMOND_CHANCE;
     assert!((sum - 1.0).abs() < 0.0001);
 }
 
@@ -615,7 +618,11 @@ fn mining_tells_what_came_out_and_where() {
 #[test]
 fn every_material_has_its_popup_text() {
     let texts = Material::ALL.map(Material::mined_text);
-    assert_eq!(texts, ["나무를 캤어요!", "철광석을 캤어요!", "동을 캤어요!", "은을 캤어요!", "금을 캤어요!"]);
+    // D75(US-079)로 루비·에메랄드·다이아몬드가 더해졌다.
+    assert_eq!(
+        texts,
+        ["나무를 캤어요!", "철광석을 캤어요!", "동을 캤어요!", "은을 캤어요!", "금을 캤어요!", "루비를 캤어요!", "에메랄드를 캤어요!", "영차! 다이아몬드를 캤어요!"]
+    );
 }
 
 // ---- US-021 제작대와 곡괭이 ----
@@ -659,8 +666,8 @@ fn the_shape_makes_a_pickaxe_and_uses_up_materials() {
     let mut bag = bag_with(5, 3);
     let mut crafting = crafting_with_shape(&bag);
     assert_eq!(bag.count(Material::Wood), 5, "놓는 동안은 줄지 않는다");
-    assert!(crafting.pickaxe_is_ready(&bag));
-    assert!(crafting.take_pickaxe(&mut bag));
+    assert_eq!(crafting.ready_recipe(&bag), Some(Recipe::Pickaxe));
+    assert_eq!(crafting.take_result(&mut bag), Some(Recipe::Pickaxe));
     assert!(bag.has_pickaxe);
     assert_eq!((bag.count(Material::Wood), bag.count(Material::Iron)), (1, 1));
     assert!(crafting.grid.iter().flatten().all(|cell| cell.is_none()), "칸이 빈다");
@@ -679,7 +686,7 @@ fn any_one_wrong_cell_makes_nothing() {
                 None => Some(Material::Wood),
             };
             crafting.grid[row][column] = swapped;
-            assert!(!crafting.pickaxe_is_ready(&bag), "{row}줄 {column}칸");
+            assert_ne!(crafting.ready_recipe(&bag), Some(Recipe::Pickaxe), "{row}줄 {column}칸");
         }
     }
 }
@@ -692,8 +699,8 @@ fn same_materials_in_another_shape_make_nothing() {
     for (index, (row, column)) in cells.into_iter().enumerate() {
         crafting.tap_cell(row, column, if index < 4 { Material::Wood } else { Material::Iron }, &bag);
     }
-    assert!(!crafting.pickaxe_is_ready(&bag));
-    assert!(!crafting.take_pickaxe(&mut bag));
+    assert_ne!(crafting.ready_recipe(&bag), Some(Recipe::Pickaxe));
+    assert_ne!(crafting.take_result(&mut bag), Some(Recipe::Pickaxe));
     assert_eq!(bag.count(Material::Wood), 4);
     assert!(!bag.has_pickaxe);
 }
@@ -716,10 +723,10 @@ fn cannot_place_more_than_you_have_and_tapping_again_takes_it_off() {
 fn only_one_pickaxe_per_game() {
     let mut bag = bag_with(8, 4);
     let mut crafting = crafting_with_shape(&bag);
-    assert!(crafting.take_pickaxe(&mut bag));
+    assert_eq!(crafting.take_result(&mut bag), Some(Recipe::Pickaxe));
     let mut again = crafting_with_shape(&bag);
-    assert!(!again.pickaxe_is_ready(&bag));
-    assert!(!again.take_pickaxe(&mut bag));
+    assert_ne!(again.ready_recipe(&bag), Some(Recipe::Pickaxe));
+    assert_ne!(again.take_result(&mut bag), Some(Recipe::Pickaxe));
     assert_eq!(bag.count(Material::Wood), 4);
 }
 
@@ -801,7 +808,7 @@ fn whole_journey_from_trees_to_a_faster_pickaxe() {
     tap(&mut g);
     g.crafting = crafting_with_shape(&g.gathering.bag);
     g.crafting.open();
-    assert!(g.crafting.take_pickaxe(&mut g.gathering.bag));
+    assert_eq!(g.crafting.take_result(&mut g.gathering.bag), Some(Recipe::Pickaxe));
     g.crafting.close();
 
     stand_by_first_tree(&mut g);
