@@ -479,6 +479,10 @@ async fn main() {
                         for event in game.take_item_events() {
                             effects.on_item_event(event);
                         }
+                        // 깜짝 미션 (US-086): 미스 말풍선, 성공·실패 글. 클리어한 아침의 실패 글은 띄우지 않는다
+                        for event in game.take_mission_events() {
+                            effects.mission.on_event(event, game.is_cleared());
+                        }
                         // 상자 부수기 (US-089): 금·나뭇조각·도끼 안내·"와우!"는 효과가, "○○을 얻었어요!"는 큰 문구로
                         for event in box_events {
                             if let Some(message) = effects.boxes.on_event(event) {

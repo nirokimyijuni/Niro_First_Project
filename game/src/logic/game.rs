@@ -12,6 +12,7 @@ use super::crafting::Crafting;
 use super::gathering::{Gathering, Material, Mineable};
 use super::math::{MathQuiz, MathResult};
 use super::miss::Miss;
+use super::mission::{Mission, MissionEvent, MissionKind, Missions};
 use super::player::{Facing, Player, PlayerInput};
 use super::shop::{sell_price, Armor, BuyRow, CantBuy, CantSell, CantUse, Pocket, Potion, SellRow, Shop, ShopEvent, ShopItem, SELLABLE};
 use super::weapon::{Weapon, Weapons};
@@ -22,7 +23,8 @@ use crate::config::{
     PLAYER_WIDTH, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT, HEALTH_POTION_HEAL,
     HOUSE_DOOR_BUTTON_TEXT, PLAYER_WALK_SPEED, SHOP_PAUSES_GAME, CAR_SPEED_MULTIPLIER, DIAMOND_PICKAXE_SLAM_DIAMONDS,
     DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT, DIAMOND_PICKAXE_SLAM_SCORE, ENDER_FRUIT_SLAM_DIAMONDS, ENDER_FRUIT_SLAM_DIAMONDS_TEXT,
-    ENDER_FRUIT_SLAM_SCORE, SLAM_BEACH_LEFT, SLAM_BEACH_RIGHT, SYRINGE_GUN_SCORE,
+    ENDER_FRUIT_SLAM_SCORE, SLAM_BEACH_LEFT, SLAM_BEACH_RIGHT, SYRINGE_GUN_SCORE, MISSION_FAIL_HP_LOSS, MISSION_REWARD_COINS,
+    QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS,
 };
 use macroquad::math::{Rect, Vec2};
 
@@ -172,6 +174,10 @@ pub struct Game {
     /// 부술 수 있는 상자와 상자에서 나온 깜짝 아이템 (D87, US-089). 부서진 상자는 `world.obstacles`에서 빠진다.
     pub boxes: Boxes,
     box_events: Vec<BoxEvent>,
+    /// 깜짝 미션 (D81, D103, US-084~086). 화면은 `mission_now`와 `take_mission_events`를 쓴다.
+    pub missions: Missions,
+    /// 18:00 낮 미션 실패 글을 보여 주는 동안 남은 실제 초 (BUG-034). 0보다 크면 퀴즈를 열기 전에 기다리는 중이다.
+    quiz_wait_seconds: f32,
 }
 
 impl Game {
@@ -185,7 +191,16 @@ impl Game {
     pub fn on_world(kind: CharacterKind, seed: u32, world: World) -> Game {
         let spawn = Vec2::new(PLAYER_SPAWN_X, world.ground_y - PLAYER_HEIGHT);
         let cave_world = World::cave();
+        let mut missions = Missions::new(seed);
+        // 미스가 없는 M1 연습 맵에는 미스 찾기 미션이 나오지 않는다.
+        if !world.is_long_map() {
+            missions.turned_on.retain(|kind| *kind != MissionKind::FindMiss);
+        }
+        // 새 게임을 시작하면 1일째 낮 미션이 바로 나온다 (임시-49).
+        missions.give_day_mission(1);
         Game {
+            missions,
+            quiz_wait_seconds: 0.0,
             gathering: Gathering::on_world(&world, &cave_world, seed),
             crafting: Crafting::default(),
             in_cave: false,
@@ -235,6 +250,11 @@ impl Game {
             self.update_combat(input, dt, &mut events);
             return events;
         }
+        if self.is_waiting_to_open_quiz() {
+            self.forget_mining();
+            self.wait_then_open_night_quiz(dt);
+            return events;
+        }
         let world_dt = dt * time_scale;
         let stand_still = PlayerInput::default();
         let input = if crafting || shopping { &stand_still } else { input };
@@ -243,9 +263,18 @@ impl Game {
         self.player.update(input, dt, if self.in_cave { &self.cave_world } else { &self.world });
 
         for clock_event in self.clock.update(world_dt) {
-            events.push(match clock_event {
-                ClockEvent::NightStarted => GameEvent::NightStarted,
+            let happened = match clock_event {
+                ClockEvent::NightStarted => {
+                    // 18:00: 낮 미션을 먼저 끝내고 잠깐 퀴즈를 연다 (임시-49).
+                    // 실패했으면 실패 글을 먼저 보여 주고 퀴즈는 조금 뒤에 연다 (BUG-034).
+                    if self.end_day_mission(&mut events) && !self.is_over() {
+                        self.quiz_wait_seconds = QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS;
+                    }
+                    GameEvent::NightStarted
+                }
                 ClockEvent::DayStarted { day_number } => {
+                    // 06:00: 밤 미션을 먼저 끝내고 체력을 채운다 (임시-49, D27). 그다음 새 낮 미션.
+                    self.end_night_mission_and_start_day(day_number, &mut events);
                     // 스케이트는 산 뒤 처음 오는 06:00에 벗겨진다 (임시-25).
                     if self.shop.take_off_skates() {
                         self.shop_events.push(ShopEvent::SkatesOff);
@@ -258,7 +287,8 @@ impl Game {
                     self.boxes.morning_came();
                     GameEvent::DayStarted { day_number }
                 }
-            });
+            };
+            events.push(happened);
         }
 
         // 갑옷 시간은 게임 속 시간이다: 빨리감기 배수만큼 빨리 준다 (임시-26).
@@ -277,12 +307,119 @@ impl Game {
         if picked > 0 {
             self.wallet.add(picked);
             events.push(GameEvent::CoinsPicked { count: picked });
+            self.count_for_mission(MissionKind::Coins, picked);
         }
 
+        let monsters_before = self.combat.monsters_given_experience;
+        let events_before = events.len();
         self.update_combat(input, dt, &mut events);
+        let monsters = self.combat.monsters_given_experience - monsters_before;
+        self.count_for_mission(MissionKind::Monsters, monsters);
+        let miss_found = events[events_before..].iter().filter(|e| matches!(e, GameEvent::MissFound { .. })).count();
+        self.count_for_mission(MissionKind::FindMiss, miss_found as u32);
         self.update_boxes(dt);
         self.update_gathering(dt, &mut events);
+        self.give_night_mission_after_quiz();
         events
+    }
+
+    /// 지금 하는 중인 미션 (US-086). 화면 위쪽 진행 글은 `progress_text()`.
+    /// 체력 지키기는 `count`가 지금 체력이다. 미션이 없거나, 성공·실패로 끝났거나, 판이 끝났으면 None이다.
+    pub fn mission_now(&self) -> Option<Mission> {
+        if self.is_over() {
+            return None;
+        }
+        self.missions.going_kind()?;
+        let mut mission = *self.missions.current()?;
+        if mission.kind == MissionKind::KeepHealth {
+            mission.count = self.combat.health.hp();
+        }
+        Some(mission)
+    }
+
+    /// 지난번 뒤로 생긴 미션 일(나옴, 성공, 실패)을 모두 받는다. 화면이 `update` 뒤에 부른다.
+    pub fn take_mission_events(&mut self) -> Vec<MissionEvent> {
+        self.missions.take_events()
+    }
+
+    /// 미션 `kind`를 `amount`만큼 했다 (임시-52). N이 되는 순간 성공하고 코인 `MISSION_REWARD_COINS`를 준다.
+    /// 지갑은 `COIN_MAX`에서 멈추지만 점수의 "획득한 동전 수"에는 다 센다 (D103).
+    fn count_for_mission(&mut self, kind: MissionKind, amount: u32) {
+        if self.is_over() || !self.missions.add(kind, amount) {
+            return;
+        }
+        self.wallet.add(MISSION_REWARD_COINS);
+        self.coins.count_mission_reward(MISSION_REWARD_COINS);
+    }
+
+    /// 18:00: 하는 중인 낮 미션은 실패로 끝나고 체력이 준다 (D103). 판이 끝났으면 아무 일도 없다.
+    /// 낮 미션이 실패했으면 true.
+    fn end_day_mission(&mut self, events: &mut Vec<GameEvent>) -> bool {
+        if self.is_over() || !self.missions.end_day_mission() {
+            return false;
+        }
+        self.lose_health_for_failed_mission(events);
+        true
+    }
+
+    /// 18:00 낮 미션 실패 글을 보여 주느라 퀴즈 열기를 기다리는 중이면 true (BUG-034).
+    /// 이동안 시계·몬스터·주인공은 퀴즈가 열린 것처럼 멈춰 있다.
+    pub fn is_waiting_to_open_quiz(&self) -> bool {
+        self.quiz_wait_seconds > 0.0
+    }
+
+    /// 기다리는 시간을 실제 `dt`만큼 흘리고, 다 되면 18:00 잠깐 퀴즈를 연다 (BUG-034).
+    fn wait_then_open_night_quiz(&mut self, dt: f32) {
+        self.quiz_wait_seconds -= dt;
+        if self.quiz_wait_seconds > 0.0 {
+            return;
+        }
+        self.quiz_wait_seconds = 0.0;
+        if !self.is_over() {
+            self.math.add_waiting();
+            self.math.open_next_waiting();
+        }
+    }
+
+    /// 06:00: 밤 미션을 끝낸다. 체력 지키기는 체력이 다시 차기 전의 체력으로 본다.
+    /// 실패하면 체력이 준다. 7일째 클리어 아침에는 줄이지 않는다 (니로 임시). 성공하면 코인을 준다.
+    /// 그다음 쓰러지지 않았고 클리어 아침이 아니면 새 낮 미션을 낸다.
+    fn end_night_mission_and_start_day(&mut self, day_number: u32, events: &mut Vec<GameEvent>) {
+        if self.is_over() {
+            return;
+        }
+        let clear_morning = day_number.saturating_sub(1) >= DAYS_TO_CLEAR;
+        match self.missions.end_night_mission(self.combat.health.hp()) {
+            Some(true) => {
+                self.wallet.add(MISSION_REWARD_COINS);
+                self.coins.count_mission_reward(MISSION_REWARD_COINS);
+            }
+            Some(false) if !clear_morning => self.lose_health_for_failed_mission(events),
+            _ => {}
+        }
+        if !self.is_over() && !clear_morning {
+            self.missions.give_day_mission(day_number);
+        }
+    }
+
+    /// 미션 실패: 체력 `MISSION_FAIL_HP_LOSS`. 갑옷이어도 준다 (수학 문제와 같다). 0이면 보통 쓰러짐과 같다.
+    fn lose_health_for_failed_mission(&mut self, events: &mut Vec<GameEvent>) {
+        let before = self.combat.health.hp();
+        self.combat.health.lose_from_quiz(MISSION_FAIL_HP_LOSS);
+        let hp_left = self.combat.health.hp();
+        events.push(GameEvent::Combat(CombatEvent::PlayerHurt { amount: before - hp_left, hp_left }));
+        if self.combat.health.is_down() {
+            self.citizens.stop_walkers();
+            events.push(GameEvent::Combat(CombatEvent::PlayerDown));
+        }
+    }
+
+    /// 밤에 잠깐 퀴즈가 닫혀 있으면 그 밤의 밤 미션을 낸다 (임시-49). 같은 밤에 두 번 내지 않는다.
+    fn give_night_mission_after_quiz(&mut self) {
+        if self.is_over() || !self.clock.is_night() || self.math.is_open() || self.is_waiting_to_open_quiz() {
+            return;
+        }
+        self.missions.give_night_mission(self.clock.day_number());
     }
 
     /// 공격 버튼을 처리하고 몬스터·미스·무기·시민 시간을 `dt`만큼 흘린다. 시계가 움직인 뒤에 불러야
@@ -297,7 +434,12 @@ impl Game {
             return;
         }
         // 밤 문제는 첫 몬스터보다 먼저 연다 (BUG-025): 18:00 프레임에는 몬스터를 움직이지 않는다.
-        if events.contains(&GameEvent::NightStarted) {
+        // 낮 미션 실패로 쓰러졌으면 문제를 열지 않는다.
+        if events.contains(&GameEvent::NightStarted) && !self.is_over() {
+            // 낮 미션 실패 글을 먼저 보여 주는 중이면 문제는 나중에 열고, 몬스터도 움직이지 않는다 (BUG-034).
+            if self.is_waiting_to_open_quiz() {
+                return;
+            }
             self.math.add_waiting();
             self.math.open_next_waiting();
             if self.math.is_open() {
@@ -831,6 +973,9 @@ impl Game {
         let mined = self.gathering.keep_mining(dt, self.in_cave, self.player.rect());
         if let Some((what, at)) = mined {
             self.gather_events.push(GatherEvent::Mined { what, at });
+            // 다 캔 것만 센다. 어떤 광물이 나와도 1이다 (임시-52).
+            let kind = if self.in_cave { MissionKind::Ores } else { MissionKind::Trees };
+            self.count_for_mission(kind, 1);
         }
     }
 
@@ -1122,7 +1267,10 @@ mod tests {
         let events = g.update(&no_input(), DAY_SECONDS);
         assert!(events.contains(&GameEvent::NightStarted));
         assert!(g.clock.is_night());
-        // 밤이 되면 수학 문제가 열린다 (부모님 답). 맞히고 닫은 뒤에 밤을 보낸다.
+        // 1일째 낮 미션을 안 했으니 실패 글을 먼저 보여 주고 (BUG-034), 그 뒤 수학 문제가 열린다 (부모님 답).
+        assert!(g.is_waiting_to_open_quiz());
+        g.update(&no_input(), crate::config::QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS);
+        // 맞히고 닫은 뒤에 밤을 보낸다.
         let answer = g.math.question().expect("밤 문제").answer;
         g.math.type_and_submit(answer);
         g.update(&no_input(), crate::config::MATH_RIGHT_SHOW_SECONDS);

@@ -51,7 +51,8 @@ impl Coin {
 /// 맵에 있는 코인 전부.
 pub struct Coins {
     pub list: Vec<Coin>,
-    /// 이번 판에 주운 코인 수. 지갑이 꽉 차도 늘고, 코인을 써도 줄지 않는다 (점수에 쓴다).
+    /// 이번 판에 얻은 코인 수 (점수의 "획득한 동전 수"): 주운 코인과 깜짝 미션 보상 코인 (D103).
+    /// 지갑이 꽉 차도 늘고, 코인을 써도 줄지 않는다. 팔아서 받은 코인은 들지 않는다.
     pub picked_total: u32,
 }
 
@@ -76,6 +77,11 @@ impl Coins {
         }
         self.picked_total += picked;
         picked
+    }
+
+    /// 깜짝 미션 보상 코인을 점수의 "획득한 동전 수"에 넣는다 (D103). 지갑은 `Game`이 따로 채운다.
+    pub fn count_mission_reward(&mut self, amount: u32) {
+        self.picked_total += amount;
     }
 }
 

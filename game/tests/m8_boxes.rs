@@ -523,6 +523,7 @@ fn no_box_monster_when_full_and_skeleton_when_zombies_are_full() {
 
 /// 밤 문제를 맞히고 아침 직전까지 보낸다. 갑옷으로 다치지 않게 한다.
 fn go_to_just_before_morning(g: &mut Game) {
+    g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034) 없이 바로 밤 문제
     g.update(&PlayerInput::default(), g.clock.seconds_left_in_phase() + 0.01);
     assert!(g.clock.is_night());
     let answer = g.math.question().expect("밤 문제").answer;

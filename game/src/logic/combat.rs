@@ -187,6 +187,8 @@ pub struct Combat {
     pub experience: u32,
     /// 이번 판에 해치운 몬스터 수 (D64). 경험치를 준 몬스터만 센다.
     pub monsters_defeated: u32,
+    /// 경험치를 준 몬스터 수 (깜짝 미션 "몬스터 물리치기", 임시-52). 한꺼번에 쓰러뜨리기 점수는 들지 않는다.
+    pub monsters_given_experience: u32,
     /// 나올 차례에 스켈레톤이 나올 확률. 테스트는 0으로 두어 좀비만 있는 밤을 만든다.
     pub skeleton_chance: f32,
     seconds_to_next_spawn: f32,
@@ -205,6 +207,7 @@ impl Combat {
             level: 1,
             experience: 0,
             monsters_defeated: 0,
+            monsters_given_experience: 0,
             skeleton_chance: SKELETON_SPAWN_CHANCE,
             seconds_to_next_spawn: 0.0,
             random: SeededRandom::new(seed),
@@ -428,6 +431,7 @@ impl Combat {
             return;
         }
         self.monsters_defeated += defeated;
+        self.monsters_given_experience += defeated;
         for _ in 0..defeated {
             self.experience += EXPERIENCE_PER_DEFEAT;
             if self.experience >= EXPERIENCE_PER_LEVEL {

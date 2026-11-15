@@ -4,6 +4,7 @@
 use super::assets::M6Art;
 use super::boxes::BoxView;
 use super::coin::CoinPops;
+use super::mission::MissionView;
 use super::hud::draw_pill;
 use super::items;
 use super::places::near_view;
@@ -36,6 +37,8 @@ const SMOKE_SECONDS: f32 = 0.6;
 const ZOMBIE_CALL_SECONDS: f32 = 2.0;
 const POISON_CLOUD_SECONDS: f32 = 1.4;
 const HEARTS_SECONDS: f32 = 1.2;
+/// 준 체력 칸이 줄어드는 시간
+const HURT_SHRINK_SECONDS: f32 = 1.0;
 const POISON_CLOUD: Color = Color::new(0.45, 0.90, 0.35, 0.55);
 const POTION_HEART: Color = Color::new(0.96, 0.32, 0.45, 1.0);
 /// 손이 플레이어에게 닿는 때 (전체를 0~1로 볼 때)
@@ -178,6 +181,10 @@ pub struct Effects {
     vroom_wait: f32,
     /// 상자 부수기 효과: 나뭇조각, 도끼 안내, "와우!" (US-089, `view::boxes`)
     pub boxes: BoxView,
+    /// 깜짝 미션 말풍선·성공·실패 글 (US-086, `view::mission`)
+    pub mission: MissionView,
+    /// 방금 준 체력과 지난 시간: 체력 막대 끝 옅은 칸이 줄어든다 (D103)
+    hurt: Option<(u32, f32)>,
 }
 
 impl Effects {
@@ -260,6 +267,7 @@ impl Effects {
             CombatEvent::SkeletonAppeared { at, .. } => self.burst(BurstKind::Smoke, at),
             CombatEvent::LevelUp { .. } => self.level_up_age = Some(0.0),
             CombatEvent::HealthRefilled => self.heart_sparkle_age = Some(0.0),
+            CombatEvent::PlayerHurt { amount, .. } => self.hurt = Some((amount, 0.0)),
             _ => {}
         }
     }
@@ -289,6 +297,8 @@ impl Effects {
     pub fn update(&mut self, dt: f32) {
         self.pops.update(dt);
         self.boxes.update(dt);
+        self.mission.update(dt);
+        self.hurt = self.hurt.map(|(amount, age)| (amount, age + dt)).filter(|(_, age)| *age < HURT_SHRINK_SECONDS);
         for burst in &mut self.bursts {
             burst.age += dt;
         }
@@ -362,6 +372,11 @@ impl Effects {
     #[cfg(test)]
     pub fn needle_volleys(&self) -> usize {
         self.bursts.iter().filter(|b| b.kind == BurstKind::Needles).count()
+    }
+
+    /// 체력 막대 끝에 옅게 남길 준 체력 (막 줄었을 때 그만큼, 점점 0으로).
+    pub fn lost_hp(&self) -> f32 {
+        self.hurt.map_or(0.0, |(amount, age)| amount as f32 * (1.0 - age / HURT_SHRINK_SECONDS).max(0.0))
     }
 
     /// 하트 반짝임 세기: 1 막 시작 ~ 0 끝.

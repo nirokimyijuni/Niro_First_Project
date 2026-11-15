@@ -11,6 +11,7 @@ use super::gameover::{draw_end_panel, draw_fallen_player, EndScreen};
 use super::gather::{self, GatherView};
 use super::bag::{self, BagView};
 use super::hud;
+use super::mission;
 use super::places;
 use super::screen::{set_shake, Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
@@ -506,8 +507,16 @@ pub fn draw_play(
     // 끝난 화면은 큰 글이 맨 위에 온다 (BUG-024). 쓰러질 때는 움직임이 끝난 뒤에 숨긴다
     let show_info = !game.is_cleared() && !ended.is_some_and(EndScreen::ready);
     // 큰 알림 글은 정보판(효과 줄·물건 칸, 폰 멈춤 버튼까지)과 곡괭이 안내 상자 아래에 쌓는다 (BUG-031, 임시-78)
+    // 깜짝 미션 글 (US-086): 위쪽 가운데. 판이 끝나면 보이지 않는다
+    let mission_look = if ended.is_none() {
+        let gap = (hud::left_panel_right(text, game.combat.level), hud::right_row1_left(text, game.clock.day_number(), game.wallet.coins()));
+        mission::look(&effects.mission, game.mission_now().as_ref(), gap, |s, size| text.width(s, size))
+    } else {
+        None
+    };
     let info_bottom = if show_info {
         let hud = hud::hud_bottom(hud::has_row(game), touch_mode && ended.is_none());
+        let hud = mission_look.as_ref().map_or(hud, |l| l.rect().bottom().max(hud));
         gathered.recipe_hint_bottom().map_or(hud, |b| b.max(hud))
     } else {
         0.0
@@ -538,12 +547,15 @@ pub fn draw_play(
     if show_info {
         // 롤플레잉 게임처럼 (US-091): 왼쪽 위 얼굴·체력·레벨·경험치, 그 아래 효과·물건 칸, 오른쪽 위 날짜·코인·시계와 가방, 아래 가운데 든 무기
         hud::draw_face(assets, player.kind);
-        hud::draw_bars(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle(), game.combat.level, game.combat.experience);
+        hud::draw_bars(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle(), game.combat.level, game.combat.experience, effects.lost_hp());
         hud::draw_effects_and_pockets(text, game, &assets.m6, time_scale, touch_mode);
         hud::draw_coins_and_clock(text, &game.clock, game.wallet.coins());
         hud::draw_held_weapon(&assets.m6, game.weapons.held());
         if ended.is_none() {
             bag::draw_bag_button(text, bag_view, touch_mode);
+        }
+        if let Some(look) = &mission_look {
+            mission::draw(text, look, &assets.m6.miss, effects.mission.banner().map_or(0.0, |(_, age)| age));
         }
     }
     // PC 아래 키 안내 한 줄은 처음 8초만 (임시-76). 폰에는 없다.

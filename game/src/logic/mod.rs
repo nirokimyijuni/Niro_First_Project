@@ -12,6 +12,7 @@ pub mod game;
 pub mod gathering;
 pub mod math;
 pub mod miss;
+pub mod mission;
 pub mod monster;
 pub mod player;
 pub mod shop;

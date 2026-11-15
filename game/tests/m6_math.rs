@@ -301,6 +301,7 @@ fn quiet_game() -> Game {
     let walled = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![wall(100.0), wall(180.0)] };
     let mut g = Game::on_world(CharacterKind::Niro, 7, walled);
     g.combat.skeleton_chance = 0.0;
+    g.missions.turn_off_all(); // 수산나 2026-11-15: 미션 실패 체력 -1(D103)이 수학 문제 체력 시험에 섞이지 않게
     g
 }
 

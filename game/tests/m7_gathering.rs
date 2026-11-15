@@ -536,6 +536,7 @@ fn six_pm_pushes_the_player_out() {
         return;
     }
     let mut g = new_game();
+    g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034) 없이 바로 밤 문제
     go_into_cave(&mut g);
     stand_by_lump(&mut g, 0);
     g.take_gather_events();
@@ -996,6 +997,7 @@ fn no_math_question_opens_inside_the_cave() {
 #[test]
 fn open_workbench_stops_six_pm_from_coming() {
     let mut g = new_game();
+    g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034) 없이 바로 밤 문제
     g.combat.skeleton_chance = 0.0;
     skip_to_just_before_night(&mut g);
     stand_at(&mut g, WORKBENCH_X, Facing::Right);

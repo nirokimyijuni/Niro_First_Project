@@ -235,6 +235,7 @@ fn us013_standing_on_coin_counts_once() {
 #[test]
 fn us013_coins_can_be_picked_at_night() {
     let mut g = m1_game(CharacterKind::Ellie);
+    g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034) 없이 바로 밤 문제
     park_far(&mut g);
     g.update(&NONE, DAY_SECONDS + 1.0);
     assert!(g.clock.is_night());

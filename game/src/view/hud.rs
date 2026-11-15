@@ -188,16 +188,37 @@ pub fn draw_face(assets: &Assets, kind: CharacterKind) {
     draw_circle_lines(c.x, c.y, FACE_RADIUS, 4.0, face_ring(kind));
 }
 
+/// 왼쪽 위 얼굴·막대 판의 오른쪽 끝 (레벨 글 뒤). 미션 글이 이 오른쪽에 들어갈 수 있는지 볼 때도 쓴다 (US-086).
+pub fn left_panel_right(text: &TextPainter, level: u32) -> f32 {
+    HEALTH_BAR.right() + LEVEL_GAP + text.width(&format!("레벨 {level}"), LEVEL_TEXT) + 14.0
+}
+
+/// 오른쪽 위 첫 줄(N일째·코인) 판의 왼쪽 끝. `draw_coins_and_clock`과 같은 셈 (US-086 미션 글 자리).
+pub fn right_row1_left(text: &TextPainter, day: u32, coins: u32) -> f32 {
+    let coin_w = RIGHT_PAD + RIGHT_ICON_W + text.width(&coins.to_string(), RIGHT_TEXT) + RIGHT_PAD;
+    let day_w = RIGHT_PAD * 2.0 + text.width(&format!("{day}일째"), RIGHT_TEXT);
+    RIGHT_COLUMN_RIGHT - coin_w - RIGHT_GAP - day_w
+}
+
+/// 줄어든 체력 자리가 옅게 남았다가 줄어드는 색 (미션 실패 등으로 체력 막대 1칸이 주는 모습, D103)
+const HEALTH_LOST: Color = Color::new(1.0, 0.80, 0.82, 0.9);
+
 /// 체력 막대 + 숫자, 작은 레벨, 하얀 경험치 막대. `sparkle`(1 막 시작 ~ 0 끝)이면 체력 막대 위로 별이 반짝인다 (D27).
-pub fn draw_bars(text: &TextPainter, hp: u32, max_hp: u32, sparkle: f32, level: u32, experience: u32) {
+/// `lost_hp`(0이면 없음): 방금 준 체력만큼 막대 끝에 옅은 칸이 남아 줄어든다.
+pub fn draw_bars(text: &TextPainter, hp: u32, max_hp: u32, sparkle: f32, level: u32, experience: u32, lost_hp: f32) {
     let level_label = format!("레벨 {level}");
     let level_x = HEALTH_BAR.right() + LEVEL_GAP;
-    let panel_right = level_x + text.width(&level_label, LEVEL_TEXT) + 14.0;
+    let panel_right = left_panel_right(text, level);
     draw_pill(LEFT_PANEL_X, LEFT_PANEL_Y, panel_right - LEFT_PANEL_X, LEFT_PANEL_H, PANEL);
 
     let r = HEALTH_BAR;
     draw_rectangle(r.x, r.y, r.w, r.h, BAR_EMPTY);
-    draw_rectangle(r.x, r.y, r.w * health_share(hp, max_hp), r.h, HEALTH_RED);
+    let filled = r.w * health_share(hp, max_hp);
+    draw_rectangle(r.x, r.y, filled, r.h, HEALTH_RED);
+    if lost_hp > 0.0 {
+        let lost = (r.w * lost_hp / max_hp.max(1) as f32).min(r.w - filled);
+        draw_rectangle(r.x + filled, r.y, lost, r.h, HEALTH_LOST);
+    }
     draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, BAR_LINE);
     text.centered(&format!("{hp}/{max_hp}"), r.center().x, r.bottom() - 6.0, HEALTH_TEXT, WHITE);
     if sparkle > 0.0 {

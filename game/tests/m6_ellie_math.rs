@@ -117,6 +117,8 @@ fn plain_game() -> Game {
 #[test]
 fn us075_night_question_comes_before_the_first_monster() {
     let mut g = plain_game();
+    // 낮 미션이 없을 때다. 낮 미션 실패 글을 먼저 보여 주는 길은 m8_missions에서 본다 (BUG-034).
+    g.missions.turn_off_all();
     // 18:00 직전까지 가고, 그 뒤 한 프레임씩 (최대 10초)
     g.update(&NONE, DAY_SECONDS - 1.0);
     g.combat.zombies.list.clear();

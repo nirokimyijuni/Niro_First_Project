@@ -547,6 +547,7 @@ fn new_game_has_full_health_and_no_zombies() {
 fn zombie_appears_in_the_same_frame_night_starts() {
     let mut g = m1_game(CharacterKind::Niro);
     g.combat.skeleton_chance = 0.0;
+    g.missions.turn_off_all(); // 수산나 2026-11-15: 18:00 낮 미션 실패(체력 -1)가 이 프레임 이벤트에 끼지 않게 (D103)
     g.clock.update(DAY_SECONDS - FRAME / 2.0);
     let events = g.update(&PlayerInput::default(), FRAME);
     assert_eq!(events, vec![GameEvent::NightStarted]);

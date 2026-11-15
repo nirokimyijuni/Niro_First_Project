@@ -713,6 +713,64 @@ pub const BOX_GOT_ENDER_FRUIT_TEXT: &str = "애서열매를 얻었어요!";
 pub const BOX_GOT_CAR_TEXT: &str = "자동차를 얻었어요!";
 pub const BOX_GOT_DIAMOND_PICKAXE_TEXT: &str = "다이아레어라이트 곡괭이를 얻었어요!";
 
+/// D81, D103 깜짝 미션 (US-084~086). 니로(에이전트)의 임시 값 [임시-49]~[임시-55]. 부모님·아이가 바꿀 수 있다.
+/// 미션 수 N = 처음 수 + 하루마다 늘어나는 수 × (날 − 1), 가장 큰 수를 넘지 않는다 ([임시-50]).
+/// 종류마다 `_ON`을 false로 하면 그 종류는 나오지 않는다 ([임시-51]).
+pub const MISSION_COINS_ON: bool = true;
+pub const MISSION_COINS_START: u32 = 10;
+pub const MISSION_COINS_PER_DAY: u32 = 2;
+pub const MISSION_COINS_MAX: u32 = 20;
+pub const MISSION_TREES_ON: bool = true;
+pub const MISSION_TREES_START: u32 = 3;
+pub const MISSION_TREES_PER_DAY: u32 = 1;
+pub const MISSION_TREES_MAX: u32 = 6;
+pub const MISSION_ORES_ON: bool = true;
+pub const MISSION_ORES_START: u32 = 2;
+pub const MISSION_ORES_PER_DAY: u32 = 1;
+pub const MISSION_ORES_MAX: u32 = 5;
+pub const MISSION_FIND_MISS_ON: bool = true;
+pub const MISSION_FIND_MISS_START: u32 = 1;
+pub const MISSION_FIND_MISS_PER_DAY: u32 = 0;
+pub const MISSION_FIND_MISS_MAX: u32 = 1;
+pub const MISSION_MONSTERS_ON: bool = true;
+pub const MISSION_MONSTERS_START: u32 = 5;
+pub const MISSION_MONSTERS_PER_DAY: u32 = 1;
+pub const MISSION_MONSTERS_MAX: u32 = 10;
+pub const MISSION_KEEP_HEALTH_ON: bool = true;
+pub const MISSION_KEEP_HEALTH_START: u32 = 4;
+pub const MISSION_KEEP_HEALTH_PER_DAY: u32 = 0;
+pub const MISSION_KEEP_HEALTH_MAX: u32 = 4;
+/// [임시-53] 성공하면 받는 코인 (부모님 결정). 지갑은 `COIN_MAX`를 넘지 않지만 점수의 "획득한 동전 수"에는 다 센다 (D103).
+pub const MISSION_REWARD_COINS: u32 = 100;
+/// [임시-53] 실패하면 줄어드는 체력 (부모님 확정 D103). 갑옷이어도 준다. 7일째 클리어 아침에는 줄이지 않는다 (니로 임시).
+pub const MISSION_FAIL_HP_LOSS: u32 = 1;
+/// [임시-51] 미션 뽑기는 상자·미스·광석·수학 문제와 따로 시드를 쓴다. 게임 seed에 이 수를 섞는다.
+pub const MISSION_SEED_MIX: u32 = 0x5EED_0081;
+/// [임시-55] 미스가 알려 주는 말. "{n}"은 그날 미션 수(N)로 바뀐다.
+pub const MISSION_COINS_MISS_SAYS: &str = "깜짝 미션이야! 밤이 되기 전에 코인 {n}개를 모아 줘!";
+pub const MISSION_TREES_MISS_SAYS: &str = "깜짝 미션이야! 밤이 되기 전에 나무 {n}개를 캐 줘!";
+pub const MISSION_ORES_MISS_SAYS: &str = "깜짝 미션이야! 밤이 되기 전에 동굴에서 광석 {n}개를 캐 줘!";
+pub const MISSION_FIND_MISS_MISS_SAYS: &str = "깜짝 미션이야! 밤이 되기 전에 나를 찾아 줘!";
+pub const MISSION_MONSTERS_MISS_SAYS: &str = "깜짝 미션이야! 아침이 되기 전에 몬스터 {n}마리를 물리쳐 줘!";
+pub const MISSION_KEEP_HEALTH_MISS_SAYS: &str = "깜짝 미션이야! 아침까지 체력을 {n} 이상 지켜 줘!";
+/// [임시-55] 화면 위쪽 진행 글. "{now}"는 지금 수(체력 지키기는 지금 체력), "{n}"은 미션 수.
+pub const MISSION_COINS_PROGRESS: &str = "깜짝 미션! 코인 {now}/{n} (밤 전까지)";
+pub const MISSION_TREES_PROGRESS: &str = "깜짝 미션! 나무 {now}/{n} (밤 전까지)";
+pub const MISSION_ORES_PROGRESS: &str = "깜짝 미션! 광석 {now}/{n} (밤 전까지)";
+pub const MISSION_FIND_MISS_PROGRESS: &str = "깜짝 미션! 미스 찾기 {now}/{n} (밤 전까지)";
+pub const MISSION_MONSTERS_PROGRESS: &str = "깜짝 미션! 몬스터 {now}/{n} (아침 전까지)";
+pub const MISSION_KEEP_HEALTH_PROGRESS: &str = "깜짝 미션! 체력 {n} 이상 지키기, 지금 {now} (아침까지)";
+/// [임시-55] 성공·실패 글. 꾸짖는 말은 쓰지 않는다. 성공 글의 "{reward}"는 `MISSION_REWARD_COINS`로 바뀐다.
+pub const MISSION_SUCCESS_TEXT: &str = "미션 성공! 코인 {reward}개를 받았어요!";
+pub const MISSION_FAIL_TEXT: &str = "아쉽다! 다음 미션도 해 보자";
+/// [임시-55] 보여 주는 시간 (실제 초). 미스 말풍선과 글이 보이는 동안에도 게임은 멈추지 않는다.
+pub const MISSION_MISS_SAYS_SECONDS: f32 = 3.0;
+pub const MISSION_SUCCESS_SHOW_SECONDS: f32 = 3.0;
+pub const MISSION_FAIL_SHOW_SECONDS: f32 = 2.0;
+/// [BUG-034, 부모님 결정 2026-11-15] 18:00에 낮 미션이 실패했으면 실패 글을 먼저 이만큼(실제 초) 보여 주고
+/// 그다음 잠깐 퀴즈를 연다. 기다리는 동안 퀴즈가 열린 것처럼 시계·몬스터·주인공이 멈춘다 (BUG-025: 퀴즈보다 몬스터가 먼저 나오지 않게).
+pub const QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS: f32 = MISSION_FAIL_SHOW_SECONDS;
+
 #[cfg(test)]
 mod tests {
     use super::*;

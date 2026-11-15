@@ -129,6 +129,7 @@ fn down_at_the_very_moment_of_six_am_comes_first() {
 #[test]
 fn fast_forward_clears_after_about_630_seconds() {
     let mut g = Game::on_world(CharacterKind::Niro, 3, World::m1());
+    g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034)는 이 시간 재기에 넣지 않는다
     // 맞아서 쓰러지지 않게 벽으로 막지 않고, 시간만 재려고 밤마다 몬스터를 치운다.
     let mut cleared_at = None;
     let limit = 700.0 / FRAME;
@@ -325,6 +326,8 @@ fn defeats_always_match_the_experience_given() {
 #[test]
 fn five_zombies_and_three_coins_make_nine() {
     let mut g = night_game();
+    g.missions.turn_off_all(); // 수산나 2026-11-15: 몬스터 5마리 밤 미션 보상 100(D103)이 점수에 섞이지 않게
+
     for _ in 0..5 {
         zombie_in_front(&mut g);
         g.update(&attack(), FRAME);

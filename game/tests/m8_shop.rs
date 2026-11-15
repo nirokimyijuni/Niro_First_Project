@@ -461,6 +461,7 @@ fn skating_never_gets_stuck_in_a_box() {
 fn skates_stay_on_until_the_next_six_am() {
     // 1일째 10:00에 사면 2일째 06:00에 벗겨진다.
     let mut g = empty_game();
+    g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034)는 게임 시간이 아니다
     g.clock.update(4.0 * 60.0 / 2.4 + 0.1);
     assert_eq!(g.clock.hour_minute().0, 10);
     give_coins(&mut g, SKATES_PRICE);
