@@ -20,8 +20,11 @@ pub const QUIT_SUB_TEXT: &str = crate::config::PAUSE_QUIT_SUB_TEXT;
 const DIM: Color = Color::new(0.0, 0.0, 0.0, 0.45);
 const PANEL_FILL: Color = Color::new(0.10, 0.13, 0.32, 0.92);
 const PANEL_LINE: Color = Color::new(1.0, 1.0, 1.0, 0.7);
-const RESUME_FILL: Color = Color::new(1.0, 0.66, 0.12, 1.0);
-const QUIT_FILL: Color = Color::new(0.30, 0.62, 0.90, 1.0);
+/// 고른 칸 (↑/↓·Enter, 부모님 요청 2026-11-15): 주황 바탕. 다른 칸은 파랑.
+pub const PICKED_FILL: Color = Color::new(1.0, 0.66, 0.12, 1.0);
+const OTHER_FILL: Color = Color::new(0.30, 0.62, 0.90, 1.0);
+const PICK_RING_COLOR: Color = WHITE;
+const PICK_RING: f32 = 7.0;
 const TITLE: Color = Color::new(1.0, 0.86, 0.22, 1.0);
 
 /// 멈춤 창에서 누른 것.
@@ -42,15 +45,53 @@ pub fn pause_tap_at(point: Vec2) -> Option<PauseTap> {
     }
 }
 
+/// 멈춤 창에서 이번 프레임에 "새로 누른" 키 (꾹 누르고 있던 키는 false. 창이 열릴 때 누르던 ↓로 바로 옮겨지지 않는다).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PauseKeys {
+    pub up: bool,
+    pub down: bool,
+    /// Enter 또는 Space
+    pub confirm: bool,
+    /// Esc
+    pub back: bool,
+}
+
+/// 멈춤 창이 받은 입력 (부모님 요청 2026-11-15).
+/// ↑/↓는 `picked`(고른 칸)를 옮기고 Enter·Space는 고른 칸을 누른다. Esc는 언제나 이어서 하기.
+/// 마우스·손가락으로 누른 버튼은 고른 칸과 상관없이 그 버튼이다.
+pub fn pause_choose(picked: &mut PauseTap, keys: PauseKeys, tap: Option<Vec2>) -> Option<PauseTap> {
+    if keys.back {
+        return Some(PauseTap::Resume);
+    }
+    if keys.up && !keys.down {
+        *picked = PauseTap::Resume;
+    } else if keys.down && !keys.up {
+        *picked = PauseTap::Quit;
+    }
+    if keys.confirm {
+        return Some(*picked);
+    }
+    tap.and_then(pause_tap_at)
+}
+
+/// 고른 칸은 주황 바탕 + 흰 테두리, 다른 칸은 파랑 바탕.
+fn draw_choice(r: Rect, picked: bool) {
+    if picked {
+        draw_pill(r.x - PICK_RING, r.y - PICK_RING, r.w + PICK_RING * 2.0, r.h + PICK_RING * 2.0, PICK_RING_COLOR);
+    }
+    draw_pill(r.x, r.y, r.w, r.h, if picked { PICKED_FILL } else { OTHER_FILL });
+}
+
 /// 멈춤 창 그리기 (화면 좌표). `touch_mode`가 아니면 "이어서 하기" 아래에 "Esc"를 작게 쓴다.
-pub fn draw_pause(text: &TextPainter, touch_mode: bool) {
+/// `picked` 칸이 주황색이다 (처음은 이어서 하기라 예전 모습 그대로).
+pub fn draw_pause(text: &TextPainter, touch_mode: bool, picked: PauseTap) {
     draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
     draw_rectangle(PANEL.x, PANEL.y, PANEL.w, PANEL.h, PANEL_FILL);
     draw_rectangle_lines(PANEL.x, PANEL.y, PANEL.w, PANEL.h, 5.0, PANEL_LINE);
     text.centered(PAUSE_TITLE_TEXT, PANEL.center().x, PANEL.y + 66.0, 44.0, TITLE);
 
     let r = RESUME_BUTTON;
-    draw_pill(r.x, r.y, r.w, r.h, RESUME_FILL);
+    draw_choice(r, picked == PauseTap::Resume);
     // 이어서 하기: 오른쪽을 가리키는 세모 (놀이 버튼)
     let tri = vec2(r.x + 62.0, r.center().y);
     draw_triangle(tri + vec2(-16.0, -22.0), tri + vec2(-16.0, 22.0), tri + vec2(22.0, 0.0), WHITE);
@@ -61,7 +102,7 @@ pub fn draw_pause(text: &TextPainter, touch_mode: bool) {
     }
 
     let q = QUIT_BUTTON;
-    draw_pill(q.x, q.y, q.w, q.h, QUIT_FILL);
+    draw_choice(q, picked == PauseTap::Quit);
     text.centered(QUIT_TEXT, q.center().x, q.center().y + 2.0, 42.0, WHITE);
     text.centered(QUIT_SUB_TEXT, q.center().x, q.bottom() - 14.0, 26.0, WHITE);
 }
@@ -87,6 +128,55 @@ mod tests {
         assert_eq!(pause_tap_at(QUIT_BUTTON.center()), Some(PauseTap::Quit));
         assert_eq!(pause_tap_at(vec2(20.0, 20.0)), None, "창 밖은 아무 일 없다");
         assert_eq!(pause_tap_at(PANEL.point() + vec2(10.0, 10.0)), None, "제목 자리도 아무 일 없다");
+    }
+
+    fn keys(up: bool, down: bool, confirm: bool, back: bool) -> PauseKeys {
+        PauseKeys { up, down, confirm, back }
+    }
+
+    #[test]
+    fn arrows_move_the_pick_and_enter_chooses_it() {
+        // 처음은 이어서 하기 (main이 창을 열 때 Resume으로 둔다)
+        let mut p = PauseTap::Resume;
+        assert_eq!(pause_choose(&mut p, keys(false, false, true, false), None), Some(PauseTap::Resume), "바로 Enter면 이어서");
+        assert_eq!(pause_choose(&mut p, keys(false, true, false, false), None), None, "↓는 옮기기만");
+        assert_eq!(p, PauseTap::Quit);
+        assert_eq!(pause_choose(&mut p, keys(false, true, false, false), None), None);
+        assert_eq!(p, PauseTap::Quit, "맨 아래에서 ↓는 그대로 (돌아 올라가지 않는다)");
+        assert_eq!(pause_choose(&mut p, keys(false, false, true, false), None), Some(PauseTap::Quit), "Enter·Space로 처음으로");
+        assert_eq!(pause_choose(&mut p, keys(true, false, false, false), None), None);
+        assert_eq!(p, PauseTap::Resume, "↑로 다시 이어서 하기");
+        assert_eq!(pause_choose(&mut p, keys(true, false, false, false), None), None);
+        assert_eq!(p, PauseTap::Resume, "맨 위에서 ↑는 그대로");
+        // 같은 프레임에 ↓와 Enter: 옮긴 칸을 고른다
+        let mut p = PauseTap::Resume;
+        assert_eq!(pause_choose(&mut p, keys(false, true, true, false), None), Some(PauseTap::Quit));
+        // ↑↓를 함께 누르면 움직이지 않는다
+        let mut p = PauseTap::Quit;
+        pause_choose(&mut p, keys(true, true, false, false), None);
+        assert_eq!(p, PauseTap::Quit);
+    }
+
+    #[test]
+    fn esc_always_resumes_and_taps_still_work() {
+        let mut p = PauseTap::Quit;
+        assert_eq!(pause_choose(&mut p, keys(false, false, false, true), None), Some(PauseTap::Resume), "처음으로를 골라 둬도 Esc는 이어서");
+        let mut p = PauseTap::Resume;
+        assert_eq!(pause_choose(&mut p, PauseKeys::default(), Some(QUIT_BUTTON.center())), Some(PauseTap::Quit), "클릭·터치는 고른 칸과 상관없이");
+        let mut p = PauseTap::Quit;
+        assert_eq!(pause_choose(&mut p, PauseKeys::default(), Some(RESUME_BUTTON.center())), Some(PauseTap::Resume));
+        assert_eq!(pause_choose(&mut p, PauseKeys::default(), Some(vec2(5.0, 5.0))), None, "빈 곳은 그대로 멈춰 있다");
+        assert_eq!(pause_choose(&mut p, PauseKeys::default(), None), None, "아무것도 안 누르면 그대로");
+        assert_eq!(p, PauseTap::Quit, "누르지 않으면 고른 칸도 그대로");
+    }
+
+    #[test]
+    fn picked_button_is_orange_and_ring_stays_inside() {
+        assert!(PICKED_FILL.r > 0.9 && PICKED_FILL.g > 0.5 && PICKED_FILL.g < 0.8 && PICKED_FILL.b < 0.3, "주황");
+        for b in [RESUME_BUTTON, QUIT_BUTTON] {
+            assert!(b.y - PICK_RING > PANEL.y && b.bottom() + PICK_RING < PANEL.bottom(), "테두리가 창 안");
+        }
+        assert!(RESUME_BUTTON.bottom() + PICK_RING < QUIT_BUTTON.y, "테두리가 다른 버튼에 안 닿는다");
     }
 
     #[test]

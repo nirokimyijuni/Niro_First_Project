@@ -60,9 +60,13 @@ const NIRO_BODY_TOP: u32 = 176;
 const ELLIE_BODY_TOP: u32 = 199;
 const LOGAN_BODY_TOP: u32 = 163;
 
-/// 머리와 몸을 나누는 y (옷 위 끝쯤), 원화 픽셀 기준. 쓰러질 때 머리만 튀어 오른다 (D30).
+/// 머리와 몸을 나누는 y (옷 위 끝쯤), 원화 픽셀 기준. 예전에는 쓰러질 때 머리만 튀어 올랐다 (D30).
+/// 부모님 결정 2026-11-15로 머리는 붙어 있고, 지금은 정보판 얼굴 자리 시험에만 쓴다.
+#[cfg(test)]
 const NIRO_NECK: u32 = 262;
+#[cfg(test)]
 const ELLIE_NECK: u32 = 268;
+#[cfg(test)]
 const LOGAN_NECK: u32 = 256;
 
 /// 자르는 네모 안에 걸린 이름 글자 조각 (x, y, 가로, 세로), 원화 픽셀 기준. 종이색으로 덮는다.
@@ -81,6 +85,23 @@ const INSIDE_PAPER_COLOR: [u8; 4] = [252, 250, 244, 255];
 /// 이 값 이하는 검정, 종이 밝기(LEVEL_WHITE) 이상은 흰색이 되도록 펼친다.
 const LEVEL_BLACK: f32 = 50.0;
 const LEVEL_WHITE: f32 = 165.0;
+
+/// 정보판 얼굴 (US-091): 원화에서 모자·머리·왕관과 얼굴만 담은 네모 (x, y, 가로, 세로), 원화 픽셀 기준.
+/// 안테나와 몸은 뺀다. 캐릭터 그림(`character_cut`으로 자른 것) 안에 들어 있어야 한다.
+pub const NIRO_FACE: (u32, u32, u32, u32) = (70, 188, 110, 80);
+pub const ELLIE_FACE: (u32, u32, u32, u32) = (236, 204, 100, 76);
+pub const LOGAN_FACE: (u32, u32, u32, u32) = (418, 168, 92, 96);
+
+/// 잘라 낸 캐릭터 그림 안에서 얼굴 자리 (그림 픽셀). `draw_texture_ex`의 `source`로 쓴다.
+pub fn face_source(kind: CharacterKind) -> Rect {
+    let (cx, cy, _, _) = character_cut(kind);
+    let (x, y, w, h) = match kind {
+        CharacterKind::Niro => NIRO_FACE,
+        CharacterKind::Ellie => ELLIE_FACE,
+        CharacterKind::Logan => LOGAN_FACE,
+    };
+    Rect::new((x - cx) as f32, (y - cy) as f32, w as f32, h as f32)
+}
 
 pub fn character_cut(kind: CharacterKind) -> (u32, u32, u32, u32) {
     match kind {
@@ -102,6 +123,7 @@ pub fn height_with_antenna(kind: CharacterKind, body_height: f32) -> f32 {
 }
 
 /// 잘라 낸 그림에서 머리 쪽이 차지하는 비율 (위에서부터, 0~1).
+#[cfg(test)]
 pub fn head_share(kind: CharacterKind) -> f32 {
     let (_, y, _, h) = character_cut(kind);
     let neck = match kind {
@@ -350,6 +372,19 @@ mod tests {
     }
 
     #[test]
+    fn face_is_inside_the_character_picture_and_below_the_antenna() {
+        // US-091 정보판 얼굴: 잘라 낸 캐릭터 그림 안, 몸 맨 위(안테나 아래)쯤부터 목 근처까지
+        for kind in CharacterKind::ALL {
+            let (_, _, w, h) = character_cut(kind);
+            let f = face_source(kind);
+            assert!(f.x >= 0.0 && f.y >= 0.0 && f.right() <= w as f32 && f.bottom() <= h as f32, "{kind:?} {f:?}");
+            assert!(f.w >= 60.0 && f.h >= 60.0, "{kind:?} 얼굴이 너무 작다");
+            let neck = head_share(kind) * h as f32;
+            assert!(f.bottom() <= neck + 12.0, "{kind:?} 몸까지 많이 들어가지 않는다");
+        }
+    }
+
+    #[test]
     fn cuts_fit_inside_sheet() {
         let s = sheet();
         for kind in CharacterKind::ALL {
@@ -501,6 +536,10 @@ mod tests {
                 }
             }
             flipped.export_png(&format!("{dir}/{}.png", kind.name()));
+            // 정보판 얼굴 자리 (US-091). 이것도 위아래를 뒤집어 저장한다.
+            let f = face_source(kind);
+            let face = flipped.sub_image(Rect::new(f.x, h as f32 - f.y - f.h, f.w, f.h));
+            face.export_png(&format!("{dir}/{}-face.png", kind.name()));
         }
     }
 }

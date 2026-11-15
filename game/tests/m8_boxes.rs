@@ -204,7 +204,7 @@ fn weapon_and_coin_on_the_box_fall_and_coin_does_not_come_back_while_box_is_gone
 // ---- 깜짝 아이템과 몬스터 (주사위) ----
 
 #[test]
-fn surprise_is_30_item_15_monster_55_nothing_for_10000_breaks() {
+fn surprise_is_15_item_15_monster_70_nothing_for_10000_breaks() {
     let mut dice = SurpriseDice::new(SEED);
     let (mut items, mut monsters, mut nothing) = (0, 0, 0);
     for _ in 0..10_000 {
@@ -218,7 +218,7 @@ fn surprise_is_30_item_15_monster_55_nothing_for_10000_breaks() {
     assert!(near(items, BOX_ITEM_CHANCE), "아이템 {items}");
     assert!(near(monsters, BOX_MONSTER_CHANCE), "몬스터 {monsters}");
     assert!(near(nothing, 1.0 - BOX_ITEM_CHANCE - BOX_MONSTER_CHANCE), "없음 {nothing}");
-    assert_eq!((BOX_ITEM_CHANCE, BOX_MONSTER_CHANCE), (0.30, 0.15));
+    assert_eq!((BOX_ITEM_CHANCE, BOX_MONSTER_CHANCE), (0.15, 0.15));
 }
 
 fn item_counts(have: &[SurpriseItem], rolls: usize) -> Vec<(SurpriseItem, usize)> {
@@ -259,8 +259,8 @@ fn only_ones_already_owned_never_come_and_the_rest_keep_their_ratio() {
 }
 
 #[test]
-fn potions_and_ender_fruit_still_come_when_owned_in_the_game() {
-    // 게임에서 하나뿐인 것을 모두 가지면 (다이아 갑옷을 입은 채) 포션·무지개 갑옷·엔더열매만 나온다.
+fn potions_ender_fruit_and_syringe_gun_still_come_when_owned_in_the_game() {
+    // 게임에서 하나뿐인 것을 모두 가지면 (다이아 갑옷을 입은 채) 포션·무지개 갑옷·엔더열매·주사기총만 나온다.
     let mut seen = Vec::new();
     for seed in 0..400 {
         let mut g = with_axe(one_box_game(seed));
@@ -272,7 +272,7 @@ fn potions_and_ender_fruit_still_come_when_owned_in_the_game() {
         g.gathering.bag.ender_fruits = 1;
         g.gathering.bag.riding_car = true;
         g.gathering.bag.has_diamond_pickaxe = true;
-        g.gathering.bag.has_syringe_gun = true;
+        g.gathering.bag.syringe_guns = 1;
         g.shop.put_on_armor(Armor::Diamond);
         for _ in 0..3 {
             for event in swing(&mut g).1 {
@@ -289,12 +289,12 @@ fn potions_and_ender_fruit_still_come_when_owned_in_the_game() {
         SurpriseItem::Skates,
         SurpriseItem::Car,
         SurpriseItem::DiamondPickaxe,
-        SurpriseItem::SyringeGun,
         SurpriseItem::DiamondArmor,
     ];
     assert!(!seen.is_empty());
     assert!(seen.iter().all(|i| !only_ones.contains(i)), "{seen:?}");
     assert!(seen.contains(&SurpriseItem::HealthPotion), "포션은 가지고 있어도 나온다");
+    assert!(seen.contains(&SurpriseItem::SyringeGun), "주사기총은 가지고 있어도 나온다 (2026-11-15)");
     assert!(seen.contains(&SurpriseItem::RainbowArmor), "입지 않은 갑옷은 나온다");
 }
 
@@ -399,7 +399,7 @@ fn picked_surprise_items_work_like_bought_or_crafted_ones() {
             SurpriseItem::Skates => g.shop.has_skates(),
             SurpriseItem::RainbowArmor => g.shop.armor() == Some(Armor::Rainbow),
             SurpriseItem::DiamondArmor => g.shop.armor() == Some(Armor::Diamond),
-            SurpriseItem::SyringeGun => bag.has_syringe_gun,
+            SurpriseItem::SyringeGun => bag.syringe_guns == 1,
             SurpriseItem::EnderFruit => bag.ender_fruits == 1,
             SurpriseItem::Car => bag.riding_car,
             SurpriseItem::DiamondPickaxe => bag.has_diamond_pickaxe,

@@ -124,8 +124,8 @@ pub struct Bag {
     pub has_pickaxe: bool,
     /// 다이아래더라이트 곡괭이 (US-082). 한 번에 하나, 쿵을 쓰면 없어진다.
     pub has_diamond_pickaxe: bool,
-    /// 주사기총 (US-083). 한 번에 하나.
-    pub has_syringe_gun: bool,
+    /// 주사기총 개수 (US-083). 여러 개 가질 수 있고, 쏠 때마다 하나 줄어든다 (부모님 결정 2026-11-15).
+    pub syringe_guns: u32,
     /// 엔더열매 개수 (US-081). 여러 개 가질 수 있다.
     pub ender_fruits: u32,
     /// 엔더열매를 먹어서 생긴 힘. 쿵을 쓸 때까지 남는다 (임시-44).

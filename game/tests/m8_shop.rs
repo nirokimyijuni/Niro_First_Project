@@ -151,6 +151,40 @@ fn away_from_the_door_e_does_nothing() {
     }
 }
 
+/// 부모님 결정 2026-11-15: 문 바로 앞(문 폭 + 좌우 `HOUSE_DOOR_REACH`)에서만 들어간다. 바라보는 쪽은 상관없다.
+#[test]
+fn door_opens_only_right_in_front_of_it() {
+    let door_edge = HOUSE_DOOR_WIDTH / 2.0 + HOUSE_DOOR_REACH;
+    for x in [HOUSE_DOOR_X - door_edge + 1.0, HOUSE_DOOR_X, HOUSE_DOOR_X + door_edge - 1.0] {
+        for facing in [Facing::Left, Facing::Right] {
+            let mut g = new_game();
+            stand_at(&mut g, x, facing);
+            assert_eq!(g.usable_in_reach(), Some(Usable::HouseDoor), "문 앞 x={x}");
+            tap_e(&mut g);
+            assert!(g.shop.is_open(), "문 앞 x={x}");
+        }
+    }
+}
+
+/// 집 벽 앞(문 밖, 예전엔 `MINE_REACH` 때문에 들어가던 자리)은 안 들어가고, ↑는 점프다.
+#[test]
+fn house_wall_beside_the_door_does_not_open_and_up_jumps() {
+    let door_edge = HOUSE_DOOR_WIDTH / 2.0 + HOUSE_DOOR_REACH;
+    for x in [HOUSE_DOOR_X - door_edge - 2.0, HOUSE_DOOR_X + door_edge + 2.0, HOUSE_DOOR_X + door_edge + MINE_REACH] {
+        let mut g = new_game();
+        stand_at(&mut g, x, Facing::Right);
+        assert_ne!(g.usable_in_reach(), Some(Usable::HouseDoor), "벽 앞 x={x}");
+        tap_e(&mut g);
+        assert!(!g.shop.is_open(), "벽 앞 x={x}");
+        // 화면은 문이 닿지 않으면 ↑를 점프로 보낸다 (view::input::up_enters).
+        let ground_y = g.player.pos.y;
+        g.update(&PlayerInput { jump_pressed: true, ..Default::default() }, FRAME);
+        run(&mut g, idle(), 0.1);
+        assert!(g.player.pos.y < ground_y, "↑는 점프 x={x}");
+        assert!(!g.shop.is_open());
+    }
+}
+
 #[test]
 fn door_is_only_on_the_long_map() {
     assert!(World::long_map(SEED).house_door().is_some());
@@ -165,6 +199,37 @@ fn no_box_near_the_door_on_any_seed() {
         for b in w.boxes() {
             let gap = (b.x - (door.x + door.w)).max(door.x - (b.x + b.w));
             assert!(gap >= NO_BOX_MARGIN, "시드 {seed}: 상자 {b:?}가 문 {door:?}에 가깝다");
+        }
+    }
+}
+
+/// 부모님 결정 2026-11-15: 동굴 입구(화산) 둘레 `BOX_CLEAR_AROUND_CAVE`, 집 문(집) 둘레 `BOX_CLEAR_AROUND_DOOR` 안에는 상자가 없다.
+/// 상자 사이 틈 규칙(붙음 또는 `BOX_MIN_GAP` 이상)은 그대로이고, 집에는 상자가 하나 이상 남는다 (화산은 0개 허용).
+/// 부서진 상자는 같은 네모로 돌아오므로 배치만 보면 06:00에도 그 둘레는 비어 있다.
+#[test]
+fn no_box_around_cave_entrance_and_house_door_on_any_seed() {
+    const { assert!(BOX_CLEAR_AROUND_CAVE >= PLAYER_WIDTH * 2.0 + MINE_REACH) };
+    const { assert!(BOX_CLEAR_AROUND_DOOR >= PLAYER_WIDTH * 2.0 + HOUSE_DOOR_REACH) };
+    for seed in 0..MANY_SEEDS {
+        let w = World::long_map(seed);
+        let cave = w.cave_entrance().unwrap();
+        let door = w.house_door().unwrap();
+        assert_eq!(w.place_name_at(cave.center().x), "화산");
+        assert_eq!(w.place_name_at(door.center().x), "집");
+        let mut boxes = w.boxes();
+        for b in &boxes {
+            for (spot, clear) in [(cave, BOX_CLEAR_AROUND_CAVE), (door, BOX_CLEAR_AROUND_DOOR)] {
+                let gap = (b.x - (spot.x + spot.w)).max(spot.x - (b.x + b.w));
+                assert!(gap >= clear, "시드 {seed}: 상자 {b:?}가 {spot:?}에 가깝다 (틈 {gap})");
+            }
+        }
+        // 화산은 0개여도 된다 (부모님 결정 2026-11-15). 집에는 하나 이상 남는다.
+        let house = w.place_index_at(door.center().x);
+        assert!(boxes.iter().any(|b| w.place_index_at(b.center().x) == house), "시드 {seed}: 집에 상자가 없다");
+        boxes.sort_by(|a, b| a.x.total_cmp(&b.x));
+        for pair in boxes.windows(2) {
+            let gap = pair[1].x - (pair[0].x + pair[0].w);
+            assert!(gap == 0.0 || gap >= BOX_MIN_GAP, "시드 {seed}: 틈 {gap}, {pair:?}");
         }
     }
 }

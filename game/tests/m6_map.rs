@@ -179,10 +179,12 @@ fn player_position_and_place_change_as_they_walk_without_touching_clock_or_coins
 
 #[test]
 fn every_place_has_boxes_and_never_more_than_ten() {
+    // 부모님 결정 2026-11-15: 동굴 입구 둘레를 비우면 화산에는 자리가 없어서 0개여도 된다.
     for (seed, w) in maps() {
         for place in 0..PLACE_NAMES.len() {
             let count = w.boxes().iter().filter(|b| w.place_index_at(b.x) == place).count();
-            assert!((1..=BOX_COUNT_MAX).contains(&count), "seed {seed}, {} 상자 {count}개", PLACE_NAMES[place]);
+            let fewest = if PLACE_NAMES[place] == "화산" { 0 } else { 1 };
+            assert!((fewest..=BOX_COUNT_MAX).contains(&count), "seed {seed}, {} 상자 {count}개", PLACE_NAMES[place]);
         }
     }
 }

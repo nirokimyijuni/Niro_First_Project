@@ -1,9 +1,8 @@
-//! 판이 끝난 화면. 쓰러졌을 때 (D30, US-043, US-044): 머리가 퐁 튀어 오르고 몸이 털썩 주저앉는 만화 같은 움직임,
-//! 끝나면 "쓰러졌어요"와 기록, 크게 "다시 하기". 무섭지 않게, 피 없이.
+//! 판이 끝난 화면. 쓰러졌을 때 (US-043, US-044, 부모님 결정 2026-11-15로 D30을 바꿈): 머리는 붙은 채 살짝 비틀거리다
+//! 털썩 주저앉고 머리 위에 별이 빙글빙글 도는 만화 같은 움직임, 끝나면 "쓰러졌어요"와 기록, 크게 "다시 하기". 무섭지 않게, 피 없이.
 //! 클리어했을 때 (D63, US-068): 밝은 아침에 고른 캐릭터가 통통 뛰고 좌우로 홱홱 돌며 축하 춤을 춘다.
 //! 쓰러진 끝 화면에도 고른 캐릭터가 다시 멀쩡히 서서 어질어질 흔들린다 (가족 피드백). 점수는 둘 다 보인다 (D64, US-069).
 
-use super::assets::head_share;
 use super::hud::draw_pill;
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::hash;
@@ -20,18 +19,17 @@ use std::f32::consts::{PI, TAU};
 const ANIMATION_SECONDS: f32 = 1.6;
 /// 공중에서 쓰러졌을 때 몸이 바닥까지 떨어지는 시간 (초)
 const BODY_DROP_SECONDS: f32 = 0.25;
-/// 몸이 주저앉기 시작·끝 (전체를 0~1로 볼 때)
-const SLUMP_START: f32 = 0.12;
-const SLUMP_END: f32 = 0.32;
-/// 다 주저앉으면 키가 이만큼 줄고 옆으로 이만큼 퍼진다
-const SLUMP_SHORTER: f32 = 0.38;
-const SLUMP_WIDER: f32 = 0.2;
-/// 머리: 날아가는 시간 비율(나머지는 한 번 통 튀기), 솟는 높이, 튀는 높이, 옆으로 굴러가는 거리, 멈췄을 때 기울기
-const HEAD_FLIGHT_SHARE: f32 = 0.7;
-const HEAD_PEAK: f32 = 130.0;
-const HEAD_BOUNCE: f32 = 18.0;
-const HEAD_ROLL: f32 = 74.0;
-const HEAD_REST_TILT: f32 = 0.3;
+/// 비틀거리다가 주저앉기 시작·끝 (전체를 0~1로 볼 때). 앞쪽은 비틀비틀, 뒤쪽은 앉아서 별만 돈다.
+const SLUMP_START: f32 = 0.5;
+const SLUMP_END: f32 = 0.7;
+/// 다 주저앉으면 키가 이만큼 줄고 옆으로 이만큼 퍼진다 (털썩 앉은 모습)
+const SLUMP_SHORTER: f32 = 0.3;
+const SLUMP_WIDER: f32 = 0.15;
+/// 비틀비틀: 가장 많이 기우는 각도(라디안), 주저앉기 전까지 흔들리는 반 번 수
+const WOBBLE_TILT: f32 = 0.22;
+const WOBBLE_SWAYS: f32 = 3.0;
+/// 머리 위 별이 다 나타나는 때 (전체를 0~1로 볼 때)
+const STARS_APPEAR: f32 = 0.2;
 
 /// "다시 하기" 버튼 (터치·클릭 판정과 그림이 같이 쓴다)
 pub const RETRY_BUTTON: Rect = Rect::new(290.0, 372.0, 380.0, 108.0);
@@ -134,84 +132,53 @@ fn landing_y(world: &World, center_x: f32, half_width: f32, from_y: f32) -> f32 
         .fold(world.floor_y_under(body), f32::min)
 }
 
-struct HeadFlight {
-    /// 옆으로 간 거리 (0 ~ HEAD_ROLL)
-    side: f32,
-    /// 머리 아래 끝이 닿을 곳에서 얼마나 떠 있는지
-    height: f32,
-    spin: f32,
-}
-
-/// `t`: 0 시작 ~ 1 끝. `start_height`: 처음(몸 위에 붙어 있을 때) 떠 있는 높이.
-fn head_flight(t: f32, start_height: f32) -> HeadFlight {
-    let t = t.clamp(0.0, 1.0);
-    let flying = (t / HEAD_FLIGHT_SHARE).min(1.0);
-    let height = if t < HEAD_FLIGHT_SHARE {
-        start_height * (1.0 - flying) + 4.0 * HEAD_PEAK * flying * (1.0 - flying)
-    } else {
-        let bounce = (t - HEAD_FLIGHT_SHARE) / (1.0 - HEAD_FLIGHT_SHARE);
-        4.0 * HEAD_BOUNCE * bounce * (1.0 - bounce)
-    };
-    let ease = 1.0 - (1.0 - t) * (1.0 - t);
-    HeadFlight { side: HEAD_ROLL * ease, height, spin: (TAU + HEAD_REST_TILT) * ease }
-}
-
-/// 몸이 주저앉은 정도 (0 ~ 1, 잠깐 더 눌렸다가 돌아온다).
+/// 몸이 비틀거리다 털썩 앉는 정도 (0 ~ 1, 잠깐 더 눌렸다가 돌아온다).
 fn slump(t: f32) -> f32 {
     let s = ((t - SLUMP_START) / (SLUMP_END - SLUMP_START)).clamp(0.0, 1.0);
     s * (1.0 + 0.3 * (s * PI).sin())
 }
 
-/// 손그림을 머리 윗부분과 몸으로 나눠서 그린다. `feet_x`, `height`는 평소 캐릭터 그림과 같은 값.
-pub fn draw_fallen_player(texture: &Texture2D, player: &Player, world: &World, feet_x: f32, height: f32, tint: Color, seconds: f32) {
-    let t = seconds / ANIMATION_SECONDS;
-    let (tw, th) = (texture.width(), texture.height());
-    let width = height * tw / th;
-    let share = head_share(player.kind);
-    let (head_h, body_h) = (height * share, height * (1.0 - share));
-    let flip_x = player.facing == Facing::Left;
-    let start_feet = player.rect().y + player.rect().h;
-
-    // 몸: 바닥까지 떨어지고 털썩
-    let rest = landing_y(world, feet_x, player.size.x / 2.0, start_feet);
-    let drop = (seconds / BODY_DROP_SECONDS).min(1.0);
-    let feet_y = start_feet + (rest - start_feet) * drop * drop;
-    let s = slump(t);
-    let size = vec2(width * (1.0 + SLUMP_WIDER * s), body_h * (1.0 - SLUMP_SHORTER * s));
-    draw_texture_ex(
-        texture,
-        feet_x - size.x / 2.0,
-        feet_y - size.y,
-        tint,
-        DrawTextureParams {
-            source: Some(Rect::new(0.0, th * share, tw, th * (1.0 - share))),
-            dest_size: Some(size),
-            flip_x,
-            ..Default::default()
-        },
-    );
-
-    // 머리: 화면 가운데 쪽으로 튀어 올랐다가 떨어져 통 튄다
-    let side = if feet_x < VIRTUAL_WIDTH / 2.0 { 1.0 } else { -1.0 };
-    let head_rest = landing_y(world, feet_x + side * HEAD_ROLL, width / 2.0, start_feet);
-    let flight = head_flight(t, head_rest - (start_feet - body_h));
-    let center = vec2(feet_x + side * flight.side, head_rest - flight.height - head_h / 2.0);
-    draw_texture_ex(
-        texture,
-        center.x - width / 2.0,
-        center.y - head_h / 2.0,
-        tint,
-        DrawTextureParams {
-            source: Some(Rect::new(0.0, 0.0, tw, th * share)),
-            dest_size: Some(vec2(width, head_h)),
-            rotation: flight.spin * side,
-            pivot: Some(center),
-            flip_x,
-            ..Default::default()
-        },
-    );
+/// 비틀비틀 기울기 (라디안): 주저앉기 전까지 좌우로 세 번 흔들리고, 앉을 때는 똑바로.
+fn wobble(t: f32) -> f32 {
+    let w = (t / SLUMP_START).clamp(0.0, 1.0);
+    (w * WOBBLE_SWAYS * PI).sin() * WOBBLE_TILT
 }
 
+/// 머리 위 별의 진하기 (0 ~ 1): 비틀거리기 시작하면 나타나 끝까지 돈다.
+fn dizzy_stars_shown(t: f32) -> f32 {
+    (t / STARS_APPEAR).clamp(0.0, 1.0)
+}
+
+/// 쓰러질 때 (부모님 결정 2026-11-15, D30을 바꿈): 머리는 붙은 채로 살짝 비틀거리다 털썩 주저앉고,
+/// 머리 위에 별이 빙글빙글 돈다 (끝 화면의 어지러운 별과 같은 모습). `feet_x`, `height`는 평소 캐릭터 그림과 같은 값.
+pub fn draw_fallen_player(texture: &Texture2D, player: &Player, world: &World, feet_x: f32, height: f32, tint: Color, seconds: f32) {
+    let t = seconds / ANIMATION_SECONDS;
+    let width = height * texture.width() / texture.height();
+    let start_feet = player.rect().y + player.rect().h;
+    // 공중에서 쓰러졌으면 바닥까지 떨어진다
+    let rest = landing_y(world, feet_x, player.size.x / 2.0, start_feet);
+    let drop = (seconds / BODY_DROP_SECONDS).min(1.0);
+    let feet = vec2(feet_x, start_feet + (rest - start_feet) * drop * drop);
+    let s = slump(t);
+    let size = vec2(width * (1.0 + SLUMP_WIDER * s), height * (1.0 - SLUMP_SHORTER * s));
+    draw_texture_ex(
+        texture,
+        feet.x - size.x / 2.0,
+        feet.y - size.y,
+        tint,
+        DrawTextureParams { dest_size: Some(size), rotation: wobble(t), pivot: Some(feet), flip_x: player.facing == Facing::Left, ..Default::default() },
+    );
+    // 머리 위 별 빙글빙글
+    let shown = dizzy_stars_shown(t);
+    let turn = seconds * DIZZY_STAR_TURNS_PER_SECOND * TAU;
+    let head = feet - vec2(0.0, size.y + 6.0);
+    let radius = DIZZY_STAR_RADIUS * 0.8;
+    for i in 0..DIZZY_STARS {
+        let a = turn + i as f32 * TAU / DIZZY_STARS as f32;
+        let at = head + vec2(a.cos() * radius, a.sin() * radius * 0.35);
+        draw_star(at, 9.0 * shown, turn * 2.0, Color { a: shown, ..NEW_RECORD });
+    }
+}
 /// 미스의 한 순간.
 #[derive(Debug, PartialEq)]
 pub(super) struct MissDance {
@@ -262,7 +229,7 @@ fn dizzy(t: f32) -> (f32, f32) {
     ((t * DIZZY_SWAYS_PER_SECOND * TAU).sin() * DIZZY_TILT, t * DIZZY_STAR_TURNS_PER_SECOND * TAU)
 }
 
-/// 머리가 빠졌던 캐릭터가 다시 멀쩡히 서서, 머리 위에 별이 빙글빙글 돈다. `t`: 끝 화면이 열린 뒤 흐른 초.
+/// 쓰러졌던 캐릭터가 다시 멀쩡히 서서, 머리 위에 별이 빙글빙글 돈다. `t`: 끝 화면이 열린 뒤 흐른 초.
 fn draw_dizzy_hero(texture: &Texture2D, t: f32) {
     let grow = (t / CLEAR_ENTER_SECONDS).min(1.0);
     let (tilt, turn) = dizzy(t);
@@ -409,13 +376,23 @@ mod tests {
     }
 
     #[test]
-    fn head_goes_up_then_lands() {
-        let start = 40.0;
-        assert_eq!(head_flight(0.0, start).height, start, "처음에는 몸 위에 붙어 있다");
-        assert!(head_flight(HEAD_FLIGHT_SHARE / 2.0, start).height > start + 50.0, "위로 퐁");
-        let end = head_flight(1.0, start);
-        assert_eq!(end.height, 0.0, "바닥에 멈춘다");
-        assert_eq!(end.side, HEAD_ROLL);
+    fn falling_wobbles_a_little_then_sits_with_stars_and_head_stays_on() {
+        // 부모님 결정 2026-11-15: 머리가 빠져 날아가지 않는다. 비틀비틀 → 털썩 → 별 빙글빙글
+        assert_eq!(wobble(0.0), 0.0, "똑바로 서서 시작");
+        let mut biggest: f32 = 0.0;
+        for i in 0..=100 {
+            let t = i as f32 / 100.0;
+            biggest = biggest.max(wobble(t).abs());
+            assert!(wobble(t).abs() <= WOBBLE_TILT + 1e-4, "살짝만 기운다");
+        }
+        assert!(biggest > WOBBLE_TILT * 0.9, "비틀거리는 게 보인다");
+        assert!(wobble(SLUMP_START).abs() < 1e-3 && wobble(1.0).abs() < 1e-3, "앉을 때와 끝에는 똑바로");
+        assert_eq!(slump(SLUMP_START), 0.0, "비틀거리는 동안은 서 있다");
+        assert_eq!(dizzy_stars_shown(0.0), 0.0);
+        assert_eq!(dizzy_stars_shown(STARS_APPEAR), 1.0);
+        assert_eq!(dizzy_stars_shown(1.0), 1.0, "앉은 뒤에도 별이 돈다");
+        // 다 앉은 뒤 잠깐 머물고, 납작해지지 않는다
+        const { assert!(SLUMP_END < 1.0 && SLUMP_SHORTER < 0.5) };
     }
 
     #[test]

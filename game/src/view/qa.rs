@@ -1,6 +1,6 @@
 //! 시험용 단축 (로건, 부모님 결정 2026-11-14 "시험 단축 만들기"): 엘리가 7일을 기다리지 않고 확인하게.
 //! 주소에 `?qa`가 있을 때만 켜진다 (PC 실행은 `cargo run -- qa`). 보통 주소에서는 단축도 "QA" 표시도 없다.
-//! PC는 숫자 키 1~9·0, 폰과 마우스는 오른쪽 위 "QA" 표를 눌러 큰 칸 창에서 고른다.
+//! PC는 Shift+숫자 키 1~9·0 (숫자 1·2·3만 누르면 포션·엔더열매라서, 부모님 결정 2026-11-15), 폰과 마우스는 오른쪽 위 "QA" 표를 눌러 큰 칸 창에서 고른다.
 //! 규칙을 새로 만들지 않는다: logic의 pub 필드·함수(지갑, 가방, 상점, 무기, 시계, 상자 주사위)로 상태만 바꾼다.
 
 use super::hud::draw_pill;
@@ -27,7 +27,7 @@ pub const QA_CLEAR_SECONDS_LEFT: f32 = 10.0;
 /// 상자 주사위를 바꿀 때 찾아볼 시드 수 (끝없이 돌지 않게)
 const DICE_TRIES: u32 = 2000;
 
-/// 오른쪽 "QA" 표: 정보판(물건 줄까지, 아래 끝 238)보다 아래, 폰 버튼·조이스틱과 먼 곳 (BUG-031).
+/// 오른쪽 "QA" 표: 정보판과 곡괭이 안내 상자보다 아래, 폰 버튼·조이스틱과 먼 곳 (BUG-031).
 /// 상점·문제·제작대·멈춤 창이 열려 있으면 그리지도 받지도 않는다 (창의 칸·버튼을 가리지 않게).
 pub const QA_BADGE: Rect = Rect::new(VIRTUAL_WIDTH - 104.0, 248.0, 92.0, 52.0);
 const PANEL: Rect = Rect::new(80.0, 40.0, 800.0, 460.0);
@@ -67,7 +67,7 @@ impl QaAction {
         match self {
             QaAction::Coins => "1 코인 3000",
             QaAction::Materials => "2 재료 채우기",
-            QaAction::Items => "3 아이템·무기 다",
+            QaAction::Items => "3 아이템, 무기 다",
             QaAction::DaySevenEvening => "4 7일째 저녁",
             QaAction::BeforeClear => "5 클리어 직전",
             QaAction::NightNow => "6 밤으로",
@@ -117,9 +117,12 @@ impl Qa {
         Qa { enabled, open: false }
     }
 
-    /// 이번 프레임에 누른 숫자 키의 단축. 꺼져 있으면 늘 None.
+    /// 이번 프레임에 Shift와 함께 누른 숫자 키의 단축. 꺼져 있거나 Shift가 없으면 None.
     pub fn key_action(&self) -> Option<QaAction> {
         if !self.enabled {
+            return None;
+        }
+        if !super::input::shift_down() {
             return None;
         }
         QaAction::ALL.into_iter().find(|a| is_key_pressed(a.key()))
@@ -149,7 +152,7 @@ pub fn apply(game: &mut Game, action: QaAction) {
             let bag = &mut game.gathering.bag;
             bag.has_pickaxe = true;
             bag.has_diamond_pickaxe = true;
-            bag.has_syringe_gun = true;
+            bag.syringe_guns = bag.syringe_guns.max(1);
             bag.ender_fruits = bag.ender_fruits.max(QA_POTIONS);
             bag.riding_car = true;
             for p in [Potion::Health, Potion::Poison] {
@@ -260,7 +263,7 @@ pub fn draw_menu(text: &TextPainter, qa: &Qa) {
     }
     draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.4));
     draw_rectangle(PANEL.x, PANEL.y, PANEL.w, PANEL.h, Color::new(0.20, 0.05, 0.22, 0.95));
-    text.centered("QA 단축 (시험용) — 밖을 누르면 닫기", PANEL.center().x, PANEL.y + 44.0, 28.0, WHITE);
+    text.centered("QA 단축 (시험용, PC는 Shift+숫자): 밖을 누르면 닫기", PANEL.center().x, PANEL.y + 44.0, 28.0, WHITE);
     for (i, a) in QaAction::ALL.into_iter().enumerate() {
         let r = cell_rect(i);
         draw_pill(r.x, r.y, r.w, r.h, Color::new(0.75, 0.10, 0.55, 1.0));
@@ -289,8 +292,8 @@ mod tests {
     #[test]
     fn badge_is_below_the_info_panel_and_away_from_buttons_bug_031() {
         use crate::view::touch::{play_buttons_with_mine, BACK_BUTTON};
-        // 정보판은 물건 줄(무기 있을 때)까지 238에서 끝난다
-        let info_bottom = crate::view::hud::hud_bottom(true).max(238.0);
+        // 정보판(폰 멈춤 버튼까지)보다 아래
+        let info_bottom = crate::view::hud::hud_bottom(true, true);
         assert!(QA_BADGE.y > info_bottom, "정보판 아래");
         assert!(QA_BADGE.right() <= VIRTUAL_WIDTH && QA_BADGE.bottom() <= VIRTUAL_HEIGHT);
         assert!(!QA_BADGE.overlaps(&BACK_BUTTON));
@@ -324,7 +327,7 @@ mod tests {
         assert!(Material::ALL.iter().all(|m| g.gathering.bag.count(*m) == QA_MATERIALS), "두 번 눌러도 그만큼");
         apply(&mut g, QaAction::Items);
         let bag = &g.gathering.bag;
-        assert!(bag.has_syringe_gun && bag.has_diamond_pickaxe && bag.riding_car && bag.ender_fruits == QA_POTIONS);
+        assert!(bag.syringe_guns >= 1 && bag.has_diamond_pickaxe && bag.riding_car && bag.ender_fruits == QA_POTIONS);
         assert_eq!(g.shop.potions(Potion::Health), QA_POTIONS);
         assert!(g.shop.has_skates() && g.shop.armor() == Some(Armor::Diamond));
         assert!(g.can_switch() && g.weapons.has(Weapon::Gun));

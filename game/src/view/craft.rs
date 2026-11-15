@@ -386,7 +386,8 @@ mod tests {
         for recipe in Recipe::ALL {
             let (game, view, made) = make_by_tapping(recipe);
             assert_eq!(made, Some(recipe));
-            assert!(recipe.already_have(&game.gathering.bag) || recipe == Recipe::EnderFruit, "{recipe:?}를 얻었다");
+            // 엔더열매·주사기총은 여러 개 가질 수 있어서 already_have가 늘 false다 (수산나 2026-11-15)
+            assert!(recipe.already_have(&game.gathering.bag) || matches!(recipe, Recipe::EnderFruit | Recipe::SyringeGun), "{recipe:?}를 얻었다");
             assert_eq!(info_text(&game, &view), Some(recipe.crafted_text().to_string()), "축하 글");
             assert!(CRAFT_MATERIALS.iter().all(|m| game.gathering.bag.count(*m) == 0), "재료를 다 썼다");
         }

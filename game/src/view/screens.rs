@@ -9,14 +9,15 @@ use super::coin::draw_coins;
 use super::effects::{draw_bubble, Effects};
 use super::gameover::{draw_end_panel, draw_fallen_player, EndScreen};
 use super::gather::{self, GatherView};
-use super::hud::{draw_health, draw_hud, draw_level, draw_weapons, hud_bottom};
+use super::bag::{self, BagView};
+use super::hud;
 use super::places;
 use super::screen::{set_shake, Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
 use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
 use super::items;
-use super::shop::{self, Pocket};
+use super::shop;
 use crate::config::{CITIZEN_HELP_TEXT, DEV_FAST_FORWARD_SCALE};
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
@@ -78,8 +79,6 @@ const PICK_ARROW_HEIGHT: f32 = 20.0;
 const PICK_ARROW_BOB: f32 = 4.0;
 
 // ---- 플레이 화면 배치 ----
-/// 조작 안내는 화면 아래 모래 위 (위쪽은 정보판 자리)
-const PLAY_HINT_Y: f32 = 526.0;
 /// 맞은 뒤 안 맞는 동안 캐릭터가 초당 깜빡이는 번, 깜빡일 때 투명도
 const HURT_BLINKS_PER_SECOND: f32 = 8.0;
 const HURT_BLINK_ALPHA: f32 = 0.35;
@@ -392,28 +391,10 @@ pub fn car_is_moving(riding_car: bool, speed_x: f32) -> bool {
     riding_car && speed_x.abs() > 1.0
 }
 
-/// PC 플레이 화면 아래 키 안내. 바꾸기(W)는 무기가 있을 때, 포션(R·T)·주사기총(Y)·엔더열매(G)는 가진 것만 쓴다.
-pub fn keyboard_hint(can_switch: bool, owned: &[Pocket]) -> String {
-    let mut hint = String::from("화살표: 걷기  Space: 점프  Q: 공격  ");
-    if can_switch {
-        hint.push_str("W: 바꾸기  ");
-    }
-    hint.push_str("E: 캐기  ");
-    let potions: Vec<&str> = owned.iter().filter(|p| matches!(p, Pocket::Potion(_))).map(|p| super::input::pocket_key_label(*p)).collect();
-    if !potions.is_empty() {
-        hint.push_str(&format!("{}: 포션  ", potions.join("·")));
-    }
-    for (pocket, name) in [(Pocket::SyringeGun, "주사기총"), (Pocket::EnderFruit, "엔더열매")] {
-        if owned.contains(&pocket) {
-            hint.push_str(&format!("{}: {name}  ", super::input::pocket_key_label(pocket)));
-        }
-    }
-    hint.push_str("Esc: 멈춤");
-    hint
-}
 
-/// `touch_mode`면 키보드 안내 대신 조이스틱 안내를 보여 준다 (터치 조이스틱·버튼은 main이 위에 그린다).
+/// 플레이 화면. 터치 조이스틱·버튼과 가방 창은 main이 위에 그린다. `bag_view`는 가방 버튼 반짝임과 아래 키 안내 시간.
 /// `ended`가 있으면 판이 끝난 화면이다 (쓰러짐이나 클리어).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_play(
     assets: &Assets,
     text: &TextPainter,
@@ -423,6 +404,7 @@ pub fn draw_play(
     ended: Option<&EndScreen>,
     touch_mode: bool,
     gathered: &GatherView,
+    bag_view: &BagView,
 ) {
     let d = game.clock.sky_darkness();
     let (camera_x, view_x) = (game.camera_left(), view_center(game));
@@ -519,7 +501,20 @@ pub fn draw_play(
     if on_map {
         game.combat.skeletons.projectiles.iter().for_each(|shot| draw_projectile(shot, view_x));
     }
-    effects.draw(text, r, player.facing, &assets.m6, camera_x, game.attack_reach());
+    // 화면에 고정된 정보판·큰 알림 글의 자리 (화면 좌표). 머리 위 "쓰러졌어요"가 이 칸들을 피한다 (BUG-032).
+    let tag_space = if ended.is_none() { gather::usable_tag_screen_rect(game, view_x, camera_x) } else { None };
+    // 끝난 화면은 큰 글이 맨 위에 온다 (BUG-024). 쓰러질 때는 움직임이 끝난 뒤에 숨긴다
+    let show_info = !game.is_cleared() && !ended.is_some_and(EndScreen::ready);
+    // 큰 알림 글은 정보판(효과 줄·물건 칸, 폰 멈춤 버튼까지)과 곡괭이 안내 상자 아래에 쌓는다 (BUG-031, 임시-78)
+    let info_bottom = if show_info {
+        let hud = hud::hud_bottom(hud::has_row(game), touch_mode && ended.is_none());
+        gathered.recipe_hint_bottom().map_or(hud, |b| b.max(hud))
+    } else {
+        0.0
+    };
+    let mut keep_words_off = effects.big_text_rects(text, info_bottom, tag_space);
+    keep_words_off.push(Rect::new(0.0, 0.0, VIRTUAL_WIDTH, info_bottom));
+    effects.draw(text, r, player.facing, &assets.m6, camera_x, game.attack_reach(), &keep_words_off);
     if ended.is_none() {
         gather::draw_mining_progress(r, game.mining_progress());
         gather::draw_usable_tag(text, game, view_x, camera_x, touch_mode, time());
@@ -537,45 +532,23 @@ pub fn draw_play(
     // 여기부터 화면 좌표: 정보판·안내는 걸어도 같은 자리다. main이 이어서 그리는 터치 버튼도 같다. 흔들지 않는다.
     set_shake(Vec2::ZERO);
     Letterbox::current().look_at(0.0);
-    let tag_space = if ended.is_none() { gather::usable_tag_screen_rect(game, view_x, camera_x) } else { None };
-    let owned = game.weapons.owned();
-    // 끝난 화면은 큰 글이 맨 위에 온다 (BUG-024). 쓰러질 때는 움직임이 끝난 뒤에 숨긴다
-    let show_info = !game.is_cleared() && !ended.is_some_and(EndScreen::ready);
     let time_scale = if fast_forward { DEV_FAST_FORWARD_SCALE } else { 1.0 };
-    let show_recipe = game.world.workbench().is_some() && !gathered.recipe_hint_showing();
-    // 큰 알림 글은 정보판(재료 줄·물건 줄까지) 아래에 쌓는다 (BUG-031)
-    let info_bottom = if show_info {
-        [
-            Some(hud_bottom(!owned.is_empty())),
-            gather::bag_bottom(text, &game.gathering.bag, show_recipe),
-            gathered.recipe_hint_bottom(),
-            shop::status_bottom(game, time_scale, !owned.is_empty()),
-        ]
-        .into_iter()
-        .flatten()
-        .fold(0.0, f32::max)
-    } else {
-        0.0
-    };
     effects.draw_on_screen(text, info_bottom, tag_space);
     gathered.draw_popup(text);
     if show_info {
-        draw_hud(text, &game.clock, game.wallet.coins(), fast_forward, game.place_name());
-        draw_health(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle());
-        draw_level(text, game.combat.level, game.combat.experience);
-        draw_weapons(&assets.m6, &owned, game.weapons.held());
-        shop::draw_status(text, game, &assets.m6, time_scale, !owned.is_empty(), touch_mode);
-        gather::draw_bag(text, &game.gathering.bag, &assets.m6, show_recipe);
+        // 롤플레잉 게임처럼 (US-091): 왼쪽 위 얼굴·체력·레벨·경험치, 그 아래 효과·물건 칸, 오른쪽 위 날짜·코인·시계와 가방, 아래 가운데 든 무기
+        hud::draw_face(assets, player.kind);
+        hud::draw_bars(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle(), game.combat.level, game.combat.experience);
+        hud::draw_effects_and_pockets(text, game, &assets.m6, time_scale, touch_mode);
+        hud::draw_coins_and_clock(text, &game.clock, game.wallet.coins());
+        hud::draw_held_weapon(&assets.m6, game.weapons.held());
+        if ended.is_none() {
+            bag::draw_bag_button(text, bag_view, touch_mode);
+        }
     }
-    if touch_mode && ended.is_none() {
-        text.centered("조이스틱을 위로 밀면 점프", VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, 26.0, TEXT_COLOR);
-    }
-    if !touch_mode && ended.is_none() {
-        let owned_pockets: Vec<Pocket> = Pocket::ALL.into_iter().filter(|p| p.count(game) > 0).collect();
-        let hint = keyboard_hint(game.can_switch(), &owned_pockets);
-        // 글이 길어지면 화면 폭에 맞게 조금 줄인다
-        let size = (26.0 * (VIRTUAL_WIDTH - 24.0) / text.width(&hint, 26.0).max(1.0)).min(26.0);
-        text.centered(&hint, VIRTUAL_WIDTH / 2.0, PLAY_HINT_Y, size, TEXT_COLOR);
+    // PC 아래 키 안내 한 줄은 처음 8초만 (임시-76). 폰에는 없다.
+    if !touch_mode && ended.is_none() && !bag_view.open {
+        bag::draw_short_hint(text, bag_view);
     }
     if let Some(ended) = ended {
         draw_end_panel(text, ended, texture);
@@ -586,17 +559,6 @@ pub fn draw_play(
 mod tests {
     use super::*;
 
-    #[test]
-    fn keyboard_hint_shows_keys_only_for_what_you_have() {
-        use crate::logic::shop::Potion;
-        assert_eq!(keyboard_hint(false, &[]), "화살표: 걷기  Space: 점프  Q: 공격  E: 캐기  Esc: 멈춤");
-        assert_eq!(
-            keyboard_hint(true, &Pocket::ALL),
-            "화살표: 걷기  Space: 점프  Q: 공격  W: 바꾸기  E: 캐기  R·T: 포션  Y: 주사기총  G: 엔더열매  Esc: 멈춤"
-        );
-        let one = keyboard_hint(false, &[Pocket::Potion(Potion::Poison), Pocket::EnderFruit]);
-        assert!(one.contains("T: 포션") && one.contains("G: 엔더열매") && !one.contains("Y:") && !one.contains("W:"), "{one}");
-    }
 
     #[test]
     fn car_moves_only_while_riding_and_rolling() {

@@ -372,7 +372,9 @@ impl Effects {
     /// 맵 좌표로 그린다. `camera_left`는 화면 왼쪽 끝의 맵 x (말풍선을 화면 안에 두는 데 쓴다).
     /// 효과의 자리는 맵 좌표로 저장되어 있어서, 이음매 너머면 화면에 가까운 쪽으로 옮겨 그린다 (D61).
     /// `attack_reach`는 logic이 준 공격 거리다. 총 빛줄기는 첫 벽에서 멈춘다 (US-073).
-    pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art, camera_left: f32, attack_reach: f32) {
+    /// `keep_words_off`: 머리 위 "쓰러졌어요"가 가리면 안 되는 칸들 (화면 좌표: 정보판, 큰 알림 글). 겹치면 그 글만 빼고 별은 그린다 (BUG-032).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(&self, text: &TextPainter, player: Rect, facing: Facing, art: &M6Art, camera_left: f32, attack_reach: f32, keep_words_off: &[Rect]) {
         let view_x = camera_left + VIRTUAL_WIDTH / 2.0;
         if let Some(age) = self.swing_age {
             let t = age / SWING_SECONDS;
@@ -386,7 +388,11 @@ impl Effects {
             match burst.kind {
                 BurstKind::Spark => draw_spark(burst),
                 BurstKind::Hand => draw_hand(burst, player.center()),
-                BurstKind::Defeated | BurstKind::Popped | BurstKind::Found => draw_burst(text, burst),
+                BurstKind::Defeated => {
+                    let words = defeated_words_rect(text, burst.at.x - camera_left, burst.at.y);
+                    draw_burst(text, burst, !keep_words_off.iter().any(|r| r.overlaps(&words)));
+                }
+                BurstKind::Popped | BurstKind::Found => draw_burst(text, burst, true),
                 BurstKind::Cheer => draw_bubble(text, SKELETON_DODGE_TEXT, burst.at.x, burst.at.y - CHEER_ABOVE, camera_left, 1.0 - burst.age / CHEER_SECONDS),
                 BurstKind::Smoke => draw_smoke(burst),
                 BurstKind::PoisonCloud => draw_poison_cloud(burst),
@@ -406,11 +412,8 @@ impl Effects {
         }
     }
 
-    /// 화면에 고정된 효과. 카메라를 푼 뒤에 부른다.
-    /// 큰 글("레벨 업!", 쿵 글, 큰 문구)은 위에서부터 차례로 쌓아서 서로 덮지 않게 한다 (BUG-031).
-    /// `info_bottom`: 정보판(재료 줄·물건 줄까지)의 아래 끝. 큰 글은 그 아래에만 놓인다.
-    /// `keep_clear`: 큰 글이 가리면 안 되는 칸 (집 문 위 E 같은 머리 위 표시, 화면 좌표, BUG-030).
-    pub fn draw_on_screen(&self, text: &TextPainter, info_bottom: f32, keep_clear: Option<Rect>) {
+    /// 지금 보이는 큰 글 덩이들 ("레벨 업!", 쿵 글, 큰 문구 순서)과 큰 문구의 줄·크기.
+    fn big_blocks(&self, text: &TextPainter) -> (Vec<BigBlock>, Vec<&'static str>, f32) {
         let message_lines = self.message.map(|(m, _)| message_lines(m)).unwrap_or_default();
         let message_fit = message_lines.iter().map(|l| text.width(l, MESSAGE_SIZE)).fold(0.0, f32::max);
         let message_size = MESSAGE_SIZE * (MESSAGE_MAX_WIDTH / message_fit.max(1.0)).min(1.0);
@@ -428,6 +431,22 @@ impl Effects {
                 width: message_fit * message_size / MESSAGE_SIZE,
             });
         }
+        (blocks, message_lines, message_size)
+    }
+
+    /// 큰 글들이 놓일 칸 (화면 좌표). `draw_on_screen`과 같은 자리. 머리 위 "쓰러졌어요"가 이 칸을 피한다 (BUG-032).
+    pub fn big_text_rects(&self, text: &TextPainter, info_bottom: f32, keep_clear: Option<Rect>) -> Vec<Rect> {
+        let (blocks, ..) = self.big_blocks(text);
+        let (tops, scale) = stack_big_texts(&blocks, info_bottom + INFO_GAP, keep_clear);
+        blocks.iter().zip(tops).map(|(b, t)| block_rect(b, t, scale)).collect()
+    }
+
+    /// 화면에 고정된 효과. 카메라를 푼 뒤에 부른다.
+    /// 큰 글("레벨 업!", 쿵 글, 큰 문구)은 위에서부터 차례로 쌓아서 서로 덮지 않게 한다 (BUG-031).
+    /// `info_bottom`: 정보판(재료 줄·물건 줄까지)의 아래 끝. 큰 글은 그 아래에만 놓인다.
+    /// `keep_clear`: 큰 글이 가리면 안 되는 칸 (집 문 위 E 같은 머리 위 표시, 화면 좌표, BUG-030).
+    pub fn draw_on_screen(&self, text: &TextPainter, info_bottom: f32, keep_clear: Option<Rect>) {
+        let (blocks, message_lines, message_size) = self.big_blocks(text);
         let (tops, scale) = stack_big_texts(&blocks, info_bottom + INFO_GAP, keep_clear);
         let mut tops = tops.into_iter();
         if let Some(age) = self.level_up_age {
@@ -687,7 +706,30 @@ fn draw_level_up(text: &TextPainter, t: f32, top: f32, scale: f32) {
     text.centered("레벨 업!", VIRTUAL_WIDTH / 2.0, baseline, size, Color { a: fade, ..LEVEL_UP_TEXT });
 }
 
-fn draw_burst(text: &TextPainter, burst: &Burst) {
+/// 쓰러진 몬스터 위 "쓰러졌어요" 글 크기와 처음 자리 (몬스터 가운데에서 위로), 떠오르는 높이
+const DEFEATED_SIZE: f32 = 30.0;
+const DEFEATED_ABOVE: f32 = 40.0;
+const DEFEATED_RISE: f32 = 36.0;
+
+/// "쓰러졌어요" 바닥선: 처음 자리에서 시간이 갈수록 위로 떠오른다.
+fn defeated_baseline(y: f32, age: f32) -> f32 {
+    y - DEFEATED_ABOVE - DEFEATED_RISE * (age / BURST_SECONDS).clamp(0.0, 1.0)
+}
+
+/// "쓰러졌어요"가 떠오르며 지나가는 칸 전체 (화면 좌표, 처음 자리부터 끝 자리까지). 이 칸이 정보판·큰 글과 겹치면 글을 뺀다 (BUG-032).
+/// 처음부터 끝까지 한 칸으로 보아서, 떠오르다 중간에 사라지지 않고 아예 안 나온다.
+fn defeated_words_rect(text: &TextPainter, screen_x: f32, y: f32) -> Rect {
+    words_span(screen_x, y, text.width("쓰러졌어요", DEFEATED_SIZE))
+}
+
+fn words_span(screen_x: f32, y: f32, width: f32) -> Rect {
+    let top = defeated_baseline(y, BURST_SECONDS) - DEFEATED_SIZE * TEXT_ABOVE;
+    let bottom = defeated_baseline(y, 0.0) + DEFEATED_SIZE * TEXT_BELOW;
+    Rect::new(screen_x - width / 2.0, top, width, bottom - top)
+}
+
+/// 별이 퍼지는 효과. `words`가 false면 "쓰러졌어요"·"펑!" 글은 빼고 별만.
+fn draw_burst(text: &TextPainter, burst: &Burst, words: bool) {
     let t = (burst.age / BURST_SECONDS).clamp(0.0, 1.0);
     let fade = 1.0 - t;
     let spread = 10.0 + 46.0 * (1.0 - fade * fade);
@@ -703,9 +745,12 @@ fn draw_burst(text: &TextPainter, burst: &Burst) {
         let p = burst.at + vec2(a.cos(), a.sin()) * spread;
         draw_star(p, 9.0 * fade + 3.0, t * 5.0 + i as f32, Color { a: fade, ..STAR });
     }
-    let rise = 36.0 * t;
+    if !words {
+        return;
+    }
+    let rise = DEFEATED_RISE * t;
     match burst.kind {
-        BurstKind::Defeated => text.centered("쓰러졌어요", burst.at.x, burst.at.y - 40.0 - rise, 30.0, Color { a: fade, ..WHITE }),
+        BurstKind::Defeated => text.centered("쓰러졌어요", burst.at.x, defeated_baseline(burst.at.y, burst.age), DEFEATED_SIZE, Color { a: fade, ..WHITE }),
         BurstKind::Popped => text.centered(CITIZEN_POP_TEXT, burst.at.x, burst.at.y - 30.0 - rise, 48.0, Color { a: fade, ..POP_TEXT }),
         _ => {}
     }
@@ -853,13 +898,32 @@ mod tests {
 
     #[test]
     fn long_message_goes_on_two_lines_bug_031() {
-        assert_eq!(message_lines(ENDER_FRUIT_EATEN_TEXT), vec!["엔더열매를 먹었어요!", "해변 바닷가에서 쿵 해 봐요"]);
+        assert_eq!(message_lines(ENDER_FRUIT_EATEN_TEXT), vec!["애서열매를 먹었어요!", "해변 바닷가에서 쿵 해 봐요"]);
         assert_eq!(message_lines(ENDER_FRUIT_ALREADY_EATEN_TEXT), vec![ENDER_FRUIT_ALREADY_EATEN_TEXT]);
         assert_eq!(message_lines(CAR_OFF_TEXT), vec![CAR_OFF_TEXT], "18자 이하는 한 줄");
         assert_eq!(message_lines("가나다라 마바사아 자차카타 파하가나"), vec!["가나다라 마바사아", "자차카타 파하가나"], "가운데 띄어쓰기");
         for text in [ENDER_FRUIT_EATEN_TEXT, CAR_OFF_TEXT, MISS_FOUND_TEXT] {
             assert!(message_lines(text).iter().all(|l| l.chars().count() <= MESSAGE_SPLIT_CHARS), "{text}");
         }
+    }
+
+    #[test]
+    fn defeated_words_skip_big_texts_and_the_info_panel_bug_032() {
+        // 쓰러진 몬스터 위 "쓰러졌어요"가 떠오르는 칸 전체: 처음 자리와 끝 자리를 다 덮는다
+        let y = 400.0;
+        let span = words_span(480.0, y, 150.0);
+        assert!(span.y <= defeated_baseline(y, BURST_SECONDS) - DEFEATED_SIZE && span.bottom() >= defeated_baseline(y, 0.0));
+        // 쿵 글 덩이(작은 줄 포함)가 그 자리에 쌓이면 겹친다 → 글을 뺀다
+        let blocks = [BigBlock { want_top: SLAM_WANT_TOP, height: items::slam_block_height(3), width: 900.0 }];
+        let (tops, scale) = stack_big_texts(&blocks, SHORT_INFO, None);
+        let slam = block_rect(&blocks[0], tops[0], scale);
+        let low = words_span(480.0, slam.bottom() + 40.0, 150.0);
+        assert!(low.overlaps(&slam), "쿵 작은 줄 바로 아래 몬스터의 글은 쿵 글과 겹친다 (그래서 뺀다)");
+        let far = words_span(480.0, 440.0 + 200.0, 150.0);
+        assert!(!far.overlaps(&slam), "멀리 있으면 그대로 보인다");
+        // 정보판 칸과 겹치면 뺀다 (상자 위 높은 몬스터)
+        let info = Rect::new(0.0, 0.0, VIRTUAL_WIDTH, SHORT_INFO);
+        assert!(words_span(480.0, SHORT_INFO + 50.0, 150.0).overlaps(&info));
     }
 
     #[test]

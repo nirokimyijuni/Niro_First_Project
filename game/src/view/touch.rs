@@ -30,8 +30,8 @@ const SWITCH_BUTTON_RADIUS: f32 = 56.0;
 /// 손가락이 버튼 그림보다 조금 밖을 눌러도 눌린 것으로 친다 (아이 손가락은 빗나가기 쉽다)
 const BUTTON_TOUCH_SLOP: f32 = 12.0;
 
-/// "◀ 고르기" 버튼: 정보판(위쪽 줄, y 10~66) 바로 아래 왼쪽
-pub const BACK_BUTTON: Rect = Rect::new(12.0, 78.0, 156.0, 60.0);
+/// "멈춤"(문제 창에서는 "◀ 고르기") 버튼: 왼쪽 위 얼굴·체력 판과 물건 칸(아래 끝 117) 아래 왼쪽 (US-091)
+pub const BACK_BUTTON: Rect = Rect::new(12.0, 118.0, 156.0, 60.0);
 
 // ---- 색 ----
 const BASE_FILL: Color = Color::new(1.0, 1.0, 1.0, 0.16);

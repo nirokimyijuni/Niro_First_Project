@@ -1225,22 +1225,42 @@ fn holding_left_and_jumping_clears_every_citizen_on_many_maps() {
     }
 }
 
+/// 시민 왼쪽에 상자 하나를 놓은 낮의 새 게임. 상자 오른쪽 끝은 시민 둘레(`CITIZEN_RUN_UP_ROOM`) 끝에서 `extra`만큼 왼쪽.
+/// 주인공은 상자 왼쪽에 `before_box`만큼 떨어져 선다.
+/// 진짜 맵에는 이제 시민 왼쪽 400 안에 상자가 없다 (부모님 결정 2026-11-15: 화산은 동굴 입구 둘레 때문에 상자 0개,
+/// 집 시민 왼쪽은 나무 둘레). 그래서 배치 규칙이 허락하는 자리에 직접 놓고 본다 (BUG-019).
+/// 숨는 곳 둘레(`NO_BOX_MARGIN`)에 걸려 진짜 맵이라면 놓이지 않을 자리면 None (화산 시민 왼쪽의 '화산 뒤').
+fn game_with_box_before_citizen(seed: u32, index: usize, size: f32, extra: f32, before_box: f32) -> Option<(Game, Rect)> {
+    let mut g = new_game(seed);
+    g.miss = None;
+    let citizen_x = g.citizens.list[index].rect.center().x;
+    let the_box = Rect::new(citizen_x - CITIZEN_RUN_UP_ROOM - extra - size, g.world.ground_y - size, size, size);
+    let near_hide_spot = HIDE_SPOTS.iter().any(|spot| the_box.x < spot.1 + NO_BOX_MARGIN && spot.1 - NO_BOX_MARGIN < the_box.x + the_box.w);
+    if near_hide_spot {
+        return None;
+    }
+    g.world.obstacles.push(the_box);
+    stand(&mut g, the_box.x - PLAYER_WIDTH - before_box);
+    g.update(&none(), FRAME);
+    Some((g, the_box))
+}
+
 #[test]
 fn walking_off_a_box_there_is_room_to_jump_the_citizen() {
     let mut checked = 0;
-    for seed in 0..200 {
+    for seed in 0..10 {
         for index in 0..CITIZEN_XS.len() {
-            let g = new_game(seed);
-            let body = g.citizens.list[index].rect;
-            let boxes = g.world.boxes();
-            let Some(nearest) = boxes.iter().filter(|b| b.x < body.x && body.x - b.x < 400.0).max_by(|a, b| a.x.total_cmp(&b.x)) else {
-                continue;
-            };
-            let mut g = game_near_citizen(seed, 0.0);
-            g.player.pos = Vec2::new(nearest.x + nearest.w - PLAYER_WIDTH / 2.0 - 2.0, nearest.y - PLAYER_HEIGHT);
-            g.update(&none(), FRAME);
-            assert!(run_and_jump_over(&mut g, index, true), "seed {seed}: {index}번, 상자 {nearest:?}");
-            checked += 1;
+            for size in [BOX_SMALL_SIZE, BOX_BIG_SIZE] {
+                for extra in (0..=240).step_by(48) {
+                    let Some((mut g, the_box)) = game_with_box_before_citizen(seed, index, size, extra as f32, 0.0) else {
+                        continue;
+                    };
+                    g.player.pos = Vec2::new(the_box.x + the_box.w - PLAYER_WIDTH / 2.0 - 2.0, the_box.y - PLAYER_HEIGHT);
+                    g.update(&none(), FRAME);
+                    assert!(run_and_jump_over(&mut g, index, true), "seed {seed}: {index}번, 상자 {the_box:?}");
+                    checked += 1;
+                }
+            }
         }
     }
     assert!(checked > 100, "상자 뒤 시민 {checked}곳");
@@ -1250,21 +1270,19 @@ fn walking_off_a_box_there_is_room_to_jump_the_citizen() {
 fn jumping_a_box_then_the_citizen_works_from_most_take_off_spots() {
     // BUG-019 재현: 상자 앞 어디서 뛰어도 시민 위로 떨어지던 자리.
     let (mut cleared, mut tries) = (0, 0);
-    for seed in 0..40 {
+    for seed in 0..4 {
         for index in 0..CITIZEN_XS.len() {
-            let g = new_game(seed);
-            let body = g.citizens.list[index].rect;
-            let boxes = g.world.boxes();
-            let Some(nearest) = boxes.iter().filter(|b| b.x < body.x && body.x - b.x < 400.0).max_by(|a, b| a.x.total_cmp(&b.x)).copied() else {
-                continue;
-            };
-            for before_box in (0..160).step_by(16) {
-                let mut g = game_near_citizen(seed, nearest.x - PLAYER_WIDTH - before_box as f32 - 2.0);
-                let walk = PlayerInput { right: true, ..Default::default() };
-                g.update(&PlayerInput { jump_pressed: true, ..walk }, FRAME);
-                // 상자에 막히거나 올라서면 다시 뛰지 않고 달린다.
-                tries += 1;
-                cleared += usize::from(run_and_jump_over(&mut g, index, true));
+            for (size, extra) in [(BOX_SMALL_SIZE, 0.0), (BOX_BIG_SIZE, 0.0), (BOX_SMALL_SIZE, 144.0), (BOX_BIG_SIZE, 192.0)] {
+                for before_box in (0..160).step_by(16) {
+                    let Some((mut g, _)) = game_with_box_before_citizen(seed, index, size, extra, before_box as f32 + 2.0) else {
+                        continue;
+                    };
+                    let walk = PlayerInput { right: true, ..Default::default() };
+                    g.update(&PlayerInput { jump_pressed: true, ..walk }, FRAME);
+                    // 상자에 막히거나 올라서면 다시 뛰지 않고 달린다.
+                    tries += 1;
+                    cleared += usize::from(run_and_jump_over(&mut g, index, true));
+                }
             }
         }
     }

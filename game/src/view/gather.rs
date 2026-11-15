@@ -2,10 +2,8 @@
 //! 머리 위 캐기 표시, 캔 것 팝업, 재료 판. 그림은 모두 코드로 그린 임시 그림이다 ([임시-20]).
 //! 무엇이 어디 있고 언제 다시 생기는지는 logic(gathering, game, world)이 정하고, 여기는 보여 주기만 한다.
 
-use super::assets::{ItemPicture, M6Art};
 use super::craft::CraftView;
 use super::hud::draw_pill;
-use super::items::draw_item_picture;
 use super::screen::{Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::night;
 use super::text::TextPainter;
@@ -49,15 +47,9 @@ const SPARKLE: Color = Color::new(1.0, 0.97, 0.75, 1.0);
 /// 밤에 맵의 임시 그림이 어두워지는 정도 (상자와 비슷하게 덜 어둡게)
 const NIGHT_AMOUNT: f32 = 0.6;
 
-// ---- 정보판 아래 재료 판 ----
-/// "◀ 고르기"(y 78~138)와 체력 판 아래 왼쪽 끝.
-pub const BAG_TOP: f32 = 146.0;
-const BAG_LEFT: f32 = 12.0;
-const BAG_HEIGHT: f32 = 44.0;
-const BAG_ICON: f32 = 30.0;
-const BAG_TEXT: f32 = 28.0;
-const BAG_PAD: f32 = 14.0;
-const BAG_GAP: f32 = 14.0;
+// ---- 정보판 아래 안내 상자 자리 ----
+/// 오른쪽 끝에서 띄우는 틈
+const HINT_RIGHT_GAP: f32 = 12.0;
 
 // ---- 팝업 (US-065) ----
 /// 약 1.5초 보이고 저절로 사라진다. 게임을 멈추지 않는다.
@@ -67,14 +59,10 @@ pub const POPUP_TOP: f32 = 228.0;
 const POPUP_HEIGHT: f32 = 58.0;
 
 // ---- 곡괭이 만드는 법 (부모님 요청) ----
-/// 재료 판 바로 아래 작은 한 줄. 곡괭이가 생기면 숨긴다.
-const RECIPE_TOP: f32 = BAG_TOP + BAG_HEIGHT + 4.0;
-const RECIPE_HEIGHT: f32 = 32.0;
-const RECIPE_TEXT: f32 = 26.0;
 /// 처음 나무를 캤을 때 한 번 나오는 안내 두 줄이 보이는 초
 const RECIPE_HINT_SECONDS: f32 = 4.0;
-/// 안내 상자: 정보판 아래 오른쪽 (재료 판과 같은 높이), 팝업·바꾸기 버튼·캐릭터보다 위
-const RECIPE_HINT_TOP: f32 = BAG_TOP;
+/// 안내 상자: 정보판 아래 오른쪽, 팝업·바꾸기 버튼·캐릭터보다 위
+const RECIPE_HINT_TOP: f32 = 146.0;
 const RECIPE_HINT_SIZE: f32 = 26.0;
 const RECIPE_HINT_LINE: f32 = RECIPE_HINT_SIZE + 6.0;
 const RECIPE_HINT_HEIGHT: f32 = RECIPE_HINT_LINE * 2.0 + 16.0;
@@ -91,8 +79,8 @@ pub fn pickaxe_needs() -> [(Material, u32); 2] {
     [(Material::Wood, count(CRAFT_WOOD_MARK)), (Material::Iron, count(CRAFT_IRON_MARK))]
 }
 
-/// "곡괭이: 나무 1/4 + 철광석 0/2 (집 제작대)". Jua 글꼴에 →가 없어서 괄호로 쓴다.
-fn recipe_line(bag: &Bag) -> String {
+/// "곡괭이: 나무 1/4 + 철광석 0/2 (집 제작대)". Jua 글꼴에 →가 없어서 괄호로 쓴다. 가방 창에 보인다 (US-091).
+pub fn recipe_line(bag: &Bag) -> String {
     let parts: Vec<String> = pickaxe_needs().iter().map(|(m, n)| format!("{} {}/{}", m.name(), bag.count(*m).min(*n), n)).collect();
     format!("곡괭이: {} (집 제작대)", parts.join(" + "))
 }
@@ -352,11 +340,36 @@ pub fn draw_usable_tag(text: &TextPainter, game: &Game, view_x: f32, camera_left
     if label == SLAM_BUTTON_TEXT {
         text.left(SLAM_BUTTON_TEXT, r.center().x + KEY_SIZE / 2.0 + 8.0, bottom - 10.0, 34.0, SPARKLE);
     }
-    let key = Rect::new(r.center().x - KEY_SIZE / 2.0, bottom - KEY_SIZE, KEY_SIZE, KEY_SIZE);
+    // 문·동굴 입구·출구는 ↑로도 들어간다 (부모님 결정 2026-11-15): [↑] / [E]. ↑ 글자는 Jua에 없어서 화살표 그림으로.
+    if super::input::up_enters(game.usable_in_reach()) {
+        let half = ARROW_KEY_PAIR_W / 2.0;
+        draw_key(text, Rect::new(r.center().x - half, bottom - KEY_SIZE, KEY_SIZE, KEY_SIZE), None);
+        text.centered("/", r.center().x, bottom - 12.0, 30.0, WHITE);
+        draw_key(text, Rect::new(r.center().x + half - KEY_SIZE, bottom - KEY_SIZE, KEY_SIZE, KEY_SIZE), Some("E"));
+    } else {
+        draw_key(text, Rect::new(r.center().x - KEY_SIZE / 2.0, bottom - KEY_SIZE, KEY_SIZE, KEY_SIZE), Some("E"));
+    }
+}
+
+/// [↑] / [E] 두 키를 나란히 놓은 폭 (`tag_space`의 폭 안이다)
+const ARROW_KEY_PAIR_W: f32 = KEY_SIZE * 2.0 + 26.0;
+
+/// 키보드 키 하나: 옆면 + 흰 윗면. `label`이 없으면 위 화살표 그림.
+fn draw_key(text: &TextPainter, key: Rect, label: Option<&str>) {
     draw_rectangle(key.x, key.y + 5.0, key.w, key.h, KEY_TEXT); // 키 옆면
     draw_rectangle(key.x, key.y, key.w, key.h, KEY_FILL);
     draw_rectangle_lines(key.x, key.y, key.w, key.h, 3.0, KEY_TEXT);
-    text.centered("E", key.center().x, key.y + key.h - 11.0, 34.0, KEY_TEXT);
+    match label {
+        Some(label) => text.centered(label, key.center().x, key.y + key.h - 11.0, 34.0, KEY_TEXT),
+        None => draw_up_arrow(key.center(), key.w * 0.6, KEY_TEXT),
+    }
+}
+
+/// 위 화살표 그림 (세모 머리 + 막대). `size`는 키.
+pub fn draw_up_arrow(c: Vec2, size: f32, color: Color) {
+    let top = c.y - size / 2.0;
+    draw_triangle(vec2(c.x, top), vec2(c.x - size * 0.45, top + size * 0.45), vec2(c.x + size * 0.45, top + size * 0.45), color);
+    draw_rectangle(c.x - size * 0.13, top + size * 0.4, size * 0.26, size * 0.6, color);
 }
 
 /// 동굴 안 한 화면 (임시-12): 벽, 땅, 수정, 등불, 출구, 광석 덩이. 카메라를 `camera_x`에 건다.
@@ -410,66 +423,6 @@ pub fn draw_mining_progress(head: Rect, progress: Option<f32>) {
     }
 }
 
-/// 재료 판에 보일 것: 1개 이상인 재료 (정보판 순서). 0개는 안 보인다 (US-020).
-pub fn bag_items(bag: &Bag) -> Vec<(Material, u32)> {
-    Material::ALL.iter().map(|m| (*m, bag.count(*m))).filter(|(_, n)| *n > 0).collect()
-}
-
-/// 재료 판 끝에 붙는 연장 그림 수: 곡괭이, 다이아래더라이트 곡괭이.
-fn tool_count(bag: &Bag) -> usize {
-    bag.has_pickaxe as usize + bag.has_diamond_pickaxe as usize
-}
-
-/// 재료 판의 폭. 보일 것이 없으면 0 (판도 없다).
-pub fn bag_width(text: &TextPainter, bag: &Bag) -> f32 {
-    let items = bag_items(bag);
-    let tools = tool_count(bag);
-    if items.is_empty() && tools == 0 {
-        return 0.0;
-    }
-    let item_w: f32 = items.iter().map(|(_, n)| BAG_ICON + 4.0 + text.width(&n.to_string(), BAG_TEXT) + BAG_GAP).sum();
-    BAG_PAD * 2.0 + item_w + tools as f32 * (BAG_ICON + BAG_GAP) - BAG_GAP
-}
-
-/// 재료 줄(과 만드는 법 줄)의 아래 끝. 그릴 것이 없으면 None (BUG-031). `draw_bag`과 같은 조건.
-pub fn bag_bottom(text: &TextPainter, bag: &Bag, show_recipe: bool) -> Option<f32> {
-    if show_recipe && !bag.has_pickaxe {
-        Some(RECIPE_TOP + RECIPE_HEIGHT)
-    } else {
-        (bag_width(text, bag) > 0.0).then_some(BAG_TOP + BAG_HEIGHT)
-    }
-}
-
-/// 정보판 아래 왼쪽: 가진 재료 개수와 곡괭이·다이아래더라이트 곡괭이 (US-020, US-021, US-082). 화면 좌표.
-/// `show_recipe`: 제작대가 있는 맵이면 곡괭이 없을 때 만드는 법 한 줄을 아래에 단다.
-pub fn draw_bag(text: &TextPainter, bag: &Bag, art: &M6Art, show_recipe: bool) {
-    if show_recipe && !bag.has_pickaxe {
-        let line = recipe_line(bag);
-        draw_pill(BAG_LEFT, RECIPE_TOP, text.width(&line, RECIPE_TEXT) + BAG_PAD * 2.0, RECIPE_HEIGHT, PANEL);
-        text.left(&line, BAG_LEFT + BAG_PAD, RECIPE_TOP + RECIPE_HEIGHT - 8.0, RECIPE_TEXT, WHITE);
-    }
-    let w = bag_width(text, bag);
-    if w <= 0.0 {
-        return;
-    }
-    draw_pill(BAG_LEFT, BAG_TOP, w, BAG_HEIGHT, PANEL);
-    let mid_y = BAG_TOP + BAG_HEIGHT / 2.0;
-    let mut x = BAG_LEFT + BAG_PAD;
-    for (material, n) in bag_items(bag) {
-        draw_material_icon(material, vec2(x + BAG_ICON / 2.0, mid_y), BAG_ICON * 0.9);
-        let label = n.to_string();
-        text.left(&label, x + BAG_ICON + 4.0, mid_y + 10.0, BAG_TEXT, WHITE);
-        x += BAG_ICON + 4.0 + text.width(&label, BAG_TEXT) + BAG_GAP;
-    }
-    if bag.has_pickaxe {
-        draw_pickaxe(vec2(x + BAG_ICON / 2.0, mid_y), BAG_ICON, WHITE);
-        x += BAG_ICON + BAG_GAP;
-    }
-    if bag.has_diamond_pickaxe {
-        draw_item_picture(art, ItemPicture::DiamondPickaxe, vec2(x + BAG_ICON / 2.0, mid_y), BAG_ICON * 1.1);
-    }
-}
-
 /// 화면 쪽 M7 상태: 캔 것 팝업과 제작대에서 고른 재료.
 pub struct GatherView {
     /// 막 캔 것과 보인 지 몇 초
@@ -506,7 +459,7 @@ impl GatherView {
         let fade = ((RECIPE_HINT_SECONDS - age) / 0.4).clamp(0.0, 1.0);
         let lines = recipe_hint_lines();
         let w = lines.iter().map(|l| text.width(l, RECIPE_HINT_SIZE)).fold(0.0, f32::max) + 48.0;
-        let x = VIRTUAL_WIDTH - BAG_LEFT - w;
+        let x = VIRTUAL_WIDTH - HINT_RIGHT_GAP - w;
         draw_pill(x, RECIPE_HINT_TOP, w, RECIPE_HINT_HEIGHT, Color { a: PANEL.a * 1.3 * fade, ..PANEL });
         for (i, line) in lines.iter().enumerate() {
             let baseline = RECIPE_HINT_TOP + 4.0 + RECIPE_HINT_LINE * (i + 1) as f32;
@@ -596,15 +549,14 @@ mod tests {
         v.update(RECIPE_HINT_SECONDS + 0.1);
         v.on_mined(Material::Wood, true);
         assert!(v.recipe_hint.is_none(), "한 번만");
-        // 만드는 법 줄은 재료 판 아래, 팝업 위
-        assert!(RECIPE_TOP >= BAG_TOP + BAG_HEIGHT && RECIPE_TOP + RECIPE_HEIGHT < POPUP_TOP);
         assert_eq!(recipe_hint_lines()[0], "나무 4개와 철광석 2개로 곡괭이를 만들 수 있어요!");
     }
 
     #[test]
     fn recipe_hint_box_stays_above_popup_buttons_and_character() {
         let bottom = RECIPE_HINT_TOP + RECIPE_HINT_HEIGHT;
-        assert!(RECIPE_HINT_TOP >= super::super::touch::BACK_BUTTON.y + super::super::touch::BACK_BUTTON.h, "정보판 아래");
+        // 정보판 아래. 상자는 오른쪽에 붙고 글이 길어서 왼쪽 폰 "멈춤" 버튼(x 168까지)에는 닿지 않는다
+        assert!(RECIPE_HINT_TOP >= super::super::hud::hud_bottom(true, false), "정보판 아래");
         assert!(bottom < POPUP_TOP, "팝업과 안 겹친다");
         assert!(bottom < crate::config::GROUND_Y - crate::config::PLAYER_HEIGHT, "서 있는 캐릭터와 안 겹친다");
         for b in super::super::touch::play_buttons(true) {
@@ -612,15 +564,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn bag_shows_only_what_we_have_in_order() {
-        let mut bag = Bag::default();
-        assert!(bag_items(&bag).is_empty());
-        bag.add(Material::Gold);
-        bag.add(Material::Wood);
-        bag.add(Material::Wood);
-        assert_eq!(bag_items(&bag), vec![(Material::Wood, 2), (Material::Gold, 1)]);
-    }
 
     #[test]
     fn ore_colors_differ_and_gold_silver_sparkle() {
@@ -658,14 +601,8 @@ mod tests {
         // 땅(맵·동굴 모두 GROUND_Y)에 서서 캘 때 진행 막대 위 끝이 팝업·안내 상자보다 아래
         let head = crate::config::GROUND_Y - crate::config::PLAYER_HEIGHT;
         let bar_top = head - PROGRESS_ABOVE - PROGRESS_HEIGHT - 3.0;
-        assert!(bar_top > POPUP_TOP + POPUP_HEIGHT && bar_top > RECIPE_HINT_TOP + RECIPE_HINT_HEIGHT);
+        assert!(bar_top > POPUP_TOP + POPUP_HEIGHT, "팝업 아래");
+        assert!(bar_top > RECIPE_HINT_TOP + RECIPE_HINT_HEIGHT, "안내 상자 아래");
     }
 
-    #[test]
-    fn popup_and_bag_stay_clear_of_hud_and_touch_buttons() {
-        // 체력 판(y 74~122)과 "◀ 고르기"(y 78~138) 아래, 조이스틱 안내(위 끝 315)와 버튼(위 끝 296)보다 위
-        assert!(BAG_TOP >= super::super::touch::BACK_BUTTON.y + super::super::touch::BACK_BUTTON.h);
-        assert!(BAG_TOP + BAG_HEIGHT < POPUP_TOP);
-        assert!(POPUP_TOP + POPUP_HEIGHT < 290.0);
-    }
 }

@@ -3,7 +3,8 @@
 
 use super::gathering::Material;
 use crate::config::{
-    COPPER_SELL_PRICE, DIAMOND_ARMOR_NAME, DIAMOND_ARMOR_PRICE, DIAMOND_ARMOR_SECONDS, GOLD_SELL_PRICE, HEALTH_POTION_NAME,
+    COPPER_SELL_PRICE, DIAMOND_ARMOR_NAME, ENDER_FRUIT_ALREADY_EATEN_TEXT, USE_HEALTH_FULL_TEXT, USE_NONE_LEFT_TEXT,
+    USE_NO_MONSTER_NEAR_TEXT, USE_NO_MONSTER_ON_SCREEN_TEXT, DIAMOND_ARMOR_PRICE, DIAMOND_ARMOR_SECONDS, GOLD_SELL_PRICE, HEALTH_POTION_NAME,
     HEALTH_POTION_PRICE, POISON_POTION_NAME, POISON_POTION_PRICE, RAINBOW_ARMOR_NAME, RAINBOW_ARMOR_PRICE, RAINBOW_ARMOR_SECONDS,
     SHOP_ALREADY_HAVE_TEXT, SHOP_NONE_TO_SELL_TEXT, SHOP_NOT_ENOUGH_COINS_TEXT, SILVER_SELL_PRICE, SKATES_NAME, SKATES_PRICE,
     SKATES_SPEED_MULTIPLIER,
@@ -89,6 +90,47 @@ impl CantBuy {
         match self {
             CantBuy::NotEnoughCoins => SHOP_NOT_ENOUGH_COINS_TEXT,
             CantBuy::AlreadyHave => SHOP_ALREADY_HAVE_TEXT,
+        }
+    }
+}
+
+/// 손에 들지 않고 바로 쓰는 물건 (부모님 결정 2026-11-14): 포션 둘, 주사기총, 엔더열매.
+/// 개수는 `Game::pocket_count`, 쓸 수 없는 이유는 `Game::why_cant_use`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pocket {
+    Potion(Potion),
+    SyringeGun,
+    EnderFruit,
+}
+
+impl Pocket {
+    /// 표시판·가방 순서 (왼쪽부터)
+    pub const ALL: [Pocket; 4] = [Pocket::Potion(Potion::Health), Pocket::Potion(Potion::Poison), Pocket::SyringeGun, Pocket::EnderFruit];
+}
+
+/// 쓰는 물건을 쓸 수 없는 이유 (부모님 결정 2026-11-15). 화면은 `text()`를 안내 글로 보인다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CantUse {
+    /// 하나도 없다
+    NoneLeft,
+    /// 체력 포션: 체력이 가득하다
+    HealthFull,
+    /// 독약 포션: `POISON_RANGE` 안에 몬스터가 없다
+    NoMonsterNear,
+    /// 주사기총: 화면에 몬스터가 없다 (동굴 안 포함)
+    NoMonsterOnScreen,
+    /// 엔더열매: 힘이 벌써 있다
+    AlreadyEaten,
+}
+
+impl CantUse {
+    pub fn text(self) -> &'static str {
+        match self {
+            CantUse::NoneLeft => USE_NONE_LEFT_TEXT,
+            CantUse::HealthFull => USE_HEALTH_FULL_TEXT,
+            CantUse::NoMonsterNear => USE_NO_MONSTER_NEAR_TEXT,
+            CantUse::NoMonsterOnScreen => USE_NO_MONSTER_ON_SCREEN_TEXT,
+            CantUse::AlreadyEaten => ENDER_FRUIT_ALREADY_EATEN_TEXT,
         }
     }
 }

@@ -78,14 +78,14 @@ impl Recipe {
             .collect()
     }
 
-    /// 이미 가지고 있어서 더 만들 수 없으면 true (임시-19, 임시-41, 임시-45, 임시-46). 엔더열매는 여러 개 가진다.
+    /// 이미 가지고 있어서 더 만들 수 없으면 true (임시-19, 임시-41, 임시-45, 임시-46). 엔더열매와 주사기총은 여러 개 가진다.
     pub fn already_have(self, bag: &Bag) -> bool {
         match self {
             Recipe::Pickaxe => bag.has_pickaxe,
             Recipe::Car => bag.riding_car,
             Recipe::EnderFruit => false,
             Recipe::DiamondPickaxe => bag.has_diamond_pickaxe,
-            Recipe::SyringeGun => bag.has_syringe_gun,
+            Recipe::SyringeGun => false,
         }
     }
 
@@ -119,7 +119,7 @@ impl Recipe {
             Recipe::Car => bag.riding_car = true,
             Recipe::EnderFruit => bag.ender_fruits += 1,
             Recipe::DiamondPickaxe => bag.has_diamond_pickaxe = true,
-            Recipe::SyringeGun => bag.has_syringe_gun = true,
+            Recipe::SyringeGun => bag.syringe_guns += 1,
         }
     }
 }

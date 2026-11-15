@@ -272,8 +272,10 @@ fn shortage_text_says_what_and_how_many() {
     assert_eq!(Recipe::EnderFruit.why_cant_make_text(&bag).as_deref(), Some("동이 2개 더 필요해요"));
     add(&mut bag, Material::Copper, 2);
     assert_eq!(Recipe::EnderFruit.why_cant_make_text(&bag), None);
-    bag.has_syringe_gun = true;
-    assert_eq!(Recipe::SyringeGun.why_cant_make_text(&bag).as_deref(), Some(CRAFT_ALREADY_HAVE_TEXT));
+    bag.has_diamond_pickaxe = true;
+    assert_eq!(Recipe::DiamondPickaxe.why_cant_make_text(&bag).as_deref(), Some(CRAFT_ALREADY_HAVE_TEXT));
+    bag.syringe_guns = 1;
+    assert_ne!(Recipe::SyringeGun.why_cant_make_text(&bag).as_deref(), Some(CRAFT_ALREADY_HAVE_TEXT), "주사기총은 또 만들 수 있다");
 }
 
 #[test]
@@ -409,7 +411,7 @@ fn switching_goes_through_weapons_only_even_with_syringe_gun_and_ender_fruit() {
     let mut g = new_game();
     g.weapons.add_bought(Weapon::Gun);
     g.weapons.hold(Weapon::Hands);
-    g.gathering.bag.has_syringe_gun = true;
+    g.gathering.bag.syringe_guns = 1;
     g.gathering.bag.ender_fruits = 1;
     let mut seen = Vec::new();
     for _ in 0..4 {
@@ -422,7 +424,7 @@ fn switching_goes_through_weapons_only_even_with_syringe_gun_and_ender_fruit() {
 #[test]
 fn syringe_gun_and_ender_fruit_alone_do_not_show_the_switch_button() {
     let mut g = new_game();
-    g.gathering.bag.has_syringe_gun = true;
+    g.gathering.bag.syringe_guns = 1;
     g.gathering.bag.ender_fruits = 2;
     assert!(!g.can_switch(), "바꾸기는 무기만 센다");
 }
@@ -442,7 +444,7 @@ fn syringe_gun_clears_monsters_on_screen_once_for_500() {
     assert!(g.fire_syringe_gun());
     assert_eq!(monster_count(&g), 1, "화면 밖 몬스터는 그대로");
     assert_eq!(g.score(), score + SYRINGE_GUN_SCORE, "3마리여도 500 한 번");
-    assert!(!g.gathering.bag.has_syringe_gun);
+    assert_eq!(g.gathering.bag.syringe_guns, 0, "하나 썼다");
     assert_eq!(g.weapons.held(), Weapon::Sword, "든 무기는 그대로");
     assert!(matches!(g.take_item_events()[..], [ItemEvent::SyringeGunFired { monsters: 3, .. }]));
     // 쓰러졌어요는 다음 update가 돌려준다.
@@ -457,11 +459,11 @@ fn syringe_gun_clears_monsters_on_screen_once_for_500() {
 fn syringe_gun_with_no_monster_does_nothing() {
     let mut g = new_game();
     stand_at(&mut g, BEACH_X, Facing::Right);
-    g.gathering.bag.has_syringe_gun = true;
+    g.gathering.bag.syringe_guns = 1;
     put_zombie(&mut g, BEACH_X + 900.0); // 화면 밖뿐
     let score = g.score();
     assert!(!g.fire_syringe_gun());
-    assert!(g.gathering.bag.has_syringe_gun, "없어지지 않는다");
+    assert_eq!(g.gathering.bag.syringe_guns, 1, "줄지 않는다");
     assert_eq!(g.score(), score);
     assert!(g.take_item_events().is_empty());
 }
@@ -470,7 +472,7 @@ fn syringe_gun_with_no_monster_does_nothing() {
 fn syringe_gun_is_not_used_while_a_window_is_open_or_the_game_is_over() {
     let mut g = new_game();
     stand_at(&mut g, BEACH_X, Facing::Right);
-    g.gathering.bag.has_syringe_gun = true;
+    g.gathering.bag.syringe_guns = 1;
     put_zombie(&mut g, BEACH_X + 300.0);
     g.crafting.open();
     assert!(!g.fire_syringe_gun(), "제작대");
@@ -484,14 +486,14 @@ fn syringe_gun_is_not_used_while_a_window_is_open_or_the_game_is_over() {
     assert!(!g.fire_syringe_gun(), "문제 창");
     let mut over = new_game();
     stand_at(&mut over, BEACH_X, Facing::Right);
-    over.gathering.bag.has_syringe_gun = true;
+    over.gathering.bag.syringe_guns = 1;
     over.gathering.bag.ender_fruits = 1;
     put_zombie(&mut over, BEACH_X + 300.0);
     over.combat.health.lose_from_quiz(over.combat.health.max_hp());
     assert!(over.is_over());
     assert!(!over.fire_syringe_gun(), "판이 끝남");
     assert!(!over.eat_ender_fruit(), "판이 끝남");
-    assert!(g.gathering.bag.has_syringe_gun);
+    assert_eq!(g.gathering.bag.syringe_guns, 1);
     assert_eq!(monster_count(&g), 1);
     assert!(g.take_item_events().is_empty());
 }
@@ -500,10 +502,10 @@ fn syringe_gun_is_not_used_while_a_window_is_open_or_the_game_is_over() {
 fn attack_button_does_not_use_the_syringe_gun() {
     let mut g = new_game();
     stand_at(&mut g, BEACH_X, Facing::Right);
-    g.gathering.bag.has_syringe_gun = true;
+    g.gathering.bag.syringe_guns = 1;
     put_zombie(&mut g, BEACH_X + 300.0);
     g.update(&attack(), FRAME);
-    assert!(g.gathering.bag.has_syringe_gun);
+    assert_eq!(g.gathering.bag.syringe_guns, 1);
     assert!(g.take_item_events().is_empty());
 }
 
@@ -512,7 +514,7 @@ fn syringe_gun_leaves_citizens_and_arrows_alone() {
     let mut g = new_game();
     let citizen_x = CITIZEN_XS[0];
     stand_at(&mut g, citizen_x - 200.0, Facing::Right);
-    g.gathering.bag.has_syringe_gun = true;
+    g.gathering.bag.syringe_guns = 1;
     put_zombie(&mut g, citizen_x + 100.0);
     let citizens = g.citizens.list.len();
     assert!(g.fire_syringe_gun());
@@ -523,13 +525,21 @@ fn syringe_gun_leaves_citizens_and_arrows_alone() {
 }
 
 #[test]
-fn only_one_syringe_gun_at_a_time() {
-    let mut bag = Bag::default();
-    bag.has_syringe_gun = true;
-    fill_bag_for(&mut bag, Recipe::SyringeGun);
-    let mut crafting = Crafting::default();
-    place_shape(&mut crafting, Recipe::SyringeGun, &bag);
-    assert_eq!(crafting.ready_recipe(&bag), None);
+fn many_syringe_guns_can_be_made_and_each_fires_once() {
+    // 부모님 결정 2026-11-15: 주사기총은 여러 개 가지고, 가진 개수만큼 쏜다.
+    let mut g = new_game();
+    stand_at(&mut g, BEACH_X, Facing::Right);
+    assert_eq!(craft(&mut g, Recipe::SyringeGun), Some(Recipe::SyringeGun));
+    assert_eq!(craft(&mut g, Recipe::SyringeGun), Some(Recipe::SyringeGun), "가지고 있어도 또 만든다");
+    assert_eq!(g.gathering.bag.syringe_guns, 2);
+    for left in [1, 0] {
+        put_zombie(&mut g, BEACH_X + 300.0);
+        assert!(g.fire_syringe_gun());
+        assert_eq!(g.gathering.bag.syringe_guns, left);
+        g.update(&idle(), FRAME);
+    }
+    put_zombie(&mut g, BEACH_X + 300.0);
+    assert!(!g.fire_syringe_gun(), "다 썼다");
 }
 
 // ---- US-081 엔더열매 ----
@@ -713,7 +723,7 @@ fn pickaxe_slam_without_monsters_still_uses_it_up() {
 fn new_game_has_none_of_the_new_things() {
     let g = new_game();
     let bag = &g.gathering.bag;
-    assert!(!bag.riding_car && !bag.has_syringe_gun && !bag.has_diamond_pickaxe && !bag.has_ender_power);
+    assert!(!bag.riding_car && bag.syringe_guns == 0 && !bag.has_diamond_pickaxe && !bag.has_ender_power);
     assert_eq!(bag.ender_fruits, 0);
     assert_eq!(g.crafting.chosen(), Recipe::Pickaxe);
 }

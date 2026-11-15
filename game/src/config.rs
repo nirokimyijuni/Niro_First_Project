@@ -224,6 +224,11 @@ pub const MAP_WIDTH: f32 = SCREEN_WIDTH * PLACE_NAMES.len() as f32;
 
 /// 임시-5 숨는 곳·시민·구조물 양옆으로 이만큼 안에는 상자를 놓지 않는다 (픽셀).
 pub const NO_BOX_MARGIN: f32 = 64.0;
+/// 부모님 결정 2026-11-15: 동굴 입구와 집 문 양옆으로 이만큼 안에는 상자를 놓지 않는다 (픽셀). `NO_BOX_MARGIN` 대신 쓴다.
+/// 처음 값: 캐릭터 몸 2개 + 그곳의 들어가기 범위. 동굴은 `MINE_REACH`라서 화산에는 상자가 0개가 된다 (부모님 승인).
+pub const BOX_CLEAR_AROUND_CAVE: f32 = PLAYER_WIDTH * 2.0 + MINE_REACH;
+/// 집 문은 `HOUSE_DOOR_REACH`. 이보다 넓히면 집(시민·집 뒤 숨는 곳 사이)에 상자 자리가 없어진다.
+pub const BOX_CLEAR_AROUND_DOOR: f32 = PLAYER_WIDTH * 2.0 + HOUSE_DOOR_REACH;
 
 /// US-051 화산의 구멍: 왼쪽 x, 폭, 깊이. 깊이는 점프 최고 높이(약 97)보다 낮아야 나올 수 있다.
 pub const HOLE_LEFT: f32 = 1620.0;
@@ -502,6 +507,9 @@ pub const WORKBENCH_BUTTON_TEXT: &str = "만들기";
 pub const HOUSE_DOOR_X: f32 = 3555.0;
 pub const HOUSE_DOOR_WIDTH: f32 = 68.0;
 pub const HOUSE_DOOR_HEIGHT: f32 = 112.0;
+/// [임시] 부모님 결정 2026-11-15: 집 문은 바로 앞에서만 들어간다. 몸 가운데가 문 폭 안이거나 문 좌우로 이만큼(픽셀) 안일 때.
+/// 다른 것(나무·제작대·동굴 입구)은 그대로 `MINE_REACH`를 쓴다.
+pub const HOUSE_DOOR_REACH: f32 = 8.0;
 /// 임시-36 폰 버튼 글
 pub const HOUSE_DOOR_BUTTON_TEXT: &str = "들어가기";
 /// 임시-24 상점 화면이 열려 있는 동안 게임 속 시간이 모두 멈춘다
@@ -593,13 +601,13 @@ pub const SYRINGE_GUN_SHAPE: [[char; CRAFT_GRID_WIDTH]; CRAFT_GRID_HEIGHT] = [
 /// 만들 것 이름 (아이가 지은 이름 그대로)
 pub const PICKAXE_NAME: &str = "곡괭이";
 pub const CAR_NAME: &str = "자동차";
-pub const ENDER_FRUIT_NAME: &str = "엔더열매";
-pub const DIAMOND_PICKAXE_NAME: &str = "다이아래더라이트 곡괭이";
+pub const ENDER_FRUIT_NAME: &str = "애서열매";
+pub const DIAMOND_PICKAXE_NAME: &str = "다이아레어라이트 곡괭이";
 pub const SYRINGE_GUN_NAME: &str = "주사기총";
 /// 만들었을 때 문구. 자동차는 만들면 바로 타서 `CAR_ON_TEXT`가 나온다.
 pub const PICKAXE_CRAFTED_TEXT: &str = "곡괭이를 만들었어요!";
-pub const ENDER_FRUIT_CRAFTED_TEXT: &str = "엔더열매를 만들었어요!";
-pub const DIAMOND_PICKAXE_CRAFTED_TEXT: &str = "다이아래더라이트 곡괭이를 만들었어요!";
+pub const ENDER_FRUIT_CRAFTED_TEXT: &str = "애서열매를 만들었어요!";
+pub const DIAMOND_PICKAXE_CRAFTED_TEXT: &str = "다이아레어라이트 곡괭이를 만들었어요!";
 pub const SYRINGE_GUN_CRAFTED_TEXT: &str = "주사기총을 만들었어요!";
 /// 재료가 모자랄 때. {모자란 것}은 "에메랄드가 2개", 여러 개면 "철광석이 1개, 나무가 2개"가 된다.
 pub const CRAFT_NEED_MORE_TEXT: &str = "{모자란 것} 더 필요해요";
@@ -637,8 +645,30 @@ pub const ENDER_FRUIT_SLAM_DIAMONDS_TEXT: &str = "다이아몬드를 10개 얻�
 pub const DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT: &str = "다이아몬드를 1개 얻었어요!";
 pub const DIAMOND_PICKAXE_GONE_TEXT: &str = "곡괭이가 쿵 하고 사라졌어요";
 /// 임시-44 엔더열매 먹기
-pub const ENDER_FRUIT_EATEN_TEXT: &str = "엔더열매를 먹었어요! 해변 바닷가에서 쿵 해 봐요";
+pub const ENDER_FRUIT_EATEN_TEXT: &str = "애서열매를 먹었어요! 해변 바닷가에서 쿵 해 봐요";
 pub const ENDER_FRUIT_ALREADY_EATEN_TEXT: &str = "벌써 먹었어요";
+
+/// 부모님 결정 2026-11-15: 쓰는 물건을 쓸 수 없을 때 안내 글 (`CantUse::text`)
+pub const USE_HEALTH_FULL_TEXT: &str = "체력이 가득해요";
+/// 독약 포션: `POISON_RANGE` 안에 몬스터가 없을 때
+pub const USE_NO_MONSTER_NEAR_TEXT: &str = "가까이에 몬스터가 없어요";
+/// 주사기총: 화면에 몬스터가 없을 때 (동굴 안 포함)
+pub const USE_NO_MONSTER_ON_SCREEN_TEXT: &str = "화면에 몬스터가 없어요";
+/// 가진 개수가 0일 때 (문구는 부모님 확정 2026-11-15)
+pub const USE_NONE_LEFT_TEXT: &str = "남은 게 없어요";
+
+/// D97 (US-091) 가방에서 곡괭이 칸을 누르면 보이는 쓰는 법. 폰은 E 대신 캐기·쿵! 버튼이라 _TOUCH 글을 쓴다.
+pub const PICKAXE_HOW_TEXT: &str = "나무나 광석 가까이에서 E를 누르고 있으면 캐요";
+pub const PICKAXE_HOW_TOUCH_TEXT: &str = "나무나 광석 가까이에서 캐기 버튼을 누르고 있으면 캐요";
+pub const DIAMOND_PICKAXE_HOW_TEXT: &str = "더 빨리 캐요. 해변 바닷가에서 E를 누르면 쿵!";
+pub const DIAMOND_PICKAXE_HOW_TOUCH_TEXT: &str = "더 빨리 캐요. 해변 바닷가에서 쿵! 버튼을 누르면 쿵!";
+
+/// US-091 가방 (REVIEW-022 2번)
+pub const BAG_NAME_TEXT: &str = "가방";
+/// [임시-76] 화면 아래 키 안내 한 줄이 보이는 실제 초 (끝에 흐려진다)
+pub const KEY_HINT_SECONDS: f32 = 8.0;
+/// [임시-77] 새 물건을 얻으면 가방 상자가 반짝이는 실제 초
+pub const BAG_FLASH_SECONDS: f32 = 2.0;
 
 /// 임시-47, D80 한 번 쓸 때 점수의 "해치운 몬스터 수"에 더하는 수. 쓰러진 몬스터가 0마리면 더하지 않는다.
 pub const ENDER_FRUIT_SLAM_SCORE: u32 = 700;
@@ -648,8 +678,8 @@ pub const SYRINGE_GUN_SCORE: u32 = 500;
 /// D87 상자 부수기 (US-089). 도끼를 들었을 때만 공격으로 부순다. 처음 값은 임시다.
 /// [임시-63] 이만큼 치면 부서진다 (아이 확정: 3번)
 pub const BOX_HITS_TO_BREAK: u32 = 3;
-/// [임시-65] [임시-69] 부서질 때 나오는 것: 아이템 30%, 몬스터 15%, 나머지는 아무것도 없음 (부모님 확정)
-pub const BOX_ITEM_CHANCE: f32 = 0.30;
+/// [임시-65] [임시-69] 부서질 때 나오는 것: 아이템 15%, 몬스터 15%, 나머지 70%는 아무것도 없음 (부모님 확정, 2026-11-15에 아이템 30%→15%)
+pub const BOX_ITEM_CHANCE: f32 = 0.15;
 pub const BOX_MONSTER_CHANCE: f32 = 0.15;
 /// [임시-65] 아이템 안의 비율 (감독 임시): 총 10%, 아주 센 것(다이아몬드 갑옷, 다이아래더라이트 곡괭이, 엔더열매, 자동차) 각 1%.
 /// 나머지 7개(칼, 도끼, 체력 포션, 독약 포션, 스케이트, 무지개 갑옷, 주사기총)가 남은 몫을 똑같이 나눈다.
@@ -679,9 +709,9 @@ pub const BOX_GOT_SKATES_TEXT: &str = "스케이트를 얻었어요!";
 pub const BOX_GOT_RAINBOW_ARMOR_TEXT: &str = "무지개 갑옷을 얻었어요!";
 pub const BOX_GOT_DIAMOND_ARMOR_TEXT: &str = "다이아몬드 갑옷을 얻었어요!";
 pub const BOX_GOT_SYRINGE_GUN_TEXT: &str = "주사기총을 얻었어요!";
-pub const BOX_GOT_ENDER_FRUIT_TEXT: &str = "엔더열매를 얻었어요!";
+pub const BOX_GOT_ENDER_FRUIT_TEXT: &str = "애서열매를 얻었어요!";
 pub const BOX_GOT_CAR_TEXT: &str = "자동차를 얻었어요!";
-pub const BOX_GOT_DIAMOND_PICKAXE_TEXT: &str = "다이아래더라이트 곡괭이를 얻었어요!";
+pub const BOX_GOT_DIAMOND_PICKAXE_TEXT: &str = "다이아레어라이트 곡괭이를 얻었어요!";
 
 #[cfg(test)]
 mod tests {

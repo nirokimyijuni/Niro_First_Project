@@ -7,13 +7,13 @@ use super::character::CharacterKind;
 use super::citizen::Citizens;
 use super::clock::{Clock, ClockEvent};
 use super::coins::{Coins, Wallet};
-use super::combat::{is_reached, is_reached_on_either_side, Combat, CombatEvent};
+use super::combat::{is_in_front_of_door, is_reached, is_reached_on_either_side, Combat, CombatEvent};
 use super::crafting::Crafting;
 use super::gathering::{Gathering, Material, Mineable};
 use super::math::{MathQuiz, MathResult};
 use super::miss::Miss;
 use super::player::{Facing, Player, PlayerInput};
-use super::shop::{sell_price, Armor, BuyRow, CantBuy, CantSell, Potion, SellRow, Shop, ShopEvent, ShopItem, SELLABLE};
+use super::shop::{sell_price, Armor, BuyRow, CantBuy, CantSell, CantUse, Pocket, Potion, SellRow, Shop, ShopEvent, ShopItem, SELLABLE};
 use super::weapon::{Weapon, Weapons};
 use super::world::{really_overlaps, shortest_dx, World};
 use crate::config::{
@@ -446,11 +446,11 @@ impl Game {
     }
 
     /// 주사기총 쏘기 (US-083, 임시-46). 포션처럼 손에 들지 않고 따로 쓴다 (부모님 결정 2026-11-14).
-    /// 화면 안 몬스터가 모두 쓰러지고 주사기총이 없어진다: `ItemEvent::SyringeGunFired`, true.
+    /// 화면 안 몬스터가 모두 쓰러지고 주사기총이 하나 줄어든다: `ItemEvent::SyringeGunFired`, true.
     /// 쓰러진 몬스터마다의 `GameEvent::Combat`은 다음 `update`가 돌려준다. 경험치는 없다.
     /// 화면에 몬스터가 없거나(동굴 안 포함), 주사기총이 없거나, 상점·제작대·문제 창이 열렸거나, 판이 끝났으면 false이고 그대로다.
     pub fn fire_syringe_gun(&mut self) -> bool {
-        if !self.gathering.bag.has_syringe_gun || !self.can_use_potion_now() {
+        if self.gathering.bag.syringe_guns == 0 || !self.can_use_potion_now() {
             return false;
         }
         let mut swept = Vec::new();
@@ -459,7 +459,7 @@ impl Game {
             return false;
         }
         self.waiting_events.extend(swept);
-        self.gathering.bag.has_syringe_gun = false;
+        self.gathering.bag.syringe_guns -= 1;
         self.combat.add_sweep_score(SYRINGE_GUN_SCORE);
         self.item_events.push(ItemEvent::SyringeGunFired { at: self.player.rect().center(), monsters });
         true
@@ -576,6 +576,40 @@ impl Game {
         true
     }
 
+    /// 쓰는 물건의 가진 개수. 0이면 표시판에 안 나온다.
+    pub fn pocket_count(&self, pocket: Pocket) -> u32 {
+        let bag = &self.gathering.bag;
+        match pocket {
+            Pocket::Potion(potion) => self.shop.potions(potion),
+            Pocket::SyringeGun => bag.syringe_guns,
+            Pocket::EnderFruit => bag.ender_fruits,
+        }
+    }
+
+    /// 쓰는 물건을 지금 쓸 수 없는 이유 (부모님 결정 2026-11-15). 쓸 수 있으면 None이다.
+    /// 상점·제작대·문제 창이 열렸거나 판이 끝났을 때도 None이다: 그때는 안내 글 없이 아무 일도 없다.
+    /// `use_potion`·`fire_syringe_gun`·`eat_ender_fruit`과 같은 규칙이다.
+    pub fn why_cant_use(&self, pocket: Pocket) -> Option<CantUse> {
+        if !self.can_use_potion_now() {
+            return None;
+        }
+        if self.pocket_count(pocket) == 0 {
+            return Some(CantUse::NoneLeft);
+        }
+        let at = self.player.rect().center();
+        match pocket {
+            Pocket::Potion(Potion::Health) if self.combat.health.hp() >= self.combat.health.max_hp() => Some(CantUse::HealthFull),
+            Pocket::Potion(Potion::Poison) if self.in_cave || self.combat.count_monsters_in_poison_range(at) == 0 => {
+                Some(CantUse::NoMonsterNear)
+            }
+            Pocket::SyringeGun if self.in_cave || self.combat.count_monsters_on_screen(self.camera_left()) == 0 => {
+                Some(CantUse::NoMonsterOnScreen)
+            }
+            Pocket::EnderFruit if self.gathering.bag.has_ender_power => Some(CantUse::AlreadyEaten),
+            _ => None,
+        }
+    }
+
     /// 상점 물건을 살 수 없는 이유. 살 수 있으면 None이다.
     /// 신고 있는 스케이트는 다시 사지 않는다. 갑옷과 포션은 언제나 또 살 수 있다.
     pub fn why_cant_buy(&self, item: ShopItem) -> Option<CantBuy> {
@@ -672,6 +706,7 @@ impl Game {
     }
 
     /// 지금 E 키나 캐기 버튼을 누르면 쓸 것: 몸 양쪽(등 뒤 포함) `MINE_REACH` 안에서 가장 가까운 하나 (임시-16, 임시-36).
+    /// 집 문만은 바로 앞에 섰을 때다 (`is_in_front_of_door`, 부모님 결정 2026-11-15).
     /// 거리가 같으면 바라보는 쪽을 먼저 쓴다.
     /// 판이 끝났거나 수학 문제·제작대가 열려 있으면 None이다. 폰 버튼은 Some일 때만 보인다 (글은 `button_text`).
     pub fn usable_in_reach(&self) -> Option<Usable> {
@@ -697,9 +732,13 @@ impl Game {
             Facing::Right => dx(rect) < 0.0,
             Facing::Left => dx(rect) > 0.0,
         };
+        let is_reached = |thing: &Usable, rect: &Rect| match thing {
+            Usable::HouseDoor => is_in_front_of_door(body, *rect),
+            _ => is_reached_on_either_side(body, MINE_REACH, *rect),
+        };
         spots
             .into_iter()
-            .filter(|(_, rect)| is_reached_on_either_side(body, MINE_REACH, *rect))
+            .filter(|(thing, rect)| is_reached(thing, rect))
             .min_by(|(_, a), (_, b)| dx(a).abs().total_cmp(&dx(b).abs()).then(is_behind(a).cmp(&is_behind(b))))
             .map(|(thing, _)| thing)
     }
@@ -880,7 +919,7 @@ impl Game {
     }
 
     /// 이미 가진 "하나뿐인 것"이면 true (임시-65): 칼, 도끼, 총, 신고 있는 스케이트, 타고 있는 자동차,
-    /// 다이아래더라이트 곡괭이, 주사기총, 지금 입고 있는 갑옷. 포션·엔더열매는 가지고 있어도 또 나온다.
+    /// 다이아래더라이트 곡괭이, 지금 입고 있는 갑옷. 포션·엔더열매·주사기총은 가지고 있어도 또 나온다.
     /// 갑옷은 입고 있는 것만 빠진다 (무지개를 입으면 다이아 갑옷은 나온다).
     fn has_the_only_one(&self, item: SurpriseItem) -> bool {
         let bag = &self.gathering.bag;
@@ -891,10 +930,9 @@ impl Game {
             SurpriseItem::Skates => self.shop.has_skates(),
             SurpriseItem::Car => bag.riding_car,
             SurpriseItem::DiamondPickaxe => bag.has_diamond_pickaxe,
-            SurpriseItem::SyringeGun => bag.has_syringe_gun,
             SurpriseItem::RainbowArmor => self.shop.armor() == Some(Armor::Rainbow),
             SurpriseItem::DiamondArmor => self.shop.armor() == Some(Armor::Diamond),
-            SurpriseItem::HealthPotion | SurpriseItem::PoisonPotion | SurpriseItem::EnderFruit => false,
+            SurpriseItem::HealthPotion | SurpriseItem::PoisonPotion | SurpriseItem::SyringeGun | SurpriseItem::EnderFruit => false,
         }
     }
 
@@ -918,7 +956,7 @@ impl Game {
             SurpriseItem::Skates => self.shop.put_on_skates(),
             SurpriseItem::RainbowArmor => self.shop.put_on_armor(Armor::Rainbow),
             SurpriseItem::DiamondArmor => self.shop.put_on_armor(Armor::Diamond),
-            SurpriseItem::SyringeGun => bag.has_syringe_gun = true,
+            SurpriseItem::SyringeGun => bag.syringe_guns += 1,
             SurpriseItem::EnderFruit => bag.ender_fruits += 1,
             SurpriseItem::Car => bag.riding_car = true,
             SurpriseItem::DiamondPickaxe => bag.has_diamond_pickaxe = true,

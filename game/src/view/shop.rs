@@ -1,8 +1,8 @@
 //! 상점 화면 (US-062, US-070, US-071, US-072, 로건): 집 안 느낌의 밝은 판에 물건 5개(칼·도끼·총은 부모님 결정으로 뺐다), 금·은·동 팔기, 지금 코인, "닫기".
 //! 마우스 클릭과 손가락 탭이 같은 `shop_tap_at` → `apply_shop_tap` 한 길로 간다. Esc는 main이 `close_shop`으로 닫는다.
 //! 살 수 있는지, 값, 이유 글은 모두 logic(`buy_rows`, `sell_rows`)이 준 그대로 보여 준다.
-//! 정보판 옆 산 물건 표시(스케이트·갑옷·포션·주사기총·엔더열매)와 물건 그림도 여기 있다. 그림은 아이 그림이 오기 전 코드로 그린 임시 그림이다.
-//! 포션·주사기총·엔더열매는 손에 들지 않는다 (부모님 결정): PC는 R·T·Y·G 키, 폰은 표시판의 그림을 누르면 바로 쓴다 (`pocket_tap_rects`).
+//! 산 물건 그림(포션·스케이트·갑옷)과 쓰는 물건(`Pocket`)도 여기 있다. 정보판 물건 칸은 view::hud, 가방은 view::bag이 그린다.
+//! 포션·주사기총·엔더열매는 손에 들지 않는다 (부모님 결정): PC는 1·2·R·3 키, 폰은 정보판의 그림을 누르면 바로 쓴다 (`hud::pocket_tap_rects`).
 
 use super::assets::{ItemPicture, M6Art};
 use super::items::draw_item_picture;
@@ -11,7 +11,6 @@ use super::gather::draw_material_icon;
 use super::hud::{draw_heart, draw_pill};
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::text::TextPainter;
-use super::input::pocket_key_label;
 use super::touch::draw_star;
 use crate::config::{SHOP_BOUGHT_TEXT, SHOP_HINT_TEXT, SHOP_SOLD_TEXT};
 use crate::logic::game::Game;
@@ -345,51 +344,15 @@ pub fn draw_shop(text: &TextPainter, game: &Game, view: &ShopView, touch_mode: b
     }
 }
 
-// ---- 정보판 옆 산 물건 표시 (스케이트, 갑옷과 남은 시간, 가진 포션·주사기총·엔더열매) ----
-
-/// 무기 판(y 130~182) 바로 아래 오른쪽 끝. 무기가 없으면 무기 판 자리에 올라간다.
-const STATUS_TOP_WITH_WEAPONS: f32 = 190.0;
-const STATUS_TOP: f32 = 130.0;
-const STATUS_H: f32 = 48.0;
-const STATUS_ICON: f32 = 36.0;
-const STATUS_TEXT: f32 = 28.0;
-const STATUS_PAD: f32 = 14.0;
-const STATUS_GAP: f32 = 14.0;
-/// 표시판 오른쪽 끝
-const STATUS_RIGHT: f32 = VIRTUAL_WIDTH - 12.0;
-/// 쓰는 물건 한 칸 폭: 그림 + 개수(두 자리). 늘 같은 폭이라 누르는 자리를 글자 폭 없이 셀 수 있다.
-const POCKET_SLOT_W: f32 = STATUS_ICON + 6.0 + 34.0;
-/// 폰에서 누르는 자리는 칸보다 크다: 옆으로 이만큼(이웃 칸과는 안 겹친다), 위·아래로 이만큼.
-const POCKET_TAP_SIDE: f32 = STATUS_GAP / 2.0 - 1.0;
-const POCKET_TAP_ABOVE: f32 = 14.0;
-const POCKET_TAP_BELOW: f32 = 16.0;
-/// PC에서 그림 아래 구석에 쓰는 키 글자 (R, T, Y, G)
-const POCKET_KEY_SIZE: f32 = 20.0;
-const POCKET_KEY_FILL: Color = Color::new(1.0, 0.62, 0.15, 1.0);
-/// 폰에서 "눌러요" 표시로 그림 둘레에 그리는 동그라미
-const POCKET_TAP_RING: Color = Color::new(1.0, 1.0, 1.0, 0.7);
-
+// ---- 쓰는 물건 (정보판 물건 칸·가방, view::hud·view::bag이 그린다) ----
 /// 손에 들지 않고 바로 쓰는 물건 (부모님 결정): 포션 둘, 주사기총, 엔더열매.
-/// PC는 키(`input::pocket_key_label`), 폰은 표시판의 그림을 누른다. 쓸 수 있는지는 logic이 정한다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pocket {
-    Potion(Potion),
-    SyringeGun,
-    EnderFruit,
-}
+/// PC는 키(`input::pocket_key_label`), 폰은 표시판의 그림을 누른다. 쓸 수 있는지는 logic이 정한다 (`Game::why_cant_use`).
+pub use crate::logic::shop::Pocket;
 
 impl Pocket {
-    /// 표시판 순서 (왼쪽부터)
-    pub const ALL: [Pocket; 4] = [Pocket::Potion(Potion::Health), Pocket::Potion(Potion::Poison), Pocket::SyringeGun, Pocket::EnderFruit];
-
-    /// 가진 개수. 0이면 표시판에 안 나온다.
+    /// 가진 개수 (`Game::pocket_count`). 0이면 표시판에 안 나온다.
     pub fn count(self, game: &Game) -> u32 {
-        let bag = &game.gathering.bag;
-        match self {
-            Pocket::Potion(potion) => game.shop.potions(potion),
-            Pocket::SyringeGun => bag.has_syringe_gun as u32,
-            Pocket::EnderFruit => bag.ender_fruits,
-        }
+        game.pocket_count(self)
     }
 }
 
@@ -402,15 +365,6 @@ pub fn draw_pocket(pocket: Pocket, art: &M6Art, c: Vec2, size: f32) {
     }
 }
 
-/// 표시판에 넣을 것 하나.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StatusItem {
-    Skates,
-    Armor(Armor, String),
-    /// 쓰는 물건, 가진 수. 폰에서는 누르면 쓰고, PC에서는 R·T·Y·G로 쓴다.
-    Pocket(Pocket, u32),
-}
-
 /// 갑옷 남은 시간 글. 게임 속 초를 지금 빨리감기 배수로 나눠서, 실제로 기다릴 시간으로 보여 준다 (임시-26).
 /// 예: 72초 ×10 → "8초", 720초 ×1 → "12분". 1분이 넘으면 "1분 5초".
 pub fn armor_time_text(game_seconds_left: f32, time_scale: f32) -> String {
@@ -419,115 +373,6 @@ pub fn armor_time_text(game_seconds_left: f32, time_scale: f32) -> String {
         (0, s) => format!("{s}초"),
         (m, 0) => format!("{m}분"),
         (m, s) => format!("{m}분 {s}초"),
-    }
-}
-
-/// 지금 보일 것들 (없으면 빈 목록 → 판도 없다).
-pub fn status_items(game: &Game, time_scale: f32) -> Vec<StatusItem> {
-    let mut list = Vec::new();
-    if game.shop.has_skates() {
-        list.push(StatusItem::Skates);
-    }
-    if let Some(armor) = game.shop.armor() {
-        list.push(StatusItem::Armor(armor, armor_time_text(game.shop.armor_seconds_left(), time_scale)));
-    }
-    for pocket in Pocket::ALL {
-        let n = pocket.count(game);
-        if n > 0 {
-            list.push(StatusItem::Pocket(pocket, n));
-        }
-    }
-    list
-}
-
-/// 물건 줄(갑옷·포션 등)의 아래 끝. 줄이 없으면 None (BUG-031). `draw_status`와 같은 조건.
-pub fn status_bottom(game: &Game, time_scale: f32, has_weapons: bool) -> Option<f32> {
-    (!status_items(game, time_scale).is_empty()).then(|| status_top(has_weapons) + STATUS_H)
-}
-
-fn status_top(has_weapons: bool) -> f32 {
-    if has_weapons {
-        STATUS_TOP_WITH_WEAPONS
-    } else {
-        STATUS_TOP
-    }
-}
-
-/// 쓰는 물건 칸 하나. `from_end`는 오른쪽 끝에서 몇 번째인지 (0 = 맨 오른쪽).
-/// 이 칸들은 표시판 맨 뒤에 같은 폭으로 놓이니 다른 것(갑옷 글 폭)과 상관없이 자리가 정해진다.
-fn pocket_slot(from_end: usize, top: f32) -> Rect {
-    let right = STATUS_RIGHT - STATUS_PAD - from_end as f32 * (POCKET_SLOT_W + STATUS_GAP);
-    Rect::new(right - POCKET_SLOT_W, top, POCKET_SLOT_W, STATUS_H)
-}
-
-/// 폰에서 누르면 쓰는 자리 (가진 것만). 그림 칸보다 크게 잡는다.
-pub fn pocket_tap_rects(game: &Game, has_weapons: bool) -> Vec<(Pocket, Rect)> {
-    let owned: Vec<Pocket> = Pocket::ALL.into_iter().filter(|p| p.count(game) > 0).collect();
-    let top = status_top(has_weapons);
-    owned
-        .iter()
-        .enumerate()
-        .map(|(i, pocket)| {
-            let s = pocket_slot(owned.len() - 1 - i, top);
-            (*pocket, Rect::new(s.x - POCKET_TAP_SIDE, s.y - POCKET_TAP_ABOVE, s.w + POCKET_TAP_SIDE * 2.0, s.h + POCKET_TAP_ABOVE + POCKET_TAP_BELOW))
-        })
-        .collect()
-}
-
-fn status_label(item: &StatusItem) -> String {
-    match item {
-        StatusItem::Skates => String::new(),
-        StatusItem::Armor(_, time) => time.clone(),
-        // 주사기총은 하나만 가지니 숫자를 쓰지 않는다
-        StatusItem::Pocket(Pocket::SyringeGun, _) => String::new(),
-        StatusItem::Pocket(_, n) => n.to_string(),
-    }
-}
-
-fn status_item_width(text: &TextPainter, item: &StatusItem) -> f32 {
-    if let StatusItem::Pocket(..) = item {
-        return POCKET_SLOT_W;
-    }
-    let label = status_label(item);
-    STATUS_ICON + if label.is_empty() { 0.0 } else { 6.0 + text.width(&label, STATUS_TEXT) }
-}
-
-/// 정보판 아래 오른쪽: 산 물건 표시. 화면 좌표.
-/// 쓰는 물건은 폰(`touch_mode`)이면 "눌러요" 동그라미, PC면 쓰는 키 글자(R·T·Y·G)를 함께 그린다.
-pub fn draw_status(text: &TextPainter, game: &Game, art: &M6Art, time_scale: f32, has_weapons: bool, touch_mode: bool) {
-    let items = status_items(game, time_scale);
-    if items.is_empty() {
-        return;
-    }
-    let t = get_time() as f32;
-    let w = STATUS_PAD * 2.0 + items.iter().map(|i| status_item_width(text, i)).sum::<f32>() + STATUS_GAP * (items.len() - 1) as f32;
-    let x0 = STATUS_RIGHT - w;
-    let top = status_top(has_weapons);
-    draw_pill(x0, top, w, STATUS_H, Color::new(0.10, 0.13, 0.32, 0.55));
-    let mid_y = top + STATUS_H / 2.0;
-    let mut x = x0 + STATUS_PAD;
-    for item in &items {
-        let c = vec2(x + STATUS_ICON / 2.0, mid_y);
-        match item {
-            StatusItem::Skates => draw_skates(c, STATUS_ICON),
-            StatusItem::Armor(armor, _) => draw_armor(*armor, c, STATUS_ICON, t),
-            StatusItem::Pocket(pocket, _) => {
-                if touch_mode {
-                    draw_circle_lines(c.x, c.y, STATUS_ICON / 2.0 + 4.0, 3.0, POCKET_TAP_RING);
-                }
-                draw_pocket(*pocket, art, c, STATUS_ICON * 0.9);
-                if !touch_mode {
-                    let key = c + vec2(-STATUS_ICON * 0.38, STATUS_ICON * 0.36);
-                    draw_circle(key.x, key.y, POCKET_KEY_SIZE * 0.55, POCKET_KEY_FILL);
-                    text.centered(pocket_key_label(*pocket), key.x, key.y + POCKET_KEY_SIZE * 0.36, POCKET_KEY_SIZE, WHITE);
-                }
-            }
-        }
-        let label = status_label(item);
-        if !label.is_empty() {
-            text.left(&label, x + STATUS_ICON + 6.0, mid_y + 10.0, STATUS_TEXT, WHITE);
-        }
-        x += status_item_width(text, item) + STATUS_GAP;
     }
 }
 
@@ -594,7 +439,6 @@ mod tests {
     use super::*;
     use crate::logic::character::CharacterKind;
     use crate::logic::shop::CantBuy;
-    use crate::logic::weapon::Weapon;
     use crate::logic::world::World;
 
     fn all_targets() -> Vec<Rect> {
@@ -627,8 +471,8 @@ mod tests {
     #[test]
     fn text_is_big_enough_on_a_small_phone() {
         // 740×360 폰은 0.667배: 가장 작은 글(이유 글)도 약 16 화면 픽셀
-        // (키 글자 R·T·Y·G는 PC에서만 보여서 여기 넣지 않는다)
-        for size in [NAME_SIZE, PRICE_SIZE, REASON_SIZE, CLOSE_SIZE, STATUS_TEXT] {
+        // (키 글자 1·2·R·3는 PC에서만 보여서 여기 넣지 않는다)
+        for size in [NAME_SIZE, PRICE_SIZE, REASON_SIZE, CLOSE_SIZE] {
             assert!(size * 360.0 / 540.0 >= 16.0, "{size}");
         }
     }
@@ -674,94 +518,6 @@ mod tests {
         assert_eq!(armor_time_text(720.0, 1.0), "12분");
         assert_eq!(armor_time_text(720.0, 10.0), "1분 12초");
         assert_eq!(armor_time_text(0.0, 10.0), "0초");
-    }
-
-    #[test]
-    fn status_shows_skates_armor_potions_and_new_items() {
-        let mut game = Game::on_world(CharacterKind::Ellie, 7, World::m1());
-        assert!(status_items(&game, 1.0).is_empty(), "산 것이 없으면 판도 없다");
-        game.wallet.add(2000);
-        for item in [ShopItem::Skates, ShopItem::RainbowArmor, ShopItem::HealthPotion, ShopItem::HealthPotion, ShopItem::PoisonPotion] {
-            game.buy(item).unwrap();
-        }
-        game.gathering.bag.has_syringe_gun = true;
-        game.gathering.bag.ender_fruits = 2;
-        let items = status_items(&game, 10.0);
-        assert_eq!(
-            items,
-            vec![
-                StatusItem::Skates,
-                StatusItem::Armor(Armor::Rainbow, "8초".into()),
-                StatusItem::Pocket(Pocket::Potion(Potion::Health), 2),
-                StatusItem::Pocket(Pocket::Potion(Potion::Poison), 1),
-                StatusItem::Pocket(Pocket::SyringeGun, 1),
-                StatusItem::Pocket(Pocket::EnderFruit, 2),
-            ]
-        );
-        assert_eq!(status_label(&items[4]), "", "주사기총은 하나뿐이라 숫자를 안 쓴다");
-        assert_eq!(status_label(&items[5]), "2");
-    }
-
-    fn game_with(potions: &[ShopItem], weapon: bool, gun: bool, fruits: u32) -> Game {
-        let mut game = Game::on_world(CharacterKind::Niro, 7, World::m1());
-        game.wallet.add(2000);
-        for item in potions {
-            game.buy(*item).unwrap();
-        }
-        if weapon {
-            game.weapons.add_bought(Weapon::Sword);
-        }
-        game.gathering.bag.has_syringe_gun = gun;
-        game.gathering.bag.ender_fruits = fruits;
-        game
-    }
-
-    #[test]
-    fn tap_spots_follow_what_you_have() {
-        assert!(pocket_tap_rects(&game_with(&[], false, false, 0), false).is_empty(), "가진 것이 없으면 누를 곳도 없다");
-        let one = pocket_tap_rects(&game_with(&[ShopItem::PoisonPotion], false, false, 0), false);
-        assert_eq!(one.len(), 1);
-        assert_eq!(one[0].0, Pocket::Potion(Potion::Poison));
-        let both = pocket_tap_rects(&game_with(&[ShopItem::PoisonPotion, ShopItem::HealthPotion], false, false, 0), false);
-        assert_eq!(both.iter().map(|(p, _)| *p).collect::<Vec<_>>(), Pocket::ALL[..2].to_vec(), "체력 포션이 왼쪽, 독약이 오른쪽");
-        assert!(both[0].1.right() < both[1].1.x, "두 자리는 안 겹친다");
-        // 맨 오른쪽 자리는 하나만 있을 때와 같다 (그림 칸과 누르는 자리가 같이 움직인다)
-        assert_eq!(both[1].1, one[0].1);
-        for (i, (_, r)) in both.iter().enumerate() {
-            let slot = pocket_slot(1 - i, STATUS_TOP);
-            assert!(r.contains(slot.point()) && r.contains(vec2(slot.right(), slot.bottom())));
-        }
-        let fruit_only = pocket_tap_rects(&game_with(&[], false, false, 3), false);
-        assert_eq!(fruit_only.iter().map(|(p, _)| *p).collect::<Vec<_>>(), vec![Pocket::EnderFruit], "엔더열매만 있으면 그것만");
-        let gun_only = pocket_tap_rects(&game_with(&[], false, true, 0), false);
-        assert_eq!(gun_only.iter().map(|(p, _)| *p).collect::<Vec<_>>(), vec![Pocket::SyringeGun]);
-    }
-
-    #[test]
-    fn tap_spots_are_big_and_clear_of_the_buttons() {
-        use crate::view::touch::{button_touches_rect, play_buttons_with_mine, BACK_BUTTON, JOYSTICK_AREA_RIGHT};
-        let both = [ShopItem::HealthPotion, ShopItem::PoisonPotion];
-        for weapon in [false, true] {
-            let game = game_with(&both, weapon, true, 2);
-            let rects = pocket_tap_rects(&game, weapon);
-            assert_eq!(rects.len(), 4, "포션 둘 + 주사기총 + 엔더열매");
-            for (i, (pocket, r)) in rects.iter().enumerate() {
-                // 812×375는 0.694배, 740×360은 0.667배: 가장 작은 폰에서도 48 화면 픽셀 넘게
-                for (w, h) in [(812.0, 375.0), (740.0, 360.0)] {
-                    let scale = f32::min(w / VIRTUAL_WIDTH, h / VIRTUAL_HEIGHT);
-                    assert!(r.w.min(r.h) * scale >= 48.0, "{pocket:?} {w}×{h}에서 {}", r.w.min(r.h) * scale);
-                }
-                assert!(r.x >= JOYSTICK_AREA_RIGHT, "조이스틱 자리와 안 겹친다");
-                assert!(r.right() <= VIRTUAL_WIDTH && r.y >= 0.0);
-                assert!(r.intersect(BACK_BUTTON).is_none());
-                for b in play_buttons_with_mine(weapon, true) {
-                    assert!(!button_touches_rect(&b, *r), "{pocket:?}가 {:?} 버튼과 겹친다 (무기 {weapon})", b.kind);
-                }
-                for (_, other) in &rects[i + 1..] {
-                    assert!(r.intersect(*other).is_none(), "누르는 자리끼리 안 겹친다");
-                }
-            }
-        }
     }
 
     #[test]

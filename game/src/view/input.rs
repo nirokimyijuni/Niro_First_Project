@@ -7,6 +7,7 @@ use super::math::MathKey;
 use super::screen::Letterbox;
 use super::shop::Pocket;
 use super::touch::{Finger, TouchFrame};
+use crate::logic::game::Usable;
 use crate::logic::player::PlayerInput;
 use crate::logic::shop::Potion;
 use macroquad::prelude::*;
@@ -42,34 +43,69 @@ pub fn any_key_pressed() -> bool {
     !get_keys_pressed().is_empty()
 }
 
-/// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프, Q 공격.
-pub fn player_input() -> PlayerInput {
-    PlayerInput {
-        left: is_key_down(KeyCode::Left),
-        right: is_key_down(KeyCode::Right),
-        jump_pressed: is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Up),
-        attack_pressed: is_key_pressed(KeyCode::Q),
-    }
+/// ↑가 들어가기·나가기가 되는 곳인지 (부모님 결정 2026-11-15): 집 문, 동굴 입구, 동굴 출구에 닿아 있을 때.
+/// 그때 ↑는 점프가 아니라 들어가기다. 다른 곳의 ↑는 지금처럼 점프다. E로 들어가기도 그대로다.
+pub fn up_enters(usable: Option<Usable>) -> bool {
+    matches!(usable, Some(Usable::HouseDoor | Usable::CaveEntrance | Usable::CaveExit))
+}
+
+/// 키 상태 → 플레이 입력. `up_enters`면 ↑는 점프가 아니다 (들어가기는 `mine_key_down`).
+pub fn keys_to_input(left: bool, right: bool, space: bool, up: bool, q: bool, up_enters: bool) -> PlayerInput {
+    PlayerInput { left, right, jump_pressed: space || (up && !up_enters), attack_pressed: q }
+}
+
+/// 플레이 중: ←/→ 걷기, Space 또는 ↑ 점프 (문·동굴 입구에서는 ↑가 들어가기), Q 공격.
+pub fn player_input(up_enters: bool) -> PlayerInput {
+    keys_to_input(
+        is_key_down(KeyCode::Left),
+        is_key_down(KeyCode::Right),
+        is_key_pressed(KeyCode::Space),
+        is_key_pressed(KeyCode::Up),
+        is_key_pressed(KeyCode::Q),
+        up_enters,
+    )
 }
 
 /// 캐기·들어가기·만들기 (임시-16): E를 누르고 있는 동안 true. 새로 누름은 logic이 가린다.
-pub fn mine_key_down() -> bool {
-    is_key_down(KeyCode::E)
+/// 문·동굴 입구에 닿아 있으면 ↑도 들어가기지만, ↑는 **새로 누른 프레임에만** true다 (REVIEW-022 1번).
+/// ↑를 꾹 누른 채 문에 닿거나, ↑를 누른 채 상점을 닫아도 저절로 들어가지 않는다.
+pub fn keys_to_mine(e_down: bool, up_pressed: bool, up_enters: bool) -> bool {
+    e_down || (up_enters && up_pressed)
 }
 
-/// 무기 바꾸기: W를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
+/// 키보드로 본 캐기·들어가기 누름 (`keys_to_mine`).
+pub fn mine_key_down(up_enters: bool) -> bool {
+    keys_to_mine(is_key_down(KeyCode::E), is_key_pressed(KeyCode::Up), up_enters)
+}
+
+/// 무기 바꾸기 키 (부모님 결정 2026-11-15: W 대신 Tab). 화면에 쓰는 글자도 함께.
+pub const SWITCH_KEY: (KeyCode, &str) = (KeyCode::Tab, "Tab");
+/// 가방 열고 닫기 키 (부모님 결정 2026-11-15: Tab 대신 I).
+pub const BAG_KEY: (KeyCode, &str) = (KeyCode::I, "I");
+
+/// 무기 바꾸기: Tab을 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
 pub fn switch_weapon_pressed() -> bool {
-    is_key_pressed(KeyCode::W)
+    is_key_pressed(SWITCH_KEY.0)
 }
 
-/// 바로 쓰는 물건 키 (부모님 결정): R = 체력 포션, T = 독약, Y = 주사기총 쏘기, G = 엔더열매 먹기.
-/// F는 개발용 빨리감기라 쓰지 않는다. (키, 물건, 화면에 쓰는 글자)
+/// 가방: I를 "새로 누른" 프레임에만 true (꾹 눌러도 한 번 열리고 한 번 닫힌다).
+pub fn bag_key_pressed() -> bool {
+    is_key_pressed(BAG_KEY.0)
+}
+
+/// 바로 쓰는 물건 키 (부모님 결정 2026-11-15): 1 = 체력 포션, 2 = 독약, R = 주사기총 쏘기, 3 = 엔더열매 먹기.
+/// F는 개발용 빨리감기라 쓰지 않는다. Shift+숫자는 시험용 단축(?qa)이라 물건을 쓰지 않는다. (키, 물건, 화면에 쓰는 글자)
 pub const POCKET_KEYS: [(KeyCode, Pocket, &str); 4] = [
-    (KeyCode::R, Pocket::Potion(Potion::Health), "R"),
-    (KeyCode::T, Pocket::Potion(Potion::Poison), "T"),
-    (KeyCode::Y, Pocket::SyringeGun, "Y"),
-    (KeyCode::G, Pocket::EnderFruit, "G"),
+    (KeyCode::Key1, Pocket::Potion(Potion::Health), "1"),
+    (KeyCode::Key2, Pocket::Potion(Potion::Poison), "2"),
+    (KeyCode::R, Pocket::SyringeGun, "R"),
+    (KeyCode::Key3, Pocket::EnderFruit, "3"),
 ];
+
+/// Shift를 누르고 있는지 (Shift+숫자 = 시험용 단축). 한 프레임 안에 눌렀다 뗀 Shift도 센다.
+pub fn shift_down() -> bool {
+    [KeyCode::LeftShift, KeyCode::RightShift].into_iter().any(|k| is_key_down(k) || is_key_pressed(k))
+}
 
 /// 키 하나가 어느 물건인지.
 pub fn pocket_for_key(key: KeyCode) -> Option<Pocket> {
@@ -81,9 +117,17 @@ pub fn pocket_key_label(pocket: Pocket) -> &'static str {
     POCKET_KEYS.iter().find(|(_, p, _)| *p == pocket).map_or("", |(.., label)| label)
 }
 
-/// 이번 프레임에 "새로" 누른 물건 키들 (꾹 눌러도 한 번).
+/// 이번 프레임에 "새로" 누른 물건 키들 (꾹 눌러도 한 번). Shift를 누르고 있으면 없다 (시험용 단축).
 pub fn pocket_keys_pressed() -> Vec<Pocket> {
-    get_keys_pressed().into_iter().filter_map(pocket_for_key).collect()
+    pockets_for_keys(get_keys_pressed().into_iter(), shift_down())
+}
+
+/// 누른 키들 → 쓸 물건들. `shift`면 아무것도 쓰지 않는다.
+pub fn pockets_for_keys(keys: impl Iterator<Item = KeyCode>, shift: bool) -> Vec<Pocket> {
+    if shift {
+        return Vec::new();
+    }
+    keys.filter_map(pocket_for_key).collect()
 }
 
 /// 메뉴 화면(타이틀·캐릭터 고르기)에서 쓰는 입력. 모두 "이번 프레임에 새로 누름" 기준.
@@ -91,6 +135,9 @@ pub fn pocket_keys_pressed() -> Vec<Pocket> {
 pub struct MenuInput {
     pub left: bool,
     pub right: bool,
+    /// ↑/↓ (멈춤 창에서 칸 옮기기). 꾹 누르고 있던 키는 false
+    pub up: bool,
+    pub down: bool,
     /// Enter 또는 Space
     pub confirm: bool,
     /// Esc
@@ -108,6 +155,8 @@ pub fn menu_input(letterbox: &Letterbox) -> MenuInput {
     MenuInput {
         left: is_key_pressed(KeyCode::Left),
         right: is_key_pressed(KeyCode::Right),
+        up: is_key_pressed(KeyCode::Up),
+        down: is_key_pressed(KeyCode::Down),
         confirm: is_key_pressed(KeyCode::Enter)
             || is_key_pressed(KeyCode::KpEnter)
             || is_key_pressed(KeyCode::Space),
@@ -160,6 +209,17 @@ mod tests {
     use super::*;
     use crate::view::touch::{button_at, ButtonKind, PLAY_BUTTONS};
 
+    #[test]
+    fn up_enters_only_on_a_new_press() {
+        // ↑를 새로 누른 프레임만 들어가기 (REVIEW-022 1번)
+        assert!(keys_to_mine(false, true, true));
+        assert!(!keys_to_mine(false, false, true), "↑를 누르고 있기만 하면 들어가지 않는다");
+        assert!(!keys_to_mine(false, true, false), "문·동굴이 아닌 곳의 ↑는 점프다");
+        // E는 누르고 있는 동안 계속 (캐기 꾹 누름)
+        assert!(keys_to_mine(true, false, false));
+        assert!(keys_to_mine(true, false, true));
+    }
+
     /// 아이폰 12 Pro 가로: 창 844×390 (논리 픽셀), 배율 3.
     fn iphone() -> Letterbox {
         Letterbox::for_window(844.0, 390.0)
@@ -184,16 +244,42 @@ mod tests {
     }
 
     #[test]
-    fn r_t_y_g_use_potions_syringe_gun_and_ender_fruit() {
-        assert_eq!(pocket_for_key(KeyCode::R), Some(Pocket::Potion(Potion::Health)));
-        assert_eq!(pocket_for_key(KeyCode::T), Some(Pocket::Potion(Potion::Poison)));
-        assert_eq!(pocket_for_key(KeyCode::Y), Some(Pocket::SyringeGun));
-        assert_eq!(pocket_for_key(KeyCode::G), Some(Pocket::EnderFruit));
-        for other in [KeyCode::Q, KeyCode::W, KeyCode::E, KeyCode::F, KeyCode::Space, KeyCode::Escape] {
-            assert_eq!(pocket_for_key(other), None, "{other:?}는 다른 일을 한다 (F는 빨리감기)");
+    fn keys_1_2_r_3_use_potions_syringe_gun_and_ender_fruit() {
+        // 부모님 결정 2026-11-15: 1 체력 포션, 2 독약, R 주사기총, 3 엔더열매
+        assert_eq!(pocket_for_key(KeyCode::Key1), Some(Pocket::Potion(Potion::Health)));
+        assert_eq!(pocket_for_key(KeyCode::Key2), Some(Pocket::Potion(Potion::Poison)));
+        assert_eq!(pocket_for_key(KeyCode::R), Some(Pocket::SyringeGun));
+        assert_eq!(pocket_for_key(KeyCode::Key3), Some(Pocket::EnderFruit));
+        for other in [KeyCode::Q, KeyCode::W, KeyCode::E, KeyCode::F, KeyCode::T, KeyCode::Y, KeyCode::G, KeyCode::Tab, KeyCode::I, KeyCode::Space, KeyCode::Escape] {
+            assert_eq!(pocket_for_key(other), None, "{other:?}는 물건을 쓰지 않는다 (T·Y·G·W는 이제 아무 일 없음)");
         }
         let labels: Vec<&str> = Pocket::ALL.iter().map(|p| pocket_key_label(*p)).collect();
-        assert_eq!(labels, ["R", "T", "Y", "G"], "물건마다 키가 하나씩 있다");
+        assert_eq!(labels, ["1", "2", "R", "3"], "물건마다 키가 하나씩 있다");
+        // Shift+숫자는 시험용 단축이라 포션을 쓰지 않는다
+        assert_eq!(pockets_for_keys([KeyCode::Key1, KeyCode::R].into_iter(), false), vec![Pocket::Potion(Potion::Health), Pocket::SyringeGun]);
+        assert!(pockets_for_keys([KeyCode::Key1].into_iter(), true).is_empty());
+    }
+
+    #[test]
+    fn tab_switches_weapons_and_i_opens_the_bag() {
+        assert_eq!(SWITCH_KEY.0, KeyCode::Tab);
+        assert_eq!(BAG_KEY.0, KeyCode::I);
+        assert_ne!(SWITCH_KEY.0, BAG_KEY.0);
+        for (k, _, _) in POCKET_KEYS {
+            assert!(k != SWITCH_KEY.0 && k != BAG_KEY.0 && k != KeyCode::Q && k != KeyCode::E && k != KeyCode::F);
+        }
+    }
+
+    #[test]
+    fn up_enters_doors_and_caves_but_jumps_elsewhere() {
+        assert!(up_enters(Some(Usable::HouseDoor)) && up_enters(Some(Usable::CaveEntrance)) && up_enters(Some(Usable::CaveExit)));
+        for other in [None, Some(Usable::Tree(0)), Some(Usable::OreLump(0)), Some(Usable::Workbench)] {
+            assert!(!up_enters(other), "{other:?}: ↑는 점프");
+        }
+        let at_door = keys_to_input(false, false, false, true, false, true);
+        assert!(!at_door.jump_pressed, "문 앞 ↑는 점프하지 않는다");
+        assert!(keys_to_input(false, false, true, true, false, true).jump_pressed, "문 앞이어도 Space는 점프");
+        assert!(keys_to_input(false, false, false, true, false, false).jump_pressed, "다른 곳의 ↑는 점프");
     }
 
     #[test]

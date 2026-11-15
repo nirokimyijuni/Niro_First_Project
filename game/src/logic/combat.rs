@@ -10,7 +10,7 @@ use super::skeleton::{ProjectileKind, Skeleton, SkeletonStage, Skeletons};
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     BOX_MONSTER_WAIT_SECONDS, CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
-    MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
+    HOUSE_DOOR_REACH, MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
     PLAYER_ATTACK_RANGE, PLAYER_HP_PER_LEVEL, POISON_DAMAGE, POISON_RANGE, PLAYER_HURT_INVINCIBLE_SECONDS, PLAYER_START_HP, SCREEN_WIDTH,
     SKELETON_SPAWN_CHANCE, SKELETON_WIDTH, ZOMBIE_ATTACK, ZOMBIE_FLOAT_CHANCE, ZOMBIE_MAX_ON_SCREEN,
     ZOMBIE_SPAWN_SECONDS, ZOMBIE_WIDTH,
@@ -148,6 +148,25 @@ fn is_in_front(player_rect: Rect, facing: Facing, target: Rect) -> bool {
 pub fn is_reached(player_rect: Rect, facing: Facing, range: f32, target: Rect) -> bool {
     let target = nearest_copy(target, player_rect.center().x);
     attack_box_with_range(player_rect, facing, range).overlaps(&target) && is_in_front(player_rect, facing, target)
+}
+
+/// 집 문 바로 앞에 섰는지 (부모님 결정 2026-11-15): 몸 가운데가 문 폭 안이거나 문 좌우 `HOUSE_DOOR_REACH` 안.
+/// 바라보는 쪽은 상관없다. 이음매 너머도 본다.
+pub fn is_in_front_of_door(player_rect: Rect, door: Rect) -> bool {
+    let door = nearest_copy(door, player_rect.center().x);
+    let x = player_rect.center().x;
+    door.x - HOUSE_DOOR_REACH <= x && x <= door.x + door.w + HOUSE_DOOR_REACH
+}
+
+/// 몸 가운데가 `at`에서 `POISON_RANGE` 안이면 true (독약 포션 거리). 이음매 너머도 닿는다.
+fn is_body_in_poison_range(body: Rect, at: Vec2) -> bool {
+    nearest_copy(body, at.x).center().distance(at) <= POISON_RANGE
+}
+
+/// 몸이 화면(`screen_left` ~ `screen_left + SCREEN_WIDTH`)에 조금이라도 보이면 true. 이음매 너머도 본다.
+fn is_body_on_screen(body: Rect, screen_left: f32) -> bool {
+    let body = nearest_copy(body, screen_left + SCREEN_WIDTH / 2.0);
+    body.x + body.w > screen_left && body.x < screen_left + SCREEN_WIDTH
 }
 
 /// 바라보는 쪽과 등 뒤 모두, 몸 양옆 `range` 안에 닿는지 (캐기·쓰기, 임시-16, 임시-36). 이음매 너머도 닿는다.
@@ -306,7 +325,7 @@ impl Combat {
     /// 독약 포션 (임시-28): 몸 가운데가 `at`에서 `POISON_RANGE` 안인 몬스터가 독에 걸린다. 이음매 너머도 닿는다.
     /// 시민과 미스는 몬스터가 아니라서 아무 일이 없다. 돌려주는 값: 범위 안 몬스터 수 (0이면 아무 일도 없다).
     pub fn spray_poison(&mut self, at: Vec2) -> u32 {
-        let is_near = |body: Rect| nearest_copy(body, at.x).center().distance(at) <= POISON_RANGE;
+        let is_near = |body: Rect| is_body_in_poison_range(body, at);
         let mut count = 0;
         for zombie in self.zombies.list.iter_mut().filter(|z| is_near(z.rect())) {
             zombie.poison.start();
@@ -354,11 +373,7 @@ impl Combat {
     /// 경험치를 주지 않고 "해치운 몬스터 수"에도 세지 않는다 (D80). 시민, 미스, 날아가는 화살·총알은 그대로다.
     pub fn sweep_monsters_on_screen(&mut self, screen_left: f32) -> Vec<CombatEvent> {
         let mut events = Vec::new();
-        let screen_middle = screen_left + SCREEN_WIDTH / 2.0;
-        let on_screen = |body: Rect| {
-            let body = nearest_copy(body, screen_middle);
-            body.x + body.w > screen_left && body.x < screen_left + SCREEN_WIDTH
-        };
+        let on_screen = |body: Rect| is_body_on_screen(body, screen_left);
         self.zombies.list.retain(|zombie| {
             let hit = on_screen(zombie.rect());
             if hit {
@@ -374,6 +389,21 @@ impl Combat {
             !hit
         });
         events
+    }
+
+    /// 독약을 뿌리면 걸릴 몬스터 수 (`spray_poison`과 같은 거리). 아무것도 바꾸지 않는다.
+    pub fn count_monsters_in_poison_range(&self, at: Vec2) -> usize {
+        self.monster_bodies().filter(|body| is_body_in_poison_range(*body, at)).count()
+    }
+
+    /// 화면에 보이는 몬스터 수 (`sweep_monsters_on_screen`과 같은 화면). 아무것도 바꾸지 않는다.
+    pub fn count_monsters_on_screen(&self, screen_left: f32) -> usize {
+        self.monster_bodies().filter(|body| is_body_on_screen(*body, screen_left)).count()
+    }
+
+    /// 좀비와 스켈레톤의 몸 상자.
+    fn monster_bodies(&self) -> impl Iterator<Item = Rect> + '_ {
+        self.zombies.list.iter().map(|z| z.rect()).chain(self.skeletons.list.iter().map(|s| s.rect()))
     }
 
     /// 한꺼번에 쓰러뜨린 점수 (D80): "해치운 몬스터 수"에 `points`를 한 번 더한다. 경험치·레벨은 그대로다.

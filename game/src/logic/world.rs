@@ -4,7 +4,7 @@
 use super::monster::SeededRandom;
 use super::player::Facing;
 use crate::config::{
-    BOX_AREA_LEFT, BOX_AREA_RIGHT, BOX_BIG_CHANCE, BOX_BIG_SIZE, BOX_COUNT_MAX, BOX_COUNT_MIN, BOX_GAP_CHANCE,
+    BOX_AREA_LEFT, BOX_AREA_RIGHT, BOX_BIG_CHANCE, BOX_BIG_SIZE, BOX_CLEAR_AROUND_CAVE, BOX_CLEAR_AROUND_DOOR,BOX_COUNT_MAX, BOX_COUNT_MIN, BOX_GAP_CHANCE,
     BOX_MIN_GAP, BOX_SMALL_SIZE, CAVE_ENTRANCE_HEIGHT, CAVE_ENTRANCE_WIDTH, CAVE_ENTRANCE_X, CAVE_EXIT_X, CITIZEN_RUN_UP_ROOM, CITIZEN_XS,
     GROUND_Y, HIDE_SPOTS, HOUSE_DOOR_HEIGHT, HOUSE_DOOR_WIDTH, HOUSE_DOOR_X, HOLE_DEPTH, HOLE_LEFT, HOLE_WIDTH, MAP_WIDTH, NO_BOX_MARGIN, PLACE_NAMES, ROCK_STEPS, SCREEN_WIDTH,
     TREE_BRANCHES, TREE_HEIGHT, TREE_WIDTH, TREE_XS, WORKBENCH_HEIGHT, WORKBENCH_WIDTH, WORKBENCH_X,
@@ -285,12 +285,17 @@ impl World {
     fn no_box_zones(&self) -> Vec<(f32, f32)> {
         let spots = HIDE_SPOTS.iter().map(|spot| (spot.1, spot.1));
         let solids = self.tree_branches().into_iter().chain(self.rock_steps()).chain(self.hole());
-        // M7·M8 쓸 것: 양옆 `NO_BOX_MARGIN` 안에 상자가 없다 (임시-14, 임시-11, 임시-18, 임시-22).
-        let solids = solids.chain(self.trees()).chain(self.cave_entrance()).chain(self.workbench()).chain(self.house_door());
+        // M7 쓸 것: 양옆 `NO_BOX_MARGIN` 안에 상자가 없다 (임시-14, 임시-18).
+        let solids = solids.chain(self.trees()).chain(self.workbench());
+        // 동굴 입구와 집 문은 더 넓게 비운다 (부모님 결정 2026-11-15).
+        let cave = self.cave_entrance().map(|r| (r, BOX_CLEAR_AROUND_CAVE));
+        let door = self.house_door().map(|r| (r, BOX_CLEAR_AROUND_DOOR));
+        let doors = cave.into_iter().chain(door).map(|(r, clear)| (r.x - clear, r.x + r.w + clear));
         let citizens = CITIZEN_XS.iter().map(|x| (x - CITIZEN_RUN_UP_ROOM, x + CITIZEN_RUN_UP_ROOM));
         spots
             .chain(solids.map(|r| (r.x, r.x + r.w)))
             .map(|(left, right)| (left - NO_BOX_MARGIN, right + NO_BOX_MARGIN))
+            .chain(doors)
             .chain(citizens)
             .collect()
     }
@@ -339,6 +344,7 @@ fn keep_boxes_out_of_zones(boxes: Vec<Rect>, zones: &[(f32, f32)]) -> Vec<Rect> 
 }
 
 /// 상자를 다 뺀 장소에도 자리가 있으면 하나는 남긴다 (US-050). 왼쪽부터 빈 자리를 찾는다.
+/// 자리가 없으면 0개다. 화산은 동굴 입구 둘레(`BOX_CLEAR_AROUND_CAVE`) 때문에 늘 0개다 (부모님 결정 2026-11-15).
 fn small_box_in_free_spot(left: f32, zones: &[(f32, f32)]) -> Option<Rect> {
     const SEARCH_STEP: usize = 4;
     let area_left = left + BOX_AREA_LEFT;
