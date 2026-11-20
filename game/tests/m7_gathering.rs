@@ -551,8 +551,7 @@ fn six_pm_pushes_the_player_out() {
     assert_eq!(CAVE_NIGHT_OUT_TEXT, "밤이 왔어요! 밖으로 나왔어요");
     // 임시-37: 입구 앞에 선 다음 밤 문제가 열린다. 그날 밤 문제는 하나다.
     assert!(g.math.is_open(), "밤 문제");
-    let answer = g.math.question().unwrap().answer;
-    g.math.type_and_submit(answer);
+    g.math.answer_right(); // 수학이든 영어든 (US-087)
     run(&mut g, idle(), MATH_RIGHT_SHOW_SECONDS + 1.0);
     assert!(!g.math.is_open(), "밤 문제는 한 번만");
 }

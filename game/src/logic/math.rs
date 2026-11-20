@@ -1,7 +1,13 @@
-//! 미스의 수학 문제 (D67, US-074~076). 상황 문제 만들기, 숫자 넣기, 기회 3번, 결과 글.
+//! 미스의 잠깐 퀴즈 (D67, US-074~076). 상황 문제 만들기, 숫자 넣기, 기회 3번, 결과 글.
+//! 퀴즈가 열릴 때 수학이나 영어 낱말 문제(D82, US-087)를 랜덤으로 고른다. 영어 문제 만들기는 `english.rs`.
 //! 언제 여는지와 체력을 줄이는 일은 `Game`이 한다. 화면(로건)은 `MathQuiz`의 값을 보고 그린다.
 
+use super::english::{EnglishQuestion, EnglishQuestionMaker};
 use super::monster::SeededRandom;
+use crate::config::{
+    ENGLISH_CHOICE_COUNT, ENGLISH_QUIZ_PERCENT, ENGLISH_TRIES, ENGLISH_WRONG_HP_LOSS, ENGLISH_WRONG_TEXT, MATH_WRONG_HP_LOSS,
+    QUIZ_SUBJECT_SEED_MIX,
+};
 use crate::config::{
     MATH_ADD_THREE_ON, MATH_ADD_THREE_RANGE, MATH_ADD_THREE_STORIES, MATH_ADD_TWO_ON, MATH_ADD_TWO_RANGE,
     MATH_ADD_TWO_STORIES, MATH_ANSWER_DIGITS, MATH_ANSWER_MAX, MATH_MULTIPLY_ON, MATH_MULTIPLY_STORIES, MATH_RIGHT_SHOW_SECONDS,
@@ -160,10 +166,26 @@ pub enum MathResult {
     Wrong,
 }
 
+/// 지금 열린 잠깐 퀴즈가 수학인지 영어인지.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuizSubject {
+    Math,
+    English,
+}
+
 /// 문제 창 하나의 상태. 열려 있는 동안(결과 글 시간 포함) 게임 속 시간이 멈춘다.
+/// 수학과 영어가 같은 창을 쓴다. 한 번에 둘 중 하나만 열린다.
 pub struct MathQuiz {
     maker: MathQuestionMaker,
     question: Option<MathQuestion>,
+    english_maker: EnglishQuestionMaker,
+    english: Option<EnglishQuestion>,
+    /// 수학·영어 고르기용. 문제를 열 때마다 한 번 굴린다.
+    subject_random: SeededRandom,
+    /// 영어 문제가 나올 확률 (%)
+    english_percent: u32,
+    /// 영어 문제에서 틀려서 흐려진 보기 (다시 못 고른다)
+    crossed_out: [bool; ENGLISH_CHOICE_COUNT],
     typed: String,
     wrong_count: u32,
     result: Option<MathResult>,
@@ -173,14 +195,38 @@ pub struct MathQuiz {
 }
 
 impl MathQuiz {
+    /// 게임의 잠깐 퀴즈: 수학과 영어를 config.rs `ENGLISH_QUIZ_PERCENT`대로 섞는다.
     pub fn new(game_seed: u32) -> MathQuiz {
-        MathQuiz::with_maker(MathQuestionMaker::new(game_seed))
+        MathQuiz::with_subjects(
+            MathQuestionMaker::new(game_seed),
+            EnglishQuestionMaker::new(game_seed),
+            game_seed,
+            ENGLISH_QUIZ_PERCENT,
+        )
     }
 
+    /// 시험용: 수학 문제만 내는 창.
+    #[cfg(test)]
     pub fn with_maker(maker: MathQuestionMaker) -> MathQuiz {
+        MathQuiz::with_subjects(maker, EnglishQuestionMaker::new(0), 0, 0)
+    }
+
+    /// 수학과 영어를 섞는 창. `english_percent`가 0이면 수학만, 100이면 영어만.
+    /// 수학·영어 고르기는 `game_seed`로 따로 굴려서 다른 뽑기가 바뀌지 않는다.
+    pub fn with_subjects(
+        maker: MathQuestionMaker,
+        english_maker: EnglishQuestionMaker,
+        game_seed: u32,
+        english_percent: u32,
+    ) -> MathQuiz {
         MathQuiz {
             maker,
             question: None,
+            english_maker,
+            english: None,
+            subject_random: SeededRandom::new(game_seed ^ QUIZ_SUBJECT_SEED_MIX),
+            english_percent,
+            crossed_out: [false; ENGLISH_CHOICE_COUNT],
             typed: String::new(),
             wrong_count: 0,
             result: None,
@@ -189,13 +235,53 @@ impl MathQuiz {
         }
     }
 
-    /// 지금 열려 있는 문제. 닫혀 있으면 None.
+    /// 지금 열려 있는 수학 문제. 닫혀 있거나 영어 문제가 열려 있으면 None.
     pub fn question(&self) -> Option<&MathQuestion> {
         self.question.as_ref()
     }
 
+    /// 지금 열려 있는 영어 문제. 닫혀 있거나 수학 문제가 열려 있으면 None.
+    pub fn english_question(&self) -> Option<&EnglishQuestion> {
+        self.english.as_ref()
+    }
+
+    /// 지금 열린 문제가 수학인지 영어인지. 닫혀 있으면 None.
+    pub fn subject(&self) -> Option<QuizSubject> {
+        if self.english.is_some() {
+            Some(QuizSubject::English)
+        } else if self.question.is_some() {
+            Some(QuizSubject::Math)
+        } else {
+            None
+        }
+    }
+
+    /// 수학이든 영어든 창이 열려 있는지.
     pub fn is_open(&self) -> bool {
-        self.question.is_some()
+        self.subject().is_some()
+    }
+
+    /// 영어 문제에서 이 자리(0~3)의 보기가 틀려서 흐려졌는지. 흐려진 보기는 다시 골라도 아무 일이 없다.
+    pub fn is_crossed_out(&self, slot: usize) -> bool {
+        self.english.is_some() && self.crossed_out.get(slot).copied().unwrap_or(false)
+    }
+
+    /// 두 번 다 틀린 문제가 닫힐 때 줄어드는 체력 (수학 `MATH_WRONG_HP_LOSS`, 영어 `ENGLISH_WRONG_HP_LOSS`).
+    pub fn wrong_hp_loss(&self) -> u32 {
+        if self.english.is_some() {
+            ENGLISH_WRONG_HP_LOSS
+        } else {
+            MATH_WRONG_HP_LOSS
+        }
+    }
+
+    /// 한 문제의 기회 (수학 `MATH_TRIES`, 영어 `ENGLISH_TRIES`).
+    fn tries(&self) -> u32 {
+        if self.english.is_some() {
+            ENGLISH_TRIES
+        } else {
+            MATH_TRIES
+        }
     }
 
     /// 지금까지 넣은 숫자 (예: "12"). 비어 있을 수 있다.
@@ -203,9 +289,9 @@ impl MathQuiz {
         &self.typed
     }
 
-    /// 남은 기회 (처음 `MATH_TRIES`).
+    /// 남은 기회 (처음 수학 `MATH_TRIES`, 영어 `ENGLISH_TRIES`).
     pub fn tries_left(&self) -> u32 {
-        MATH_TRIES - self.wrong_count
+        self.tries().saturating_sub(self.wrong_count)
     }
 
     /// 남은 기회 글: "기회가 2번 남았어". 틀린 뒤 "다시 해 볼까?"와 함께 보여 준다.
@@ -224,7 +310,15 @@ impl MathQuiz {
     }
 
     /// 결과 글: "넌 최고야!", "너무 아쉽다! 다시 해 볼까?", "너무 아쉽다! 정답은 362야".
+    /// 영어는 "너무 아쉽다! 정답은 Kite 야".
     pub fn result_text(&self) -> Option<String> {
+        if let Some(english) = &self.english {
+            return Some(match self.result? {
+                MathResult::Right => MATH_RIGHT_TEXT.to_string(),
+                MathResult::TryAgain => MATH_TRY_AGAIN_TEXT.to_string(),
+                MathResult::Wrong => ENGLISH_WRONG_TEXT.replace('□', english.answer_word().word),
+            });
+        }
         let answer = self.question.as_ref()?.answer;
         Some(match self.result? {
             MathResult::Right => MATH_RIGHT_TEXT.to_string(),
@@ -288,9 +382,50 @@ impl MathQuiz {
         self.submit()
     }
 
-    /// 열려 있고 맞힘·정답 글을 보여 주는 중이 아니면 숫자를 넣을 수 있다.
+    /// 영어 문제에서 보기 하나를 골랐다 (`slot` 0~3, 숫자 키 1~4). 맞힘·정답 글을 보여 주는 중이거나,
+    /// 흐려진 보기거나, 영어 문제가 아니면 None. 틀리면 그 보기가 흐려진다.
+    /// 틀린 횟수가 `ENGLISH_TRIES`가 되면 `Wrong`이고, 체력은 정답 글이 닫힐 때 `Game`이 줄인다.
+    pub fn pick_choice(&mut self, slot: usize) -> Option<MathResult> {
+        let answer = self.english.as_ref()?.answer;
+        if self.is_showing_end_text() || slot >= ENGLISH_CHOICE_COUNT || self.crossed_out[slot] {
+            return None;
+        }
+        let result = if slot == answer {
+            self.result_seconds_left = MATH_RIGHT_SHOW_SECONDS;
+            MathResult::Right
+        } else {
+            self.crossed_out[slot] = true;
+            self.wrong_count += 1;
+            if self.wrong_count >= ENGLISH_TRIES {
+                self.result_seconds_left = MATH_WRONG_SHOW_SECONDS;
+                MathResult::Wrong
+            } else {
+                MathResult::TryAgain
+            }
+        };
+        self.result = Some(result);
+        Some(result)
+    }
+
+    /// 시험용: 수학이든 영어든 지금 문제를 맞힌다.
+    #[cfg(test)]
+    pub fn answer_right(&mut self) -> Option<MathResult> {
+        if let Some(english) = &self.english {
+            let slot = english.answer;
+            return self.pick_choice(slot);
+        }
+        let answer = self.question.as_ref()?.answer;
+        self.type_and_submit(answer)
+    }
+
+    /// 수학 문제가 열려 있고 맞힘·정답 글을 보여 주는 중이 아니면 숫자를 넣을 수 있다.
     fn can_type(&self) -> bool {
-        self.is_open() && !matches!(self.result, Some(MathResult::Right | MathResult::Wrong))
+        self.question.is_some() && !self.is_showing_end_text()
+    }
+
+    /// 맞힘이나 정답 글을 보여 주는 중 (곧 닫힌다).
+    fn is_showing_end_text(&self) -> bool {
+        matches!(self.result, Some(MathResult::Right | MathResult::Wrong))
     }
 
     /// 문제 하나를 낼 차례로 넣는다. 같은 순간 두 가지(무기와 밤)가 겹치면 하나를 닫은 뒤에 다음 것이 열린다.
@@ -304,7 +439,12 @@ impl MathQuiz {
             return;
         }
         self.waiting -= 1;
-        self.question = self.maker.next();
+        // 수학·영어 고르기는 비율과 상관없이 한 번 굴린다 → 같은 시드면 같은 차례.
+        let roll = (self.subject_random.next_unit() * 100.0) as u32;
+        // 영어 낱말이 모자라서 문제를 못 만들면 수학 문제를 낸다.
+        self.english = if roll < self.english_percent { self.english_maker.next() } else { None };
+        self.question = if self.english.is_none() { self.maker.next() } else { None };
+        self.crossed_out = [false; ENGLISH_CHOICE_COUNT];
         self.typed.clear();
         self.wrong_count = 0;
         self.result = None;
@@ -319,6 +459,7 @@ impl MathQuiz {
             return None;
         }
         self.question = None;
+        self.english = None;
         self.result = None;
         Some(result)
     }
@@ -358,8 +499,9 @@ fn iya_after(number: u32) -> &'static str {
 mod tests {
     use super::*;
 
+    /// 수학만 내는 창 (이 시험들은 숫자판 규칙을 본다).
     fn open_quiz(seed: u32) -> MathQuiz {
-        let mut quiz = MathQuiz::new(seed);
+        let mut quiz = MathQuiz::with_maker(MathQuestionMaker::new(seed));
         quiz.add_waiting();
         quiz.open_next_waiting();
         quiz

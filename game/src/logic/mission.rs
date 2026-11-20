@@ -95,7 +95,7 @@ impl MissionKind {
     }
 }
 
-/// 성공 글: "미션 성공! 코인 100개를 받았어요!".
+/// 성공 글: "잘했어! 코인 100개를 줄게!".
 pub fn mission_success_text() -> String {
     MISSION_SUCCESS_TEXT.replace("{reward}", &MISSION_REWARD_COINS.to_string())
 }
@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(MissionKind::Coins.miss_says_text(12), "깜짝 미션이야! 밤이 되기 전에 코인 12개를 모아 줘!");
         assert_eq!(MissionKind::Monsters.progress_text(2, 5), "깜짝 미션! 몬스터 2/5 (아침 전까지)");
         assert_eq!(MissionKind::KeepHealth.progress_text(6, 4), "깜짝 미션! 체력 4 이상 지키기, 지금 6 (아침까지)");
-        assert_eq!(mission_success_text(), "미션 성공! 코인 100개를 받았어요!");
+        assert_eq!(mission_success_text(), "잘했어! 코인 100개를 줄게!");
     }
 
     #[test]

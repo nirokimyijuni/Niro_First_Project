@@ -240,8 +240,7 @@ fn us013_coins_can_be_picked_at_night() {
     g.update(&NONE, DAY_SECONDS + 1.0);
     assert!(g.clock.is_night());
     // 밤이 되면 수학 문제가 열린다 (부모님 답). 맞히고 닫은 뒤에 줍는다.
-    let answer = g.math.question().expect("밤 문제").answer;
-    g.math.type_and_submit(answer);
+    g.math.answer_right(); // 수학이든 영어든 (US-087)
     g.update(&NONE, MATH_RIGHT_SHOW_SECONDS);
     assert!(!g.math.is_open());
     touch_coin(&mut g, 1);

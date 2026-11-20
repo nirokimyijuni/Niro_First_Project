@@ -552,8 +552,7 @@ fn zombie_appears_in_the_same_frame_night_starts() {
     let events = g.update(&PlayerInput::default(), FRAME);
     assert_eq!(events, vec![GameEvent::NightStarted]);
     // US-075·BUG-025: 18:00 프레임에는 밤 문제가 먼저 열린다. 닫힌 바로 다음 프레임에 첫 좀비가 나온다.
-    let answer = g.math.question().expect("밤 문제").answer;
-    g.math.type_and_submit(answer);
+    g.math.answer_right(); // 수학이든 영어든 (US-087)
     assert!(g.update(&PlayerInput::default(), MATH_RIGHT_SHOW_SECONDS).is_empty());
     assert!(!g.math.is_open());
     let events = g.update(&PlayerInput::default(), FRAME);

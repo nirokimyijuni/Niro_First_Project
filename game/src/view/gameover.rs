@@ -53,7 +53,9 @@ const HERO_FEET: Vec2 = Vec2::new(VIRTUAL_WIDTH / 2.0, 318.0);
 /// 쓰러진 끝 화면: 어질어질 흔들리는 기울기와 빠르기, 머리 위를 도는 별 수·반지름·도는 빠르기
 const DIZZY_TILT: f32 = 0.12;
 const DIZZY_SWAYS_PER_SECOND: f32 = 0.8;
-const DIZZY_STARS: u32 = 3;
+/// 머리 위 별: 노란 별 5개 (아이 결정 2026-11-20, 쓰러지는 순간과 끝 화면 모두)
+const DIZZY_STARS: u32 = 5;
+const DIZZY_STAR_COLOR: Color = Color::new(1.0, 0.86, 0.22, 1.0);
 const DIZZY_STAR_RADIUS: f32 = 34.0;
 const DIZZY_STAR_TURNS_PER_SECOND: f32 = 0.6;
 /// 춤: 한 번 뛰는 시간, 뛰는 높이. 세 번째마다 두 배로 뛰며 한 바퀴 돈다.
@@ -176,7 +178,7 @@ pub fn draw_fallen_player(texture: &Texture2D, player: &Player, world: &World, f
     for i in 0..DIZZY_STARS {
         let a = turn + i as f32 * TAU / DIZZY_STARS as f32;
         let at = head + vec2(a.cos() * radius, a.sin() * radius * 0.35);
-        draw_star(at, 9.0 * shown, turn * 2.0, Color { a: shown, ..NEW_RECORD });
+        draw_star(at, 9.0 * shown, turn * 2.0, Color { a: shown, ..DIZZY_STAR_COLOR });
     }
 }
 /// 미스의 한 순간.
@@ -241,7 +243,7 @@ fn draw_dizzy_hero(texture: &Texture2D, t: f32) {
     for i in 0..DIZZY_STARS {
         let a = turn + i as f32 * TAU / DIZZY_STARS as f32;
         let at = head + vec2(a.cos() * DIZZY_STAR_RADIUS * grow, a.sin() * DIZZY_STAR_RADIUS * 0.35 * grow);
-        draw_star(at, 10.0 * grow, turn * 2.0, NEW_RECORD);
+        draw_star(at, 10.0 * grow, turn * 2.0, DIZZY_STAR_COLOR);
     }
 }
 
@@ -363,6 +365,13 @@ mod tests {
         assert!(!dance_faces_left(0.0));
         assert!(dance_faces_left(HOP_SECONDS * 1.5));
         assert!(!dance_faces_left(HOP_SECONDS * 2.5));
+    }
+
+    #[test]
+    fn dizzy_stars_are_five_yellow_stars() {
+        assert_eq!(DIZZY_STARS, 5, "아이 결정 2026-11-20: 5개");
+        let c = DIZZY_STAR_COLOR;
+        assert!(c.r > 0.9 && c.g > 0.75 && c.b < 0.4, "노란색: {c:?}");
     }
 
     #[test]

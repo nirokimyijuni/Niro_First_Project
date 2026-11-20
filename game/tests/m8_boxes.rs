@@ -526,8 +526,7 @@ fn go_to_just_before_morning(g: &mut Game) {
     g.missions.turn_off_all(); // 낮 미션 실패 글 기다리기(BUG-034) 없이 바로 밤 문제
     g.update(&PlayerInput::default(), g.clock.seconds_left_in_phase() + 0.01);
     assert!(g.clock.is_night());
-    let answer = g.math.question().expect("밤 문제").answer;
-    g.math.type_and_submit(answer);
+    g.math.answer_right(); // 수학이든 영어든 (US-087)
     g.update(&PlayerInput::default(), MATH_RIGHT_SHOW_SECONDS);
     assert!(!g.math.is_open());
     g.shop.put_on_armor(Armor::Diamond);

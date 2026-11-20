@@ -4,6 +4,7 @@
 //! 원화 한 장(547×428)에 세 캐릭터가 같이 있어서, 게임이 시작할 때
 //! 1) 캐릭터별 네모로 잘라 내고 2) 바깥 종이 배경을 투명하게 만든다.
 
+use super::english::EnglishArt;
 use super::sky::SkyArt;
 use super::title::TitleArt;
 use crate::logic::character::CharacterKind;
@@ -156,6 +157,8 @@ pub struct Assets {
     /// 코드로 만든 하늘 그림 (해·달·구름·빛). 시작할 때 한 번만 만든다.
     pub sky: SkyArt,
     pub m6: M6Art,
+    /// 영어 퀴즈 그림 (US-088, config 낱말 표의 그림). 없는 그림은 빠져 있다.
+    pub english: EnglishArt,
 }
 
 /// 미스·시민·무기 그림. 둘레 여백을 잘라서 그림 아래 끝 = 발이다.
@@ -242,7 +245,7 @@ impl Assets {
             let image = cut_to_ink(&bytes);
             skeletons.push((pixel_texture(&image), pixel_texture(&white_silhouette(&image))));
         }
-        Assets { font, title, characters, zombie, zombie_flash, skeletons, sky: SkyArt::new(), m6: M6Art::load().await }
+        Assets { font, title, characters, zombie, zombie_flash, skeletons, sky: SkyArt::new(), m6: M6Art::load().await, english: EnglishArt::load().await }
     }
 
     pub fn character(&self, kind: CharacterKind) -> &Texture2D {

@@ -69,8 +69,8 @@ fn pass_game_time(g: &mut Game, game_seconds: f32) {
 }
 
 fn answer_quiz_if_open(g: &mut Game) {
-    if let Some(answer) = g.math.question().map(|q| q.answer) {
-        g.math.type_and_submit(answer);
+    if g.math.is_open() {
+        g.math.answer_right(); // 수학이든 영어든 (US-087)
         g.update(&idle(), MATH_RIGHT_SHOW_SECONDS + A_LITTLE);
         assert!(!g.math.is_open());
     }

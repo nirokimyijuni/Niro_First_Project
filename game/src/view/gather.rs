@@ -141,7 +141,7 @@ pub fn draw_pickaxe(c: Vec2, size: f32, tint: Color) {
 }
 
 /// 나무 한 그루 (캘 수 있을 때) 또는 그루터기. `r`은 화면에 가장 가까운 자리다.
-fn draw_tree(r: Rect, ready: bool, amount: f32) {
+pub(crate) fn draw_tree(r: Rect, ready: bool, amount: f32) {
     let trunk_w = r.w * 0.34;
     let tx = r.center().x - trunk_w / 2.0;
     if !ready {

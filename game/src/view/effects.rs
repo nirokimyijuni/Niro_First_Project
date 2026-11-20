@@ -915,7 +915,9 @@ mod tests {
     fn long_message_goes_on_two_lines_bug_031() {
         assert_eq!(message_lines(ENDER_FRUIT_EATEN_TEXT), vec!["애서열매를 먹었어요!", "해변 바닷가에서 쿵 해 봐요"]);
         assert_eq!(message_lines(ENDER_FRUIT_ALREADY_EATEN_TEXT), vec![ENDER_FRUIT_ALREADY_EATEN_TEXT]);
-        assert_eq!(message_lines(CAR_OFF_TEXT), vec![CAR_OFF_TEXT], "18자 이하는 한 줄");
+        // 아이 결정 2026-11-20: "아쉽다!"가 붙어 22자 → 느낌표 뒤에서 두 줄
+        assert_eq!(message_lines(CAR_OFF_TEXT), vec!["아쉽다!", "아침이 와서 자동차에서 내렸어요"]);
+        assert_eq!(message_lines("아침이 와서 자동차에서 내렸어요"), vec!["아침이 와서 자동차에서 내렸어요"], "18자 이하는 한 줄");
         assert_eq!(message_lines("가나다라 마바사아 자차카타 파하가나"), vec!["가나다라 마바사아", "자차카타 파하가나"], "가운데 띄어쓰기");
         for text in [ENDER_FRUIT_EATEN_TEXT, CAR_OFF_TEXT, MISS_FOUND_TEXT] {
             assert!(message_lines(text).iter().all(|l| l.chars().count() <= MESSAGE_SPLIT_CHARS), "{text}");

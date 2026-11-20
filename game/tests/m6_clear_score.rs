@@ -136,9 +136,9 @@ fn fast_forward_clears_after_about_630_seconds() {
     for frame in 0..limit as usize {
         g.combat.zombies.list.clear();
         g.combat.skeletons.clear();
-        // 밤마다 나오는 수학 문제는 바로 맞힌다. 칭찬 글 2초 동안은 게임이 멈춘다.
-        if let Some(answer) = g.math.question().filter(|_| g.math.result().is_none()).map(|q| q.answer) {
-            g.math.type_and_submit(answer);
+        // 밤마다 나오는 잠깐 퀴즈(수학이나 영어)는 바로 맞힌다. 칭찬 글 2초 동안은 게임이 멈춘다.
+        if g.math.is_open() && g.math.result().is_none() {
+            g.math.answer_right();
         }
         if fast_frame(&mut g, &idle()).contains(&GameEvent::GameCleared) {
             cleared_at = Some(frame as f32 * FRAME);

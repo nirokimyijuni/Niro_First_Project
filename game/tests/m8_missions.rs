@@ -60,8 +60,8 @@ fn only_mission(g: &mut Game, kind: MissionKind) {
 }
 
 fn answer_right_and_close(g: &mut Game) {
-    let answer = g.math.question().expect("문제가 열려 있다").answer;
-    g.math.type_and_submit(answer);
+    assert!(g.math.is_open(), "문제가 열려 있다");
+    g.math.answer_right(); // 수학이든 영어든 (US-087)
     g.update(&idle(), MATH_RIGHT_SHOW_SECONDS + A_LITTLE);
     assert!(!g.math.is_open());
 }
@@ -293,14 +293,20 @@ fn mission_draws_do_not_change_boxes_miss_weapons_ores_or_math() {
             assert_eq!(mine(&mut b.gathering), expected);
         }
 
-        // 수학 문제: 미션 없는 문제 만들기와 같은 차례.
+        // 잠깐 퀴즈: 두 판이 같은 차례로 수학·영어를 내고, 수학 문제는 미션 없는 문제 만들기와 같은 차례.
         let mut maker = MathQuestionMaker::new(seed);
         for _ in 0..5 {
-            let expected = maker.next();
             for g in [&mut a, &mut b] {
                 g.math.add_waiting();
                 g.math.open_next_waiting();
-                assert_eq!(g.math.question().cloned(), expected);
+            }
+            assert_eq!(a.math.subject(), b.math.subject());
+            assert_eq!(a.math.english_question(), b.math.english_question());
+            if let Some(question) = a.math.question().cloned() {
+                assert_eq!(Some(question), maker.next());
+                assert_eq!(b.math.question().cloned(), a.math.question().cloned());
+            }
+            for g in [&mut a, &mut b] {
                 answer_right_and_close(g);
             }
         }
@@ -869,7 +875,7 @@ fn mission_now_and_texts_for_the_screen() {
     assert_eq!(MissionKind::Coins.miss_says_text(MissionKind::Coins.goal_on_day(2)), "깜짝 미션이야! 밤이 되기 전에 코인 12개를 모아 줘!");
     assert_eq!(MissionKind::FindMiss.progress_text(0, 1), "깜짝 미션! 미스 찾기 0/1 (밤 전까지)");
     assert_eq!(MissionKind::Monsters.progress_text(2, 5), "깜짝 미션! 몬스터 2/5 (아침 전까지)");
-    assert_eq!(mission_success_text(), "미션 성공! 코인 100개를 받았어요!");
+    assert_eq!(mission_success_text(), "잘했어! 코인 100개를 줄게!");
     assert_eq!(mission_fail_text(), "아쉽다! 다음 미션도 해 보자");
     assert_eq!((MISSION_MISS_SAYS_SECONDS, MISSION_SUCCESS_SHOW_SECONDS, MISSION_FAIL_SHOW_SECONDS), (3.0, 3.0, 2.0));
 

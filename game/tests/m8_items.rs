@@ -131,9 +131,8 @@ fn run_until_morning(g: &mut Game) -> Vec<ItemEvent> {
     for _ in 0..2000 {
         let events = g.update_with_time_scale(&idle(), FRAME, 600.0);
         // 밤 수학 문제가 열리면 맞히고 닫는다.
-        if let Some(q) = g.math.question() {
-            let answer = q.answer;
-            g.math.type_and_submit(answer);
+        if g.math.is_open() {
+            g.math.answer_right(); // 수학이든 영어든 (US-087)
             g.update(&idle(), MATH_RIGHT_SHOW_SECONDS + A_LITTLE);
         }
         item_events.extend(g.take_item_events());

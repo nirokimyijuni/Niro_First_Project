@@ -13,7 +13,7 @@ use logic::player::PlayerInput;
 use macroquad::prelude::*;
 use view::assets::Assets;
 use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
-use view::pause::{draw_pause, pause_choose, PauseKeys, PauseTap};
+use view::pause::{draw_pause, pause_choose, PauseBuddy, PauseKeys, PauseTap};
 use view::shop::Pocket;
 use view::effects::Effects;
 use view::gameover::{EndScreen, RETRY_BUTTON};
@@ -23,7 +23,7 @@ use view::input::{
     pocket_keys_pressed, switch_weapon_pressed, up_enters, MenuInput,
 };
 use view::gather::GatherView;
-use view::math::{draw_math, pad_key_at};
+use view::math::{apply_quiz_input, draw_math};
 use view::touch::{
     draw_back_button, draw_rotate_hint, draw_touch_controls, next_touch_mode, play_buttons_with_mine, show_rotate_hint, ButtonKind, TouchControls,
     TouchFrame, BACK_BUTTON,
@@ -56,6 +56,8 @@ enum Scene {
         paused: bool,
         /// 멈춤 창에서 ↑/↓로 고른 칸 (주황색). 창을 열 때마다 "이어서 하기"로 돌아간다.
         pause_pick: PauseTap,
+        /// 멈춤 창 옆에서 기다려 주는 친구 (아이 결정 2026-11-20). 창을 열 때마다 랜덤으로 다시 고른다.
+        pause_buddy: PauseBuddy,
         /// 가방 (US-091): 열려 있는지, 장난감 상자 반짝임, 아래 키 안내 8초. 열린 동안은 멈춤 창처럼 logic을 부르지 않는다.
         bag: BagView,
     },
@@ -64,7 +66,7 @@ enum Scene {
 fn start_play(kind: CharacterKind) -> Scene {
     // 판마다 좀비가 다르게 나오도록 지금 시각(밀리초)을 시드로 쓴다.
     let seed = (macroquad::miniquad::date::now() * 1000.0) as u64 as u32;
-    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false, pause_pick: PauseTap::Resume, bag: BagView::new() }
+    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false, pause_pick: PauseTap::Resume, pause_buddy: PauseBuddy::Miss, bag: BagView::new() }
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
@@ -129,6 +131,14 @@ fn bag_input(key: bool, esc: bool, tap: Option<Vec2>, touch_mode: bool) -> Optio
 /// 폰 캐기 버튼 글: 손 닿는 것(캐기·들어가기·만들기 …)이 먼저, 없으면 해변 쿵 (US-081/082). 버튼을 안 보이면 None.
 fn mine_button_label(game: &Game) -> Option<&'static str> {
     game.usable_in_reach().map(|u| u.button_text()).or_else(|| game.slam_power_here().map(|_| config::SLAM_BUTTON_TEXT))
+}
+
+/// 멈춤 창 친구의 그림: 캐릭터는 손그림 그대로, 미스는 miss.png.
+fn pause_buddy_texture(assets: &Assets, buddy: PauseBuddy) -> &Texture2D {
+    match buddy {
+        PauseBuddy::Hero(kind) => assets.character(kind),
+        PauseBuddy::Miss => &assets.m6.miss,
+    }
 }
 
 /// 플레이 중 Esc·"멈춤" 버튼으로 멈춘 상태에서 받은 입력 (부모님 요청 2026-11-14, 키보드 고르기 2026-11-15).
@@ -286,7 +296,7 @@ async fn main() {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, effects, ended, walk_lock, gathered, shop_view, paused, pause_pick, bag } => {
+                Scene::Play { game, fast_forward, effects, ended, walk_lock, gathered, shop_view, paused, pause_pick, pause_buddy, bag } => {
                     // 상점의 "샀어요!"는 진짜 시간으로 흐른다 (게임은 멈춰 있어도)
                     shop_view.update(dt);
                     // 가방 버튼 반짝임과 아래 키 안내 8초: 창(멈춤·가방·퀴즈·상점·제작대)이 열린 동안은 안내 시간이 줄지 않는다 (임시-76)
@@ -368,6 +378,7 @@ async fn main() {
                         // 문제 창은 그대로 열려 있고, 이어서 하면 그 창으로 돌아온다
                         *paused = true;
                         *pause_pick = PauseTap::Resume;
+                        *pause_buddy = PauseBuddy::pick((macroquad::miniquad::date::now() * 1000.0) as u64 as u32);
                         game.mine_held = false;
                         None
                     } else if back == Some(BackAction::Leave) || retry {
@@ -380,12 +391,10 @@ async fn main() {
                         game.mine_held = false;
                         None
                     } else {
-                        // 문제 창이 열린 동안: 숫자 키·숫자판만 받고, 걷기·점프·공격·바꾸기·빨리감기는 게임에 넣지 않는다.
+                        // 문제 창이 열린 동안: 숫자 키·숫자판(수학) 또는 1~4 키·보기 칸(영어)만 받고,
+                        // 걷기·점프·공격·바꾸기·빨리감기는 게임에 넣지 않는다.
                         if quiz_open {
-                            let tapped = menu.tap.and_then(pad_key_at);
-                            for key in quiz_keys.iter().copied().chain(tapped) {
-                                key.apply(&mut game.math);
-                            }
+                            apply_quiz_input(&mut game.math, &quiz_keys, menu.tap);
                         } else if craft_open {
                             // "…을 만들었어요!"는 제작대 화면이 바로 보여 준다 (craft::draw_craft)
                             if let Some(tap) = menu.tap.and_then(craft_tap_at) {
@@ -508,13 +517,13 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, effects, ended, gathered, shop_view, paused, pause_pick, bag, .. } => {
+            Scene::Play { game, fast_forward, effects, ended, gathered, shop_view, paused, pause_pick, pause_buddy, bag, .. } => {
                 screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode, gathered, bag);
                 if ended.is_none() && game.math.is_open() {
-                    draw_math(&text, &game.math, &assets.m6.miss);
+                    draw_math(&text, &game.math, &assets.m6.miss, &assets.english);
                     if *paused {
                         // 멈춤 창이 문제 창 위에 뜬다. 이어서 하면 문제 창이 그대로 보인다
-                        draw_pause(&text, touch_mode, *pause_pick);
+                        draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32));
                     } else if touch_mode {
                         draw_back_button(&text);
                     }
@@ -523,7 +532,7 @@ async fn main() {
                 } else if ended.is_none() && game.shop.is_open() {
                     draw_shop(&text, game, shop_view, touch_mode);
                 } else if ended.is_none() && *paused {
-                    draw_pause(&text, touch_mode, *pause_pick);
+                    draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32));
                 } else if ended.is_none() && bag.open {
                     let show_recipe = game.world.workbench().is_some();
                     draw_bag_window(&text, game, &assets.m6, bag, touch_mode, show_recipe);

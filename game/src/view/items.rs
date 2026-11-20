@@ -43,9 +43,11 @@ pub const GOLDEN_PUFF_SECONDS: f32 = 1.0;
 pub const NEEDLE_SECONDS: f32 = 0.8;
 /// 침이 날아가는 거리: 화면 반쯤을 넘게 (화면 안 몬스터가 다 쓰러지니 양쪽 끝까지)
 const NEEDLE_FLY: f32 = 560.0;
-const NEEDLE_BODY: Color = Color::new(0.80, 0.95, 1.0, 1.0);
-const NEEDLE_TIP: Color = Color::new(0.85, 0.88, 0.92, 1.0);
-const NEEDLE_LIQUID: Color = Color::new(0.55, 0.92, 0.35, 1.0);
+/// 바늘 총알은 은색 (아이 결정 2026-11-20)
+const NEEDLE_BODY: Color = Color::new(0.78, 0.80, 0.84, 1.0);
+const NEEDLE_TIP: Color = Color::new(0.94, 0.95, 0.97, 1.0);
+/// 몸통 가운데 반짝이는 은빛 줄
+const NEEDLE_SHINE: Color = Color::new(0.96, 0.97, 1.0, 1.0);
 const NEEDLE_LINE: Color = Color::new(0.13, 0.16, 0.36, 1.0);
 
 // ---- 쿵 (아이: "쿵! 몬스터들을 다 없애버려!" + 화면 흔들기) ----
@@ -144,13 +146,13 @@ pub fn draw_golden_puff(at: Vec2, t: f32) {
     }
 }
 
-/// 침 총알 하나: 몸통(초록 약), 바늘 끝. `dir`은 1(오른쪽) 또는 -1(왼쪽).
+/// 침 총알 하나: 은색 몸통과 반짝이 줄, 바늘 끝. `dir`은 1(오른쪽) 또는 -1(왼쪽).
 fn draw_needle(p: Vec2, dir: f32, alpha: f32) {
     let len = 34.0;
     let back = p - vec2(dir * len, 0.0);
     draw_line(back.x, back.y, p.x - dir * 10.0, p.y, 9.0, Color { a: alpha, ..NEEDLE_LINE });
     draw_line(back.x + dir, back.y, p.x - dir * 11.0, p.y, 6.0, Color { a: alpha, ..NEEDLE_BODY });
-    draw_line(back.x + dir * 6.0, back.y, p.x - dir * 16.0, p.y, 3.0, Color { a: alpha, ..NEEDLE_LIQUID });
+    draw_line(back.x + dir * 6.0, back.y, p.x - dir * 16.0, p.y, 3.0, Color { a: alpha, ..NEEDLE_SHINE });
     draw_line(p.x - dir * 10.0, p.y, p.x, p.y, 2.0, Color { a: alpha, ..NEEDLE_TIP });
     // 뒤에 하얀 바람 줄
     draw_line(back.x - dir * 4.0, back.y, back.x - dir * 22.0, back.y, 2.0, Color { a: alpha * 0.6, ..WHITE });
@@ -244,6 +246,16 @@ pub fn draw_item_picture(art: &M6Art, picture: ItemPicture, c: Vec2, size: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn needle_bullets_are_silver() {
+        // 은색: 빨강·초록·파랑이 거의 같고 밝다 (예전 초록 약 없음)
+        for c in [NEEDLE_BODY, NEEDLE_TIP, NEEDLE_SHINE] {
+            let (hi, lo) = (c.r.max(c.g).max(c.b), c.r.min(c.g).min(c.b));
+            assert!(hi - lo < 0.08 && lo > 0.7, "은색이 아니다: {c:?}");
+        }
+        assert!(NEEDLE_SHINE.r > NEEDLE_BODY.r, "반짝이 줄이 몸통보다 밝다");
+    }
 
     #[test]
     fn shake_fades_out_and_stops() {

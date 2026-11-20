@@ -2,12 +2,13 @@
 //! 숫자판·숫자 키를 `press_digit`·`erase`·`submit`으로 넘긴다.
 //! 왼쪽: 미스와 말풍선, 문제 문장, 넣은 답 칸, 남은 기회. 오른쪽: 큰 숫자판 12개.
 
+use super::english::{choice_slot_at, draw_english, slot_for_digit, EnglishArt};
 use super::gameover::{draw_confetti, miss_dance};
 use super::hud::draw_pill;
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::text::TextPainter;
 use crate::config::{MATH_MISS_ASK_TEXT, MATH_RIGHT_SHOW_SECONDS, MATH_TITLE_TEXT, MATH_TRY_AGAIN_TEXT};
-use crate::logic::math::{MathQuiz, MathResult};
+use crate::logic::math::{MathQuiz, MathResult, QuizSubject};
 use macroquad::prelude::*;
 
 /// 숫자판 버튼 하나가 하는 일.
@@ -54,7 +55,7 @@ const PAD_ROWS: [[MathKey; 3]; 4] = [
 ];
 
 /// 창 판. 왼쪽은 터치 "◀ 고르기" 버튼(x 12~168)이 보이도록 비운다.
-const PANEL: Rect = Rect::new(178.0, 8.0, 774.0, 524.0);
+pub const PANEL: Rect = Rect::new(178.0, 8.0, 774.0, 524.0);
 /// 왼쪽 칸 (말풍선, 문제 문장, 답 칸): 판 왼쪽 안쪽 ~ 숫자판 앞
 const LEFT_X: f32 = 196.0;
 const LEFT_RIGHT: f32 = PAD_LEFT - 18.0;
@@ -62,7 +63,7 @@ const TITLE_Y: f32 = 62.0;
 const MISS_FEET: Vec2 = Vec2::new(250.0, 212.0);
 const MISS_HEIGHT: f32 = 112.0;
 const BUBBLE: Rect = Rect::new(318.0, 92.0, LEFT_RIGHT - 318.0, 104.0);
-const BUBBLE_SIZE: f32 = 28.0;
+pub const BUBBLE_SIZE: f32 = 28.0;
 /// 문제 문장: 이 자리에서 시작해 줄마다 내려간다. 마지막 줄은 답 칸 위.
 pub const QUESTION_TOP: f32 = 228.0;
 pub const QUESTION_SIZE: f32 = 30.0;
@@ -138,9 +139,58 @@ fn miss_says(quiz: &MathQuiz) -> String {
     }
 }
 
+/// 말풍선에 들어갈 줄 수 (시험용: 영어 정답 글이 두 줄 안에 드는지).
+#[cfg(test)]
+pub fn bubble_line_count(says: &str, width: impl Fn(&str) -> f32) -> usize {
+    bubble_lines(says, width).len()
+}
+
+/// 문제 창이 열린 동안 받은 숫자 키와 탭을 문제에 넘긴다.
+/// 수학: 숫자 키·Backspace·Enter와 숫자판. 영어: 숫자 키 1~4와 보기 칸 (숫자판은 없고, 다른 키는 버린다).
+/// 영어는 한 프레임에 하나만 고른다 (두 키를 같이 눌러 기회 두 번이 한꺼번에 사라지지 않게).
+pub fn apply_quiz_input(quiz: &mut MathQuiz, keys: &[MathKey], tap: Option<Vec2>) {
+    match quiz.subject() {
+        Some(QuizSubject::Math) => {
+            for key in keys.iter().copied().chain(tap.and_then(pad_key_at)) {
+                key.apply(quiz);
+            }
+        }
+        Some(QuizSubject::English) => {
+            let from_keys = keys.iter().filter_map(|k| match k {
+                MathKey::Digit(d) => slot_for_digit(*d),
+                _ => None,
+            });
+            for slot in from_keys.chain(tap.and_then(choice_slot_at)) {
+                if quiz.pick_choice(slot).is_some() {
+                    break;
+                }
+            }
+        }
+        None => {}
+    }
+}
+
 /// 문제 창 전체. 판은 왼쪽 터치 "◀ 고르기" 자리를 가리지 않는다 (main이 그 버튼을 그린다).
-pub fn draw_math(text: &TextPainter, quiz: &MathQuiz, miss: &Texture2D) {
+/// 영어 문제면 숫자판 대신 보기 4개를 그린다 (`view::english`).
+pub fn draw_math(text: &TextPainter, quiz: &MathQuiz, miss: &Texture2D, english: &EnglishArt) {
+    if let Some(question) = quiz.english_question() {
+        draw_frame(text, quiz, miss);
+        draw_english(text, quiz, question, english);
+        return;
+    }
     let Some(question) = quiz.question() else { return };
+    draw_frame(text, quiz, miss);
+
+    // 문제 문장 (식은 보여 주지 않는다)
+    let lines = wrap_lines(&question.text, LEFT_RIGHT - LEFT_X, |s| text.width(s, QUESTION_SIZE));
+    for (i, line) in lines.iter().enumerate() {
+        text.left(line, LEFT_X, QUESTION_TOP + QUESTION_SIZE + i as f32 * QUESTION_LINE, QUESTION_SIZE, WHITE);
+    }
+    draw_answer_and_pad(text, quiz);
+}
+
+/// 수학·영어가 같이 쓰는 창: 어둡게 덮기, 판, 제목, 미스와 말풍선, 맞히면 꽃가루.
+fn draw_frame(text: &TextPainter, quiz: &MathQuiz, miss: &Texture2D) {
     let right = quiz.result() == Some(MathResult::Right);
     draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
     draw_rectangle(PANEL.x, PANEL.y, PANEL.w, PANEL.h, PANEL_FILL);
@@ -161,13 +211,10 @@ pub fn draw_math(text: &TextPainter, quiz: &MathQuiz, miss: &Texture2D) {
     for (i, line) in lines.iter().enumerate() {
         text.centered(line, BUBBLE.x + BUBBLE.w / 2.0, first + i as f32 * size * 1.2, size, color);
     }
+}
 
-    // 문제 문장 (식은 보여 주지 않는다)
-    let lines = wrap_lines(&question.text, LEFT_RIGHT - LEFT_X, |s| text.width(s, QUESTION_SIZE));
-    for (i, line) in lines.iter().enumerate() {
-        text.left(line, LEFT_X, QUESTION_TOP + QUESTION_SIZE + i as f32 * QUESTION_LINE, QUESTION_SIZE, WHITE);
-    }
-
+/// 수학: 넣은 답 칸, 남은 기회, 숫자판.
+fn draw_answer_and_pad(text: &TextPainter, quiz: &MathQuiz) {
     // 넣은 답 칸과 남은 기회
     let b = ANSWER_BOX;
     draw_rectangle(b.x, b.y, b.w, b.h, BOX_FILL);
@@ -295,6 +342,62 @@ mod tests {
         assert_eq!(wrap_lines("가나 다라 마", 5.0, wide(1.0)), ["가나 다라", "마"]);
         assert_eq!(wrap_lines("가나다라마바", 4.0, wide(1.0)), ["가나다라", "마바"]);
         assert!(wrap_lines("", 4.0, wide(1.0)).is_empty());
+    }
+
+    fn english_quiz(seed: u32) -> MathQuiz {
+        use crate::logic::english::EnglishQuestionMaker;
+        let mut quiz = MathQuiz::with_subjects(MathQuestionMaker::new(seed), EnglishQuestionMaker::new(seed), seed, 100);
+        quiz.add_waiting();
+        quiz.open_next_waiting();
+        assert_eq!(quiz.subject(), Some(QuizSubject::English));
+        quiz
+    }
+
+    #[test]
+    fn english_number_keys_and_taps_pick_a_choice() {
+        use crate::view::english::choice_rect;
+        // 숫자 키 1~4 = 보기 1~4번
+        let mut quiz = english_quiz(5);
+        let answer = quiz.english_question().unwrap().answer;
+        apply_quiz_input(&mut quiz, &[MathKey::Digit(answer as u32 + 1)], None);
+        assert_eq!(quiz.result(), Some(MathResult::Right));
+
+        // 탭도 같다. 숫자판 자리를 눌러도, 5~9·0·지우기·확인을 눌러도 아무 일이 없다
+        let mut quiz = english_quiz(6);
+        let answer = quiz.english_question().unwrap().answer;
+        let keys = [MathKey::Digit(0), MathKey::Digit(5), MathKey::Digit(9), MathKey::Erase, MathKey::Submit];
+        apply_quiz_input(&mut quiz, &keys, pad_buttons().next().map(|(r, _)| r.center()));
+        assert_eq!((quiz.result(), quiz.tries_left()), (None, 2));
+        apply_quiz_input(&mut quiz, &[], Some(choice_rect(answer).center()));
+        assert_eq!(quiz.result(), Some(MathResult::Right));
+    }
+
+    #[test]
+    fn english_crossed_out_choice_does_nothing_and_one_pick_per_frame() {
+        let mut quiz = english_quiz(7);
+        let answer = quiz.english_question().unwrap().answer;
+        let wrong: Vec<u32> = (0..4).filter(|s| *s != answer).map(|s| s as u32 + 1).collect();
+        // 틀린 키 두 개를 한 프레임에 눌러도 기회는 하나만 준다
+        apply_quiz_input(&mut quiz, &[MathKey::Digit(wrong[0]), MathKey::Digit(wrong[1])], None);
+        assert_eq!((quiz.result(), quiz.tries_left()), (Some(MathResult::TryAgain), 1));
+        assert!(quiz.is_crossed_out(wrong[0] as usize - 1));
+        assert_eq!(miss_says(&quiz), MATH_TRY_AGAIN_TEXT);
+        // 흐려진 칸은 다시 눌러도 아무 일이 없다
+        apply_quiz_input(&mut quiz, &[MathKey::Digit(wrong[0])], None);
+        assert_eq!(quiz.tries_left(), 1);
+        apply_quiz_input(&mut quiz, &[MathKey::Digit(wrong[1])], None);
+        assert_eq!(quiz.result(), Some(MathResult::Wrong));
+        let word = quiz.english_question().unwrap().answer_word().word;
+        assert!(miss_says(&quiz).contains(word), "말풍선에 정답 낱말");
+    }
+
+    #[test]
+    fn math_quiz_ignores_english_choice_taps() {
+        let mut quiz = MathQuiz::with_maker(MathQuestionMaker::new(3));
+        quiz.add_waiting();
+        quiz.open_next_waiting();
+        apply_quiz_input(&mut quiz, &[MathKey::Digit(1)], Some(crate::view::english::choice_rect(0).center()));
+        assert_eq!(quiz.typed(), "1", "수학은 숫자 키 그대로, 보기 칸 자리는 숫자판이 아니다");
     }
 
     #[test]

@@ -413,6 +413,100 @@ pub const MATH_SUBTRACT_STORIES: &[&str] = &[
     "{이름:이} 사탕 {a}개 중에서 {b}개를 친구에게 나눠 줬어요. 몇 개 남았을까요?",
 ];
 
+// ---- D82·D106 잠깐 퀴즈 영어 낱말 문제 (US-087·088, [임시-56]~[임시-62]) ----
+// 나오는 때, 멈춤, 맞힘·정답 글 시간(MATH_RIGHT_SHOW_SECONDS, MATH_WRONG_SHOW_SECONDS),
+// 제목, 미스의 말, 남은 기회 글은 수학 문제와 같은 값을 쓴다.
+
+/// 임시-56 잠깐 퀴즈가 열릴 때 영어 문제가 나올 확률 (%). 나머지는 수학. 0이면 수학만, 100이면 영어만.
+pub const ENGLISH_QUIZ_PERCENT: u32 = 50;
+/// 임시-58 영어 문제 한 문제의 기회 (부모님 확정)
+pub const ENGLISH_TRIES: u32 = 2;
+/// 임시-58 두 번 다 틀리면 줄어드는 체력. 갑옷이어도 준다 (수학과 같다)
+pub const ENGLISH_WRONG_HP_LOSS: u32 = 2;
+/// 임시-57 한 문제의 보기 수 (2×2 칸)
+pub const ENGLISH_CHOICE_COUNT: usize = 4;
+/// 수학·영어 고르기와 영어 문제 뽑기를 상자·미스·광석·수학·미션 뽑기와 따로 굴리려고 게임 시드에 섞는 값
+pub const QUIZ_SUBJECT_SEED_MIX: u32 = 0x5EED_0056;
+pub const ENGLISH_SEED_MIX: u32 = 0x5EED_0082;
+/// 임시-61 묻는 글. (가) 그림 보고 낱말 고르기, (나) 낱말 보고 그림 고르기
+pub const ENGLISH_PICTURE_TO_WORD_ASK_TEXT: &str = "이 그림은 영어로 뭘까?";
+pub const ENGLISH_WORD_TO_PICTURE_ASK_TEXT: &str = "이 낱말에 맞는 그림은?";
+/// 임시-58 두 번 다 틀렸을 때 글. □에 정답 낱말이 들어간다 ("너무 아쉽다! 정답은 Kite 야")
+pub const ENGLISH_WRONG_TEXT: &str = "너무 아쉽다! 정답은 □ 야";
+
+/// 임시-60 Tree는 그림 파일 대신 게임의 나무 그림(코드로 그린 것)을 쓴다. 로건은 이 이름을 보면 나무를 그린다.
+pub const ENGLISH_GAME_TREE_PICTURE: &str = "game-tree";
+/// 임시-59 영어 낱말 표 (48개, 부모님이 준 차례. Pole은 2026-11-20 부모님 결정으로 뺌). 한 줄에 (낱말, 그림 이름) 하나.
+/// 낱말은 앞 글자만 대문자. 그림은 헤일리가 그린 `en-<소문자 낱말>.png` (D106).
+/// 줄을 더하면 문제에 나오고, 빼면 안 나온다. 그림이 늦은 낱말은 잠시 빼 둔다.
+/// 움직임 낱말(cry, fly 등)은 나중에 넣는다 (D104).
+pub const ENGLISH_WORDS: &[(&str, &str)] = &[
+    ("Acorn", "en-acorn.png"),
+    ("Apron", "en-apron.png"),
+    ("Baby", "en-baby.png"),
+    ("Fan", "en-fan.png"),
+    ("Jacket", "en-jacket.png"),
+    ("Kangaroo", "en-kangaroo.png"),
+    ("Lamp", "en-lamp.png"),
+    ("Maple", "en-maple.png"),
+    ("Paper", "en-paper.png"),
+    ("Radio", "en-radio.png"),
+    ("Table", "en-table.png"),
+    ("Beehive", "en-beehive.png"),
+    ("Cheek", "en-cheek.png"),
+    ("Cheese", "en-cheese.png"),
+    ("Elephant", "en-elephant.png"),
+    ("Feet", "en-feet.png"),
+    ("Hen", "en-hen.png"),
+    ("Net", "en-net.png"),
+    ("Seed", "en-seed.png"),
+    ("Teeth", "en-teeth.png"),
+    ("Tree", ENGLISH_GAME_TREE_PICTURE),
+    ("Vest", "en-vest.png"),
+    ("Dish", "en-dish.png"),
+    ("Fire", "en-fire.png"),
+    ("Kite", "en-kite.png"),
+    ("Knife", "en-knife.png"),
+    ("Lizard", "en-lizard.png"),
+    ("Pine", "en-pine.png"),
+    ("Slide", "en-slide.png"),
+    ("Bib", "en-bib.png"),
+    ("Bone", "en-bone.png"),
+    ("Cone", "en-cone.png"),
+    ("Doll", "en-doll.png"),
+    ("Hole", "en-hole.png"),
+    ("Hose", "en-hose.png"),
+    ("Mole", "en-mole.png"),
+    ("Mop", "en-mop.png"),
+    ("Phone", "en-phone.png"),
+    ("Rope", "en-rope.png"),
+    ("Rose", "en-rose.png"),
+    ("Smoke", "en-smoke.png"),
+    ("Ice", "en-ice.png"),
+    ("King", "en-king.png"),
+    ("Sky", "en-sky.png"),
+    ("Watch", "en-watch.png"),
+    ("Candy", "en-candy.png"),
+    ("Insect", "en-insect.png"),
+    ("Tent", "en-tent.png"),
+];
+/// 임시-62 그림이 비슷해 헷갈리는 묶음 (D106). 한 묶음의 두 낱말은 한 문제의 보기 4개에 함께 나오지 않는다.
+/// 한 낱말이 여러 묶음에 들 수 있다 (Pine). 줄을 더하면 묶음이 는다.
+pub const ENGLISH_CONFUSING_GROUPS: &[&[&str]] = &[
+    &["Pine", "Tree", "Maple"],
+    &["Feet", "Teeth", "Cheek"],
+    &["Hole", "Mole"],
+    &["Apron", "Bib", "Vest", "Jacket"],
+    &["Baby", "Doll", "King"],
+    &["Fire", "Smoke", "Sky"],
+    &["Hose", "Rope", "Mop"],
+    &["Watch", "Phone"],
+    &["Acorn", "Seed"],
+    &["Cone", "Tent", "Pine"],
+    &["Insect", "Beehive"],
+    &["Ice", "Candy"],
+];
+
 // ---- M7 제작과 동굴 (stories/backlog.md M7 맨 위 표. 임시-N은 아이·부모가 언제든 바꿀 수 있다) ----
 // x는 모두 몸 가운데다. 시간은 모두 실제 시간이라 빨리감기로 빨라지지 않는다.
 
@@ -619,7 +713,7 @@ pub const CRAFT_STEPS_TEXT: &str = "① 만들 것을 골라요 → ② 재료�
 /// 임시-41 자동차를 타면 걷는 빠르기가 이만큼 곱해진다 (부모님: 3배, 220 → 660). 스케이트와 겹쳐 곱하지 않는다.
 pub const CAR_SPEED_MULTIPLIER: f32 = 3.0;
 pub const CAR_ON_TEXT: &str = "자동차를 탔어요! 슝!";
-pub const CAR_OFF_TEXT: &str = "아침이 와서 자동차에서 내렸어요";
+pub const CAR_OFF_TEXT: &str = "아쉽다! 아침이 와서 자동차에서 내렸어요";
 /// 자동차를 타고 움직이는 동안 떠오르는 글 (아이: 자동차 소리).
 pub const CAR_VROOM_TEXT: &str = "부릉!";
 
@@ -761,7 +855,7 @@ pub const MISSION_FIND_MISS_PROGRESS: &str = "깜짝 미션! 미스 찾기 {now}
 pub const MISSION_MONSTERS_PROGRESS: &str = "깜짝 미션! 몬스터 {now}/{n} (아침 전까지)";
 pub const MISSION_KEEP_HEALTH_PROGRESS: &str = "깜짝 미션! 체력 {n} 이상 지키기, 지금 {now} (아침까지)";
 /// [임시-55] 성공·실패 글. 꾸짖는 말은 쓰지 않는다. 성공 글의 "{reward}"는 `MISSION_REWARD_COINS`로 바뀐다.
-pub const MISSION_SUCCESS_TEXT: &str = "미션 성공! 코인 {reward}개를 받았어요!";
+pub const MISSION_SUCCESS_TEXT: &str = "잘했어! 코인 {reward}개를 줄게!";
 pub const MISSION_FAIL_TEXT: &str = "아쉽다! 다음 미션도 해 보자";
 /// [임시-55] 보여 주는 시간 (실제 초). 미스 말풍선과 글이 보이는 동안에도 게임은 멈추지 않는다.
 pub const MISSION_MISS_SAYS_SECONDS: f32 = 3.0;

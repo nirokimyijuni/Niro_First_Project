@@ -5,6 +5,7 @@
 use super::hud::draw_pill;
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::text::TextPainter;
+use crate::logic::character::CharacterKind;
 use macroquad::prelude::*;
 
 const PANEL: Rect = Rect::new(250.0, 90.0, 460.0, 380.0);
@@ -26,6 +27,50 @@ const OTHER_FILL: Color = Color::new(0.30, 0.62, 0.90, 1.0);
 const PICK_RING_COLOR: Color = WHITE;
 const PICK_RING: f32 = 7.0;
 const TITLE: Color = Color::new(1.0, 0.86, 0.22, 1.0);
+
+/// 멈춤 창 옆에서 기다려 주는 친구 (아이 결정 2026-11-20): 창이 열릴 때마다 넷 중 하나를 랜덤으로 고른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseBuddy {
+    Hero(CharacterKind),
+    Miss,
+}
+
+impl PauseBuddy {
+    pub const ALL: [PauseBuddy; 4] =
+        [PauseBuddy::Hero(CharacterKind::Niro), PauseBuddy::Hero(CharacterKind::Ellie), PauseBuddy::Hero(CharacterKind::Logan), PauseBuddy::Miss];
+
+    /// 아무 수(`roll`, 예: 지금 시각 밀리초)로 넷 중 하나를 고른다.
+    pub fn pick(roll: u32) -> PauseBuddy {
+        // 섞어서 밀리초가 비슷해도 고르게 나오게 한다
+        let mixed = roll.wrapping_mul(0x9E37_79B9) >> 16;
+        PauseBuddy::ALL[mixed as usize % PauseBuddy::ALL.len()]
+    }
+}
+
+/// 친구가 서는 칸 (창 오른쪽 바깥, 창·버튼과 안 겹친다). 발은 칸 아래 가운데.
+const BUDDY_BOX: Rect = Rect::new(PANEL.x + PANEL.w + 20.0, 200.0, 210.0, 230.0);
+/// 통통: 살짝만 뛴다 (가상 픽셀), 한 번 뛰는 데 걸리는 초
+const BUDDY_HOP: f32 = 10.0;
+const BUDDY_HOP_SECONDS: f32 = 0.9;
+
+/// `t`초에 친구가 땅에서 뜬 높이 (0 ~ `BUDDY_HOP`). 부드럽게 통통.
+fn buddy_lift(t: f32) -> f32 {
+    ((t / BUDDY_HOP_SECONDS).fract() * std::f32::consts::PI).sin().abs() * BUDDY_HOP
+}
+
+/// 그림 비율을 지키며 `BUDDY_BOX`(뛰는 높이 빼고) 안에 들어가는 크기.
+fn buddy_size(texture_w: f32, texture_h: f32) -> Vec2 {
+    let room = vec2(BUDDY_BOX.w, BUDDY_BOX.h - BUDDY_HOP);
+    let k = (room.x / texture_w.max(1.0)).min(room.y / texture_h.max(1.0));
+    vec2(texture_w * k, texture_h * k)
+}
+
+/// 기다려 주는 친구 그리기. `seconds`: 통통 뛰는 시간.
+fn draw_buddy(texture: &Texture2D, seconds: f32) {
+    let size = buddy_size(texture.width(), texture.height());
+    let feet = vec2(BUDDY_BOX.center().x, BUDDY_BOX.bottom() - buddy_lift(seconds));
+    draw_texture_ex(texture, feet.x - size.x / 2.0, feet.y - size.y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+}
 
 /// 멈춤 창에서 누른 것.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,8 +129,10 @@ fn draw_choice(r: Rect, picked: bool) {
 
 /// 멈춤 창 그리기 (화면 좌표). `touch_mode`가 아니면 "이어서 하기" 아래에 "Esc"를 작게 쓴다.
 /// `picked` 칸이 주황색이다 (처음은 이어서 하기라 예전 모습 그대로).
-pub fn draw_pause(text: &TextPainter, touch_mode: bool, picked: PauseTap) {
+/// `buddy`: 창 옆에서 기다려 주는 친구 그림과 통통 뛰는 시간(초).
+pub fn draw_pause(text: &TextPainter, touch_mode: bool, picked: PauseTap, buddy: (&Texture2D, f32)) {
     draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
+    draw_buddy(buddy.0, buddy.1);
     draw_rectangle(PANEL.x, PANEL.y, PANEL.w, PANEL.h, PANEL_FILL);
     draw_rectangle_lines(PANEL.x, PANEL.y, PANEL.w, PANEL.h, 5.0, PANEL_LINE);
     text.centered(PAUSE_TITLE_TEXT, PANEL.center().x, PANEL.y + 66.0, 44.0, TITLE);
@@ -177,6 +224,36 @@ mod tests {
             assert!(b.y - PICK_RING > PANEL.y && b.bottom() + PICK_RING < PANEL.bottom(), "테두리가 창 안");
         }
         assert!(RESUME_BUTTON.bottom() + PICK_RING < QUIT_BUTTON.y, "테두리가 다른 버튼에 안 닿는다");
+    }
+
+    #[test]
+    fn buddy_is_one_of_four_and_all_four_come_up() {
+        let mut seen = [false; 4];
+        for roll in 0..400u32 {
+            let b = PauseBuddy::pick(roll);
+            let i = PauseBuddy::ALL.iter().position(|x| *x == b).expect("넷 중 하나");
+            seen[i] = true;
+        }
+        assert_eq!(seen, [true; 4], "Niro, Ellie, Logan, 미스 모두 나온다");
+        assert!(PauseBuddy::ALL.contains(&PauseBuddy::Miss));
+    }
+
+    #[test]
+    fn buddy_stands_beside_the_window_on_screen_and_hops_only_a_little() {
+        assert!(BUDDY_BOX.x > PANEL.right(), "창과 버튼에 안 겹친다");
+        assert!(BUDDY_BOX.right() <= VIRTUAL_WIDTH && BUDDY_BOX.bottom() <= VIRTUAL_HEIGHT && BUDDY_BOX.y >= 0.0, "화면 안 (740×360도 같은 가상 화면)");
+        // 740×360 폰(0.667배)에서도 잘 보이는 크기
+        assert!(BUDDY_BOX.h * 360.0 / 540.0 >= 120.0);
+        for (w, h) in [(100.0, 300.0), (300.0, 100.0), (200.0, 200.0), (0.0, 0.0)] {
+            let s = buddy_size(w, h);
+            assert!(s.x <= BUDDY_BOX.w + 0.01 && s.y + BUDDY_HOP <= BUDDY_BOX.h + 0.01, "{w}×{h} → {s:?} 칸 안");
+        }
+        for i in 0..300 {
+            let lift = buddy_lift(i as f32 * 0.01);
+            assert!((0.0..=BUDDY_HOP + 0.01).contains(&lift), "살짝만 통통: {lift}");
+        }
+        assert!(buddy_lift(0.0) < 0.01, "땅에서 시작");
+        const { assert!(BUDDY_HOP <= 12.0) };
     }
 
     #[test]

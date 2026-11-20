@@ -11,7 +11,7 @@ use config::*;
 use logic::character::CharacterKind;
 use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent};
-use logic::math::{fill_story, with_particle, MathKind, MathQuestion, MathQuestionMaker, MathResult};
+use logic::math::{fill_story, with_particle, MathKind, MathQuestion, MathQuestionMaker, MathQuiz, MathResult};
 use logic::monster::Zombie;
 use logic::player::PlayerInput;
 use logic::weapon::{DroppedWeapon, Weapon};
@@ -123,6 +123,7 @@ fn no_four_digit_answer_through_the_real_game_for_1000_seeds() {
     let in_range = |x: u32, (low, high): (u32, u32)| (low..=high).contains(&x);
     for seed in 0..SEEDS {
         let mut g = Game::on_world(CharacterKind::Niro, seed, World::m1());
+        g.math = MathQuiz::with_maker(MathQuestionMaker::new(seed)); // 수학만 (영어는 m8_english.rs)
         for _ in 0..20 {
             g.math.add_waiting();
             g.math.open_next_waiting();
@@ -302,6 +303,7 @@ fn quiet_game() -> Game {
     let mut g = Game::on_world(CharacterKind::Niro, 7, walled);
     g.combat.skeleton_chance = 0.0;
     g.missions.turn_off_all(); // 수산나 2026-11-15: 미션 실패 체력 -1(D103)이 수학 문제 체력 시험에 섞이지 않게
+    g.math = MathQuiz::with_maker(MathQuestionMaker::new(7)); // 수산나 2026-11-20: 수학 규칙 시험이라 영어(US-087)는 섞지 않는다
     g
 }
 

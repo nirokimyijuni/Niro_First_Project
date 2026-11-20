@@ -8,6 +8,7 @@ pub mod clock;
 pub mod coins;
 pub mod combat;
 pub mod crafting;
+pub mod english;
 pub mod game;
 pub mod gathering;
 pub mod math;

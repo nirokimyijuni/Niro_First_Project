@@ -19,7 +19,7 @@ use super::weapon::{Weapon, Weapons};
 use super::world::{really_overlaps, shortest_dx, World};
 use crate::config::{
     CAVE_AWAY_Y, CAVE_ENTER_BUTTON_TEXT, CAVE_ENTRANCE_X, CAVE_EXIT_BUTTON_TEXT, CAVE_NAME, CAVE_OPEN_AT_NIGHT, CRAFTING_PAUSES_GAME,
-    DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MATH_WRONG_HP_LOSS, MINE_BUTTON_TEXT, MINE_REACH, PLAYER_HEIGHT, PLAYER_SPAWN_X,
+    DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MINE_BUTTON_TEXT, MINE_REACH, PLAYER_HEIGHT, PLAYER_SPAWN_X,
     PLAYER_WIDTH, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT, HEALTH_POTION_HEAL,
     HOUSE_DOOR_BUTTON_TEXT, PLAYER_WALK_SPEED, SHOP_PAUSES_GAME, CAR_SPEED_MULTIPLIER, DIAMOND_PICKAXE_SLAM_DIAMONDS,
     DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT, DIAMOND_PICKAXE_SLAM_SCORE, ENDER_FRUIT_SLAM_DIAMONDS, ENDER_FRUIT_SLAM_DIAMONDS_TEXT,
@@ -500,11 +500,13 @@ impl Game {
     /// 결과 글 시간을 흘린다. 틀린 문제가 닫히는 순간 체력이 준다. 0이면 보통 쓰러짐과 같다 (부모님 답).
     /// 무적 시간은 생기지 않는다. 기다리는 문제가 있으면 다음 프레임에 연다.
     fn wait_after_math_answer(&mut self, dt: f32, events: &mut Vec<GameEvent>) {
+        // 수학과 영어가 줄이는 체력이 다를 수 있어서 닫기 전에 본다.
+        let hp_loss = self.math.wrong_hp_loss();
         if self.math.wait_after_answer(dt) != Some(MathResult::Wrong) {
             return;
         }
         let before = self.combat.health.hp();
-        self.combat.health.lose_from_quiz(MATH_WRONG_HP_LOSS);
+        self.combat.health.lose_from_quiz(hp_loss);
         let hp_left = self.combat.health.hp();
         events.push(GameEvent::Combat(CombatEvent::PlayerHurt { amount: before - hp_left, hp_left }));
         if self.combat.health.is_down() {
@@ -1271,8 +1273,7 @@ mod tests {
         assert!(g.is_waiting_to_open_quiz());
         g.update(&no_input(), crate::config::QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS);
         // 맞히고 닫은 뒤에 밤을 보낸다.
-        let answer = g.math.question().expect("밤 문제").answer;
-        g.math.type_and_submit(answer);
+        g.math.answer_right(); // 수학이든 영어든 (US-087)
         g.update(&no_input(), crate::config::MATH_RIGHT_SHOW_SECONDS);
         assert!(!g.math.is_open());
         let events = g.update(&no_input(), NIGHT_SECONDS);
