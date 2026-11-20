@@ -68,6 +68,8 @@
    |---|---|
    | `GitHubOwner` | `nirokimyijuni` (기본값 그대로) |
    | `GitHubRepo` | `Niro_First_Project` (기본값 그대로) |
+   | `GitHubOwnerId` | `351028612` (기본값 그대로) |
+   | `GitHubRepoId` | `1441717561` (기본값 그대로) |
    | `CreateOidcProvider` | 1단계 결과대로 `true` 또는 `false` |
    | `ExistingOidcProviderArn` | `false`일 때만 1단계에서 복사한 ARN. 아니면 비워 둠 |
    | `CreateBudget` | `true` |
@@ -122,6 +124,22 @@
 2. 게임이 뜨면 성공. 버전까지 보려면 F12 → **Console**(콘솔)에서 `게임 버전: ...` 줄이 GitHub Pages 주소의 것과 같은지 봅니다.
 3. GitHub **Actions** → 그 실행 → 맨 아래 **Summary**(요약)에 `AWS 플레이 주소: ...`와 `deploy-aws=success`가 보입니다.
 4. **이 주소를 다른 사람에게 보내는 건 부모님이 정할 일입니다.** 케빈은 묻지 않고 공유하지 않아요.
+
+## 스택 업데이트 (템플릿이 바뀌었을 때, 5~10분)
+
+케빈이 `game-hosting.yaml`을 고치면 부모님이 이미 만든 스택에 새 템플릿을 올려 줍니다. 버킷·주소·GitHub 변수는 그대로예요.
+
+1. 새 `game-hosting.yaml`을 컴퓨터에 받아 둡니다 (시작 전에 4번과 같은 방법).
+2. 리전 **Seoul** 확인 → **CloudFormation** → 스택 목록에서 `miss-game-hosting` 선택.
+3. 오른쪽 위 **Update**(업데이트). (메뉴가 나오면 **Update stack**(스택 업데이트) → **Make a direct update**(직접 업데이트).)
+4. **Prepare template**: **Replace existing template**(현재 템플릿 교체) → **Upload a template file**(템플릿 파일 업로드) → **Choose file** → 새 `game-hosting.yaml` → **Next**.
+5. **Parameters**: 그대로 둡니다. 새로 생긴 칸(`GitHubOwnerId`, `GitHubRepoId`)도 기본값 그대로 → **Next**.
+6. **Configure stack options**: 바꾸지 않고 맨 아래 **"I acknowledge that AWS CloudFormation might create IAM resources."** 체크 → **Next**.
+7. **Review** → **Submit**(제출).
+8. 상태가 **UPDATE_COMPLETE**(업데이트 완료, 초록색)가 되면 끝. 케빈에게 알려 주시면 다시 배포해서 확인합니다.
+   - **UPDATE_ROLLBACK_COMPLETE**가 되면 예전 상태로 돌아간 것이에요(망가지지 않음). **Events** 탭 빨간 줄의 **Status reason**을 케빈에게 알려 주세요.
+
+> 2026-11-21 고침: 이 저장소는 GitHub이 OIDC 이름표(sub)를 새 "immutable subject" 모양(`repo:nirokimyijuni@351028612/Niro_First_Project@1441717561:ref:refs/heads/main`)으로 보내서, 옛 모양만 허용하던 역할이 거부했어요(첫 AWS 배포 실패). 그래서 두 모양을 정확히 허용하고, 숫자 ID는 파라미터로 받습니다. 숫자는 GitHub 공개 ID이고 AWS 계정 번호가 아니에요.
 
 ---
 

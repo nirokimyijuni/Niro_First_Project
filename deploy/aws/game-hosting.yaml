@@ -14,6 +14,17 @@ Parameters:
     Type: String
     Default: Niro_First_Project
     Description: 저장소 이름 (이 저장소의 main 브랜치만 배포 역할을 쓸 수 있다)
+  # GitHub "immutable subject" OIDC 모양(repo:주인@번호/저장소@번호)에 쓰는 GitHub 숫자 ID. 공개 정보이고 AWS 계정 번호가 아니다.
+  GitHubOwnerId:
+    Type: String
+    Default: "351028612"
+    AllowedPattern: "^[0-9]+$"
+    Description: GitHub 사용자(주인) 숫자 ID (gh api users/<주인> 의 id)
+  GitHubRepoId:
+    Type: String
+    Default: "1441717561"
+    AllowedPattern: "^[0-9]+$"
+    Description: GitHub 저장소 숫자 ID (gh api repos/<주인>/<저장소> 의 id)
   CreateOidcProvider:
     Type: String
     AllowedValues: ["true", "false"]
@@ -165,8 +176,11 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                # main 브랜치 push만. (주의: 이 작업에 environment:를 붙이면 sub 모양이 바뀌어 막힌다)
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/main"
+                # main 브랜치만. (주의: 이 작업에 environment:를 붙이면 sub 모양이 바뀌어 막힌다)
+                # 두 모양을 정확히 허용(와일드카드 없음): 새 immutable 모양(이 저장소가 지금 보내는 것)과 옛 모양.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/main"
       Policies:
         - PolicyName: deploy-game-site-only
           PolicyDocument:
