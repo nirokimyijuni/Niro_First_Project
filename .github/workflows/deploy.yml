@@ -80,11 +80,84 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v5
 
+  # AWS(S3 + CloudFront) 두 번째 배포. 부모 결정 2026-11-20. 설명: deploy/aws/README.md
+  # 저장소 변수 AWS_DEPLOY_ROLE_ARN 이 없으면 이 작업은 건너뛴다(skipped) → 지금 Pages 배포는 그대로.
+  # Pages 배포가 성공해야만 돈다 (출시 게이트는 build 작업이 이미 지켰다).
+  # 주의: environment: 를 붙이지 않는다. 붙이면 OIDC sub 모양이 바뀌어 AWS 역할이 거부한다.
+  deploy-aws:
+    needs: [build, deploy]
+    if: ${{ vars.AWS_DEPLOY_ROLE_ARN != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
+      BUCKET: ${{ vars.AWS_S3_BUCKET }}
+      DIST_ID: ${{ vars.AWS_CLOUDFRONT_ID }}
+      CF_DOMAIN: ${{ vars.AWS_CLOUDFRONT_DOMAIN }}
+    steps:
+      - name: 빌드한 dist 받기 (Pages에 올린 것과 같은 파일)
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: artifact
+
+      - name: dist 풀기
+        run: |
+          mkdir -p dist
+          tar -xf artifact/artifact.tar -C dist
+          test -f dist/index.html
+          test -n "$BUCKET" && test -n "$DIST_ID" && test -n "$CF_DOMAIN"
+
+      - name: AWS 로그인 (OIDC, 키 없음)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # index.html은 매번 새로 받게 no-cache. 나머지는 Pages와 비슷하게 10분.
+      # .wasm은 Content-Type을 application/wasm으로 못 박는다.
+      - name: S3에 올리기
+        run: |
+          aws s3 sync dist "s3://$BUCKET" --delete \
+            --exclude "index.html" --exclude "*.wasm" \
+            --cache-control "public, max-age=600"
+          for f in dist/*.wasm; do
+            aws s3 cp "$f" "s3://$BUCKET/$(basename "$f")" \
+              --content-type application/wasm --cache-control "public, max-age=600"
+          done
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html" \
+            --content-type "text/html; charset=utf-8" --cache-control "no-cache"
+
+      - name: CloudFront 캐시 비우기 (/* = 경로 1개로 셈)
+        run: |
+          id=$(aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*" --query Invalidation.Id --output text)
+          echo "invalidation: $id"
+          aws cloudfront wait invalidation-completed --distribution-id "$DIST_ID" --id "$id"
+
+      # 공개 주소에서 버전과 wasm 종류를 확인한다. 횟수 제한 있음(최대 10번).
+      - name: 공개 주소 확인
+        run: |
+          ver=$(grep -oE 'window.GAME_VERSION = "[^"]+"' dist/index.html | head -1 | cut -d'"' -f2)
+          wasm=$(basename dist/*.wasm)
+          ok=""
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS "https://$CF_DOMAIN/" | grep -q "$ver"; then ok=1; break; fi
+            sleep 15
+          done
+          test -n "$ok" || { echo "공개 주소에 버전 $ver 이 안 보여요"; exit 1; }
+          ctype=$(curl -fsSI "https://$CF_DOMAIN/$wasm" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print $2}')
+          echo "버전 $ver, $wasm Content-Type: $ctype"
+          test "$ctype" = "application/wasm"
+          echo "AWS 플레이 주소: https://$CF_DOMAIN/ (버전 $ver)" >> "$GITHUB_STEP_SUMMARY"
+
   # 실패하거나 취소돼도 결과를 남긴다. always()는 이 작은 작업에만 쓴다.
   record:
-    needs: [build, deploy]
+    needs: [build, deploy, deploy-aws]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: 배포 시도 결과 기록
-        run: echo "build=${{ needs.build.result }} deploy=${{ needs.deploy.result }} commit=${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "build=${{ needs.build.result }} deploy=${{ needs.deploy.result }} deploy-aws=${{ needs.deploy-aws.result }} commit=${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
