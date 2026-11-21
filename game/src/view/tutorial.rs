@@ -6,6 +6,8 @@
 //! - 말풍선이 떠도 게임은 멈추지 않는다. 건너뛰기를 누른 손가락은 조이스틱·버튼으로 새지 않는다 (`claim_skip_finger`).
 
 use super::assets::{face_source, Assets};
+use super::effects::Effects;
+use super::gather::GatherView;
 use super::hud::draw_pill;
 use super::mission::{draw_round_rect, split_lines};
 use super::screen::VIRTUAL_WIDTH;
@@ -45,6 +47,12 @@ pub fn text_rect(touch_mode: bool) -> Rect {
     let left = body.x + TUTORIAL_PAD;
     let right = skip_rect(touch_mode).x - TUTORIAL_PAD;
     Rect::new(left, body.y, right - left, body.h)
+}
+
+/// 말풍선 자리를 다른 안내가 쓰고 있는가: 미스가 미션을 말하는 3초, 처음 나무를 캤을 때 곡괭이 안내 4초.
+/// 그리기(`bubble_text`)·건너뛰기 받기·logic의 칭찬 시간 멈춤(`Tutorial::set_notice_up`, BUG-040)이 모두 이 한 값을 쓴다.
+pub fn other_notice_up(effects: &Effects, gathered: &GatherView) -> bool {
+    effects.mission.miss_is_talking() || gathered.recipe_hint_showing()
 }
 
 /// 지금 말풍선에 쓸 글. 칭찬 중이면 칭찬 글, 단계가 진행 중이면 그 단계 글, 아니면(시작 전·건너뜀·끝) None.

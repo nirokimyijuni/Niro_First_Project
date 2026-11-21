@@ -314,7 +314,7 @@ impl TouchControls {
 // ---- 그리기 (판정 결과를 보여 주기만) ----
 
 /// 위·왼쪽·오른쪽을 가리키는 세모. `dir`은 가리키는 방향 (단위 벡터).
-fn draw_arrow_head(tip: Vec2, dir: Vec2, size: f32, color: Color) {
+pub fn draw_arrow_head(tip: Vec2, dir: Vec2, size: f32, color: Color) {
     let side = vec2(-dir.y, dir.x) * size * 0.6;
     let back = tip - dir * size;
     draw_triangle(tip, back + side, back - side, color);

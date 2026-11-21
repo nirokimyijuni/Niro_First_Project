@@ -9,9 +9,12 @@ mod view;
 use logic::character::CharacterKind;
 use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent, GatherEvent};
+use logic::help::Help;
+use logic::mission::MissionEvent;
 use logic::player::PlayerInput;
 use logic::settings::Settings;
 use logic::tutorial::{Tutorial, TutorialEvent, TutorialState};
+use logic::window_tips::{TipWindow, WindowTips};
 use macroquad::prelude::*;
 use view::assets::Assets;
 use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
@@ -64,6 +67,9 @@ enum Scene {
         pause_buddy: PauseBuddy,
         /// 가방 (US-091): 열려 있는지, 장난감 상자 반짝임, 아래 키 안내 8초. 열린 동안은 멈춤 창처럼 logic을 부르지 않는다.
         bag: BagView,
+        /// 물음표(?) 버튼과 조작 안내 한 장 (US-122): 버튼은 판을 시작하고 30초만 보인다. 열려 있는 동안은 멈춤 창처럼 logic을 부르지 않는다.
+        /// 판이 새로 시작되면 새로 만든다 (`start_play`).
+        help: Help,
     },
 }
 
@@ -79,7 +85,16 @@ fn start_play(kind: CharacterKind, settings: &Settings, no_guide: bool, carried:
             game.start_tutorial(settings, no_guide);
         }
     }
-    Scene::Play { game, fast_forward: config::DEV_FAST_FORWARD_AT_START, ff_by_hand: false, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false, pause_pick: PauseTap::Resume, pause_buddy: PauseBuddy::Miss, bag: BagView::new() }
+    Scene::Play { game, fast_forward: config::DEV_FAST_FORWARD_AT_START, ff_by_hand: false, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false, pause_pick: PauseTap::Resume, pause_buddy: PauseBuddy::Miss, bag: BagView::new(), help: Help::new(no_guide) }
+}
+
+/// 창 한 줄 안내를 "봤다"로 적었으면 설정에 넣고 저장한다 (바뀔 때만 쓴다. ?qa에서는 save_settings가 안 쓴다).
+fn keep_tips_seen(tips: &WindowTips, settings: &mut Settings) {
+    let after = tips.settings_after(settings);
+    if after != *settings {
+        *settings = after;
+        view::web::save_settings(settings);
+    }
 }
 
 /// 이번 프레임에 빨리감기를 쓸지 (BUG-039, 부모님 결정 2026-11-21). 튜토리얼이 진행 중이면 시계를 보통 속도로 둔다.
@@ -261,6 +276,10 @@ async fn main() {
     let mut settings = view::web::load_settings();
     // ?qa에서는 튜토리얼 말풍선이 나오지 않는다. ?qa=tutorial이면 나온다 (US-123). 저장은 둘 다 읽지도 쓰지도 않는다.
     let no_guide = view::web::no_guide();
+    // 창 한 줄 안내 (US-121): 판이 바뀌어도 이어 쓴다 (본 창은 다시하기를 해도 또 나오지 않는다). 본 창은 설정에 저장된다.
+    let mut tips = WindowTips::from_settings(&settings);
+    // 지난 프레임에 열려 있던 안내 창: 바뀌는 프레임이 "창이 열리고 닫힌 순간"이다
+    let mut prev_tip_window: Option<TipWindow> = None;
     // 쓰러진 뒤 "다시하기"·"처음으로"를 하면 새 판에 이어 줄 튜토리얼 상태 (이미 시작했으면 다시 안 나온다)
     let mut carried_tutorial: Option<Tutorial> = None;
     // 건너뛰기 버튼을 누른 손가락: 뗄 때까지 조이스틱·버튼에 넘기지 않는다
@@ -277,6 +296,8 @@ async fn main() {
         let rotate_hint = show_rotate_hint(touch_mode, sw, sh);
         let mut menu = if rotate_hint { MenuInput::default() } else { menu_input(&letterbox) };
         let dt = cap_frame_seconds(get_frame_time());
+        // 한 줄 안내의 5초는 실제 시간이다: 창이 열려 게임이 멈춰도 센다
+        tips.update(dt);
         // 플레이 중이 아니거나(쓰러진 화면 포함) 안내 중이면 조이스틱·버튼을 놓고, 지금 닿아 있는 손가락만 기억한다.
         // (메뉴에서 누른 손가락, 안내 전에 대고 있던 손가락이 플레이에서 저절로 걷기·점프가 되지 않게)
         // 수학 문제 창도 같다: 숫자판을 누르던 손가락이 창이 닫힌 뒤 조이스틱·버튼이 되지 않는다 (US-076).
@@ -294,7 +315,9 @@ async fn main() {
         let new_finger = fingers.iter().find(|f| f.phase == TouchPhase::Started).map(|f| f.pos);
         // 가방 창도 멈춤처럼 (US-091): 손가락은 메뉴 탭으로만, logic은 부르지 않는다
         let bag_open = matches!(&scene, Scene::Play { bag, ended: None, .. } if bag.open);
-        let paused_now = paused_now || qa.open || bag_open;
+        // 물음표 조작 안내가 열려 있어도 멈춤처럼 (US-122): 손가락은 메뉴 탭으로만, logic은 부르지 않는다
+        let help_open = matches!(&scene, Scene::Play { help, ended: None, .. } if help.is_open());
+        let paused_now = paused_now || qa.open || bag_open || help_open;
         // 가방 키(I)는 장면과 상관없이 매 프레임 한 번만 읽는다
         let bag_key = bag_key_pressed();
         // 글자 줄은 장면과 상관없이 매 프레임 꺼낸다 (닫혀 있으면 버린다)
@@ -336,7 +359,13 @@ async fn main() {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, ff_by_hand, effects, ended, walk_lock, gathered, shop_view, paused, pause_pick, pause_buddy, bag } => {
+                Scene::Play { game, fast_forward, ff_by_hand, effects, ended, walk_lock, gathered, shop_view, paused, pause_pick, pause_buddy, bag, help } => {
+                    // 말풍선 자리를 다른 안내가 쓰는 동안은 "잘했어요!" 시간이 흐르지 않는다 (BUG-040). 매 프레임 logic 업데이트 전에 알려 준다.
+                    game.tutorial.set_notice_up(view::tutorial::other_notice_up(effects, gathered));
+                    // 물음표 버튼의 30초는 실제 시간이고, 창·멈춤으로 게임이 멈춘 동안은 세지 않는다 (US-122)
+                    if ended.is_none() {
+                        help.update(dt, window_open || *paused || bag.open || qa.open);
+                    }
                     // 상점의 "샀어요!"는 진짜 시간으로 흐른다 (게임은 멈춰 있어도)
                     shop_view.update(dt);
                     // 가방 버튼 반짝임과 아래 키 안내 8초: 창(멈춤·가방·퀴즈·상점·제작대)이 열린 동안은 안내 시간이 줄지 않는다 (임시-76)
@@ -351,7 +380,7 @@ async fn main() {
                     let pocket_spots = view::hud::pocket_tap_rects(game);
                     // 튜토리얼 건너뛰기 (US-120): N 키, 버튼 클릭, 버튼에 새로 댄 손가락. 누른 손가락은 뗄 때까지
                     // 조이스틱·버튼에 넘기지 않는다 (왼쪽 반을 누르면 조이스틱이 되어 걷는 것을 막는다).
-                    let skip_on = ended.is_none() && !window_open && !*paused && !qa.open && !bag.open && view::tutorial::bubble_text(game, touch_mode, effects.mission.miss_is_talking() || gathered.recipe_hint_showing()).is_some();
+                    let skip_on = ended.is_none() && !window_open && !*paused && !qa.open && !bag.open && !help.pauses_game() && view::tutorial::bubble_text(game, touch_mode, view::tutorial::other_notice_up(effects, gathered)).is_some();
                     let skip_rect = view::tutorial::skip_rect(touch_mode);
                     if skip_finger.is_some_and(|id| !fingers.iter().any(|f| f.id == id)) {
                         skip_finger = None;
@@ -363,8 +392,16 @@ async fn main() {
                     if skip_on && view::tutorial::skip_pressed(view::input::tutorial_skip_key_pressed(), menu.tap, claimed.map(|f| f.pos), skip_rect) {
                         game.skip_tutorial();
                     }
+                    // 물음표(?) 버튼 (US-122): 보이는 동안만 받는다. 누른 손가락도 건너뛰기처럼 뗄 때까지 조이스틱·버튼에 넘기지 않는다.
+                    let help_on = ended.is_none() && !window_open && !*paused && !qa.open && !bag.open && !help.pauses_game() && help.button_visible();
+                    let help_rect = view::help::button_rect(touch_mode);
+                    let help_claimed = if help_on { view::tutorial::claim_skip_finger(&fingers, help_rect) } else { None };
+                    if let Some(finger) = help_claimed {
+                        skip_finger = Some(finger.id);
+                    }
+                    let help_pressed = help_on && view::help::pressed(menu.tap, help_claimed.map(|f| f.pos), help_rect);
                     let game_fingers = view::tutorial::without_finger(&fingers, skip_finger);
-                    let touched = if ended.is_none() && !window_open && !*paused && !qa.open && !bag.open {
+                    let touched = if ended.is_none() && !window_open && !*paused && !qa.open && !bag.open && !help.pauses_game() {
                         let mut spots: Vec<Rect> = pocket_spots.iter().map(|(_, r)| *r).collect();
                         spots.push(bag_button_rect(true));
                         touch.update_with_pockets(&game_fingers, &buttons, &spots, touch_mode)
@@ -421,6 +458,14 @@ async fn main() {
                             *walk_lock = true;
                         }
                         None
+                    } else if help.is_open() && ended.is_none() {
+                        // 조작 안내 한 장 (US-122): logic을 부르지 않는다 (시계·몬스터가 그대로 멈춘다). Esc·Enter·Space나 "알았어요!"로 닫으면 하던 판으로 돌아온다.
+                        if menu.back || menu.confirm || view::help::pressed(menu.tap, None, view::help::close_rect()) {
+                            help.close();
+                            // 안내가 열린 동안 누르던 ←/→는 뗄 때까지 걷기가 되지 않는다
+                            *walk_lock = true;
+                        }
+                        None
                     } else if back == Some(BackAction::CloseCraft) {
                         // 제작대 화면의 Esc는 고르기로 나가지 않고 제작대만 닫는다 (US-021)
                         game.crafting.close();
@@ -442,6 +487,11 @@ async fn main() {
                         keep_score(game.score(), &mut best_score);
                         carried_tutorial = Some(game.tutorial.for_next_game());
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
+                    } else if help_pressed {
+                        // 물음표 버튼: 이번 프레임부터 게임이 멈춘다
+                        help.press_button();
+                        game.mine_held = false;
+                        None
                     } else if ended.is_none() && !window_open && bag_opens(bag_key, menu.tap, touch_mode, touched.pocket_pressed == Some(pocket_spots.len())) {
                         // 가방 열기 (I, 장난감 상자 버튼). 이번 프레임부터 게임이 멈춘다
                         bag.open_bag();
@@ -558,6 +608,10 @@ async fn main() {
                         }
                         // 깜짝 미션 (US-086): 미스 말풍선, 성공·실패 글. 클리어한 아침의 실패 글은 띄우지 않는다
                         for event in game.take_mission_events() {
+                            // 깜짝 미션이 처음 나올 때 한 줄 안내 (US-121). 말풍선이 떠 있거나 ?qa면 규칙이 막는다
+                            if matches!(event, MissionEvent::Appeared { .. }) && tips.window_opened(TipWindow::SurpriseMission, no_guide, game.tutorial.current_step().is_some()).is_some() {
+                                keep_tips_seen(&tips, &mut settings);
+                            }
                             effects.mission.on_event(event, game.is_cleared());
                         }
                         // 상자 부수기 (US-089): 금·나뭇조각·도끼 안내·"와우!"는 효과가, "○○을 얻었어요!"는 큰 문구로
@@ -578,6 +632,20 @@ async fn main() {
         if let Some(next) = next {
             scene = next;
         }
+        // 창 한 줄 안내 (US-121): 안내 창이 열리거나 닫힌 순간. 가방은 열린 프레임에, 퀴즈·제작대·상점은 logic이 연 프레임에 잡힌다.
+        let now_tip_window = match &scene {
+            Scene::Play { game, bag, ended: None, .. } => view::window_tip::open_window(game, bag.open),
+            _ => None,
+        };
+        if now_tip_window != prev_tip_window {
+            prev_tip_window = now_tip_window;
+            tips.window_closed();
+            if let (Some(window), Scene::Play { game, .. }) = (now_tip_window, &scene) {
+                if tips.window_opened(window, no_guide, game.tutorial.current_step().is_some()).is_some() {
+                    keep_tips_seen(&tips, &mut settings);
+                }
+            }
+        }
 
         // 3) 그리기 (960×540 가상 화면)
         letterbox.begin();
@@ -585,8 +653,8 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, ff_by_hand, effects, ended, gathered, shop_view, paused, pause_pick, pause_buddy, bag, .. } => {
-                screens::draw_play(&assets, &text, game, fast_forward_now(*fast_forward, *ff_by_hand, game.tutorial.state()), effects, ended.as_ref(), touch_mode, gathered, bag);
+            Scene::Play { game, fast_forward, ff_by_hand, effects, ended, gathered, shop_view, paused, pause_pick, pause_buddy, bag, help, .. } => {
+                screens::draw_play(&assets, &text, game, fast_forward_now(*fast_forward, *ff_by_hand, game.tutorial.state()), effects, ended.as_ref(), touch_mode, gathered, bag, view::window_tip::bottom(tips.current()));
                 if ended.is_none() && game.math.is_open() {
                     draw_math(&text, &game.math, &assets.m6.miss, &assets.english);
                     if *paused {
@@ -604,10 +672,23 @@ async fn main() {
                 } else if ended.is_none() && bag.open {
                     let show_recipe = game.world.workbench().is_some();
                     draw_bag_window(&text, game, &assets.m6, bag, touch_mode, show_recipe);
-                } else if touch_mode && ended.is_none() && !qa.open {
+                } else if touch_mode && ended.is_none() && !qa.open && !help.is_open() {
                     let label = mine_button_label(game);
                     let buttons = play_buttons_with_mine(game.can_switch(), label.is_some());
                     draw_touch_controls(&text, &touch, &buttons, label.unwrap_or(""));
+                }
+                if ended.is_none() {
+                    let a_window_is_up = game.math.is_open() || game.crafting.is_open() || game.shop.is_open() || *paused || bag.open || qa.open;
+                    // 물음표(?) 버튼 (US-122): 창이 없을 때, 처음 30초만. 열려 있으면 조작 안내 한 장이 화면을 덮는다
+                    if help.is_open() {
+                        view::help::draw_sheet(&text, Help::lines(touch_mode));
+                    } else if !a_window_is_up && help.button_visible() {
+                        view::help::draw_button(&text, touch_mode);
+                    }
+                    // 창 한 줄 안내 (US-121): 창 위 빈 곳에 5초. 멈춤 창이 뜨면 가린다
+                    if let Some(window) = tips.current().filter(|_| !*paused && !help.is_open() && !qa.open) {
+                        view::window_tip::draw(&text, window, touch_mode);
+                    }
                 }
                 if ended.is_none() {
                     // 창(문제·제작대·상점·멈춤·가방)이 열려 있으면 QA 표를 숨긴다: 그때는 눌러도 안 열리고 창의 칸을 가린다 (BUG-031)

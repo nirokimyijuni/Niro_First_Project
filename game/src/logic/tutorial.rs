@@ -89,6 +89,8 @@ pub struct Tutorial {
     step_seconds: f32,
     /// "잘했어요!"를 보여 주는 남은 초. 있는 동안은 다음 말풍선이 아직 안 나온다.
     cheer_left: Option<f32>,
+    /// 다른 안내(미스 미션 말, 곡괭이 안내)가 말풍선 자리를 쓰는 중 (BUG-040). 화면이 매 프레임 `set_notice_up`으로 알려 준다.
+    notice_up: bool,
 }
 
 impl Default for Tutorial {
@@ -99,7 +101,7 @@ impl Default for Tutorial {
 
 impl Tutorial {
     pub fn new() -> Tutorial {
-        Tutorial { state: TutorialState::NotStarted, walked: 0.0, step_seconds: 0.0, cheer_left: None }
+        Tutorial { state: TutorialState::NotStarted, walked: 0.0, step_seconds: 0.0, cheer_left: None, notice_up: false }
     }
 
     /// 시작한다. 이미 본 사람(`settings.tutorial_done`)이나 안내 없음(`?qa`, `no_guide`)이면 시작하지 않고 None이다.
@@ -128,6 +130,14 @@ impl Tutorial {
         self.cheer_left.is_some()
     }
 
+    /// 다른 안내가 말풍선 자리를 쓰는 동안 true로 알려 준다 (`view::tutorial::bubble_text`가 말풍선을 숨기는 그 조건).
+    /// true인 동안은 "잘했어요!" 시간과 ⑤의 사라지는 시간이 흐르지 않는다: 안 보이는 사이에 칭찬이 끝나 버리지 않고,
+    /// 안내가 끝난 뒤 칭찬을 처음부터 다 보여 준다 (BUG-040). 단계를 해냈는지 보는 일은 그대로 한다.
+    /// 매 프레임 부르면 된다 (false로 돌아와야 시간이 다시 흐른다).
+    pub fn set_notice_up(&mut self, notice_up: bool) {
+        self.notice_up = notice_up;
+    }
+
     /// 건너뛰기/끝남이면 true. 어떤 단계도 더 나오지 않는다.
     pub fn is_over(&self) -> bool {
         matches!(self.state, TutorialState::Skipped | TutorialState::Finished)
@@ -149,6 +159,9 @@ impl Tutorial {
         };
         let dt = dt.max(0.0);
         if let Some(left) = self.cheer_left {
+            if self.notice_up {
+                return events; // 칭찬이 가려져 있는 동안은 기다린다
+            }
             let left = left - dt;
             if left > 0.0 {
                 self.cheer_left = Some(left);
@@ -184,7 +197,9 @@ impl Tutorial {
                 }
             }
             TutorialStep::FindMiss => {
-                self.step_seconds += dt;
+                if !self.notice_up {
+                    self.step_seconds += dt;
+                }
                 if facts.found_miss || self.step_seconds >= TUTORIAL_FIND_MISS_SECONDS {
                     self.state = TutorialState::Finished;
                     events.push(TutorialEvent::Finished);
@@ -235,7 +250,6 @@ impl Tutorial {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::*;
 
     const ALL_STEPS: [TutorialStep; 5] =
         [TutorialStep::Move, TutorialStep::Attack, TutorialStep::Gather, TutorialStep::Jump, TutorialStep::FindMiss];
@@ -467,4 +481,71 @@ mod tests {
         assert_eq!(TutorialStep::Move.number(), 1);
         assert_eq!(TutorialStep::FindMiss.number(), 5);
     }
+
+    // ---- BUG-040: 다른 안내가 말풍선 자리를 쓰는 동안 칭찬 시간이 안 흐른다 ----
+
+    #[test]
+    fn cheer_timer_stops_while_another_notice_is_up() {
+        let mut t = started();
+        t.update(0.016, &TutorialFacts { walked: TUTORIAL_WALK_DISTANCE, ..day_one() });
+        assert!(t.is_cheering());
+        t.set_notice_up(true);
+        for _ in 0..100 {
+            assert!(t.update(1.0, &day_one()).is_empty(), "안내가 떠 있는 동안은 아무 일도 없다");
+        }
+        assert!(t.is_cheering());
+        assert_eq!(t.current_step(), Some(TutorialStep::Move));
+        // 안내가 끝나면 칭찬이 처음부터 다 보인다
+        t.set_notice_up(false);
+        assert!(t.update(TUTORIAL_CHEER_SECONDS - 0.1, &day_one()).is_empty());
+        assert!(t.is_cheering());
+        assert_eq!(t.update(0.2, &day_one()), vec![TutorialEvent::StepStarted(TutorialStep::Attack)]);
+    }
+
+    #[test]
+    fn cheer_that_already_ran_a_bit_keeps_its_remaining_time() {
+        let mut t = started();
+        t.update(0.016, &TutorialFacts { walked: TUTORIAL_WALK_DISTANCE, ..day_one() });
+        t.update(TUTORIAL_CHEER_SECONDS - 0.5, &day_one()); // 0.5초 남음
+        t.set_notice_up(true);
+        t.update(30.0, &day_one());
+        t.set_notice_up(false);
+        assert!(t.update(0.4, &day_one()).is_empty(), "남은 0.5초가 그대로");
+        assert_eq!(t.update(0.2, &day_one()).len(), 1);
+    }
+
+    #[test]
+    fn doing_a_step_still_counts_while_notice_is_up() {
+        let mut t = started();
+        t.set_notice_up(true);
+        let events = t.update(0.016, &TutorialFacts { walked: TUTORIAL_WALK_DISTANCE, ..day_one() });
+        assert_eq!(events, vec![TutorialEvent::StepDone(TutorialStep::Move)]);
+        assert_eq!(t.skip(), Some(TutorialEvent::Skipped));
+        assert!(!t.is_cheering());
+    }
+
+    #[test]
+    fn find_miss_timer_also_waits_while_notice_hides_the_bubble() {
+        let mut t = started();
+        t.state = TutorialState::Running(TutorialStep::FindMiss);
+        t.set_notice_up(true);
+        for _ in 0..50 {
+            assert!(t.update(10.0, &day_one()).is_empty());
+        }
+        assert_eq!(t.current_step(), Some(TutorialStep::FindMiss));
+        // 미스를 찾았다면 안내 중이어도 끝난다
+        assert_eq!(t.update(0.016, &TutorialFacts { found_miss: true, ..day_one() }), vec![TutorialEvent::Finished]);
+        let mut t = started();
+        t.state = TutorialState::Running(TutorialStep::FindMiss);
+        t.set_notice_up(false);
+        assert_eq!(t.update(TUTORIAL_FIND_MISS_SECONDS + 0.1, &day_one()), vec![TutorialEvent::Finished]);
+    }
+
+    #[test]
+    fn notice_flag_starts_off_and_new_game_tutorial_is_clean() {
+        assert!(!Tutorial::new().for_next_game().is_cheering());
+        let mut fresh = Tutorial::new();
+        fresh.start(&Settings::default(), false);
+        fresh.update(0.016, &TutorialFacts { walked: TUTORIAL_WALK_DISTANCE, ..day_one() });
+        assert_eq!(fresh.update(TUTORIAL_CHEER_SECONDS + 0.01, &day_one()).len(), 1, "처음 값은 안내 없음");    }
 }

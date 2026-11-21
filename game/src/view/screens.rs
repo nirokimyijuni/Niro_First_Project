@@ -487,6 +487,7 @@ pub fn draw_play(
     touch_mode: bool,
     gathered: &GatherView,
     bag_view: &BagView,
+    window_tip_bottom: Option<f32>,
 ) {
     let d = game.clock.sky_darkness();
     let (camera_x, view_x) = (game.camera_left(), view_center(game));
@@ -597,12 +598,13 @@ pub fn draw_play(
         None
     };
     // 튜토리얼 말풍선 (US-119): 있으면 큰 알림 글이 그 아래로 쌓인다
-    let tutorial_text = if ended.is_none() { tutorial::bubble_text(game, touch_mode, effects.mission.miss_is_talking() || gathered.recipe_hint_showing()) } else { None };
+    let tutorial_text = if ended.is_none() { tutorial::bubble_text(game, touch_mode, tutorial::other_notice_up(effects, gathered)) } else { None };
     let info_bottom = if show_info {
         let hud = hud::hud_bottom(hud::has_row(game), touch_mode && ended.is_none());
         let hud = mission_look.as_ref().map_or(hud, |l| l.rect().bottom().max(hud));
         let hud = gathered.recipe_hint_bottom().map_or(hud, |b| b.max(hud));
-        tutorial::bottom(game, touch_mode, effects.mission.miss_is_talking() || gathered.recipe_hint_showing()).filter(|_| tutorial_text.is_some()).map_or(hud, |b| b.max(hud))
+        let hud = window_tip_bottom.map_or(hud, |b| b.max(hud));
+        tutorial::bottom(game, touch_mode, tutorial::other_notice_up(effects, gathered)).filter(|_| tutorial_text.is_some()).map_or(hud, |b| b.max(hud))
     } else {
         0.0
     };

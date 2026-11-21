@@ -1,11 +1,13 @@
 //! 설정 저장 (US-125). 글자로 만들고 읽는 순수 함수만 있다. 브라우저·macroquad를 모른다.
 //!
 //! 글자 모양 (손으로 쓴 간단한 모양, 새 의존성 없음):
-//! `1;tutorial=1;tip=0;sound=1;music=70;effects=80`
+//! `1;tutorial=1;tips=0;sound=1;music=70;effects=80`
+//! - `tips`는 창 한 줄 안내를 본 창들 (여섯 칸 숫자 0~63, `WindowTipsSeen`). 옛 글자의 `tip=`는 모르는 항목처럼 무시한다.
 //! - 맨 앞이 버전 번호. 모르는 버전이면 통째로 새 게임 값.
 //! - 한 항목만 이상하면 그 항목만 기본값. 모르는 항목은 무시, 빠진 항목은 기본값.
 //! - 이름·주소·나이 같은 개인 정보는 없다 ("봤다" 표시와 소리 값뿐).
 
+use super::window_tips::WindowTipsSeen;
 use crate::config::*;
 
 /// 저장하는 설정 값들.
@@ -13,8 +15,8 @@ use crate::config::*;
 pub struct Settings {
     /// 튜토리얼 말풍선을 다 봤거나 건너뛰었다
     pub tutorial_done: bool,
-    /// 창 한 줄 안내를 봤다
-    pub window_tip_seen: bool,
+    /// 창 한 줄 안내를 본 창들 (창마다 따로)
+    pub window_tips_seen: WindowTipsSeen,
     /// 소리 켜기(true)/끄기(false). 소리 기능은 US-112에서, 여기는 값 자리만
     pub sound_on: bool,
     /// 음악 크기 0~100
@@ -28,7 +30,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             tutorial_done: false,
-            window_tip_seen: false,
+            window_tips_seen: WindowTipsSeen::default(),
             sound_on: SETTINGS_DEFAULT_SOUND_ON,
             music_percent: SETTINGS_DEFAULT_MUSIC_PERCENT,
             effects_percent: SETTINGS_DEFAULT_EFFECTS_PERCENT,
@@ -37,10 +39,11 @@ impl Default for Settings {
 }
 
 /// 설정을 저장 글자로 만든다.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // 저장 읽고 쓰기는 웹(wasm) 화면(view/web.rs)과 시험에서만 쓴다
 pub fn settings_to_text(s: &Settings) -> String {
     let items: [(&str, u32); 5] = [
         (SETTINGS_KEY_TUTORIAL_DONE, s.tutorial_done as u32),
-        (SETTINGS_KEY_WINDOW_TIP_SEEN, s.window_tip_seen as u32),
+        (SETTINGS_KEY_WINDOW_TIPS_SEEN, s.window_tips_seen.bits() as u32),
         (SETTINGS_KEY_SOUND_ON, s.sound_on as u32),
         (SETTINGS_KEY_MUSIC_PERCENT, s.music_percent as u32),
         (SETTINGS_KEY_EFFECTS_PERCENT, s.effects_percent as u32),
@@ -56,6 +59,7 @@ pub fn settings_to_text(s: &Settings) -> String {
 }
 
 /// 저장 글자를 읽는다. 이상하면 조용히 기본값(새 게임). 절대 패닉하지 않는다.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // 저장 읽고 쓰기는 웹(wasm) 화면(view/web.rs)과 시험에서만 쓴다
 pub fn settings_from_text(text: &str) -> Settings {
     let mut s = Settings::default();
     let text = text.trim();
@@ -85,9 +89,9 @@ pub fn settings_from_text(text: &str) -> Settings {
                     s.tutorial_done = b;
                 }
             }
-            SETTINGS_KEY_WINDOW_TIP_SEEN => {
-                if let Some(b) = parse_flag(value) {
-                    s.window_tip_seen = b;
+            SETTINGS_KEY_WINDOW_TIPS_SEEN => {
+                if let Some(tips) = parse_tips(value) {
+                    s.window_tips_seen = tips;
                 }
             }
             SETTINGS_KEY_SOUND_ON => {
@@ -116,6 +120,7 @@ pub fn settings_cleared() -> Settings {
     Settings::default()
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // 저장 읽고 쓰기는 웹(wasm) 화면(view/web.rs)과 시험에서만 쓴다
 fn parse_flag(value: &str) -> Option<bool> {
     match value {
         "0" => Some(false),
@@ -124,6 +129,12 @@ fn parse_flag(value: &str) -> Option<bool> {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // 저장 읽고 쓰기는 웹(wasm) 화면(view/web.rs)과 시험에서만 쓴다
+fn parse_tips(value: &str) -> Option<WindowTipsSeen> {
+    WindowTipsSeen::from_bits(value.parse().ok()?) // 음수·소수·여섯 칸 밖의 숫자는 None
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // 저장 읽고 쓰기는 웹(wasm) 화면(view/web.rs)과 시험에서만 쓴다
 fn parse_percent(value: &str) -> Option<u8> {
     let n: u8 = value.parse().ok()?; // 음수·소수·너무 큰 수는 None
     (n <= SETTINGS_VOLUME_MAX_PERCENT).then_some(n)
@@ -136,7 +147,7 @@ mod tests {
     fn changed() -> Settings {
         Settings {
             tutorial_done: true,
-            window_tip_seen: true,
+            window_tips_seen: WindowTipsSeen::from_bits(0b10_0101).unwrap(),
             sound_on: false,
             music_percent: 30,
             effects_percent: 100,
@@ -201,7 +212,7 @@ mod tests {
         assert!(s.tutorial_done);
         assert_eq!(s.music_percent, 40);
         assert_eq!(s.effects_percent, SETTINGS_DEFAULT_EFFECTS_PERCENT);
-        assert!(!s.window_tip_seen);
+        assert_eq!(s.window_tips_seen, WindowTipsSeen::default());
         assert_eq!(settings_from_text("1"), Settings::default());
     }
 
@@ -221,7 +232,7 @@ mod tests {
         let t = settings_to_text(&changed());
         let allowed = [
             SETTINGS_KEY_TUTORIAL_DONE,
-            SETTINGS_KEY_WINDOW_TIP_SEEN,
+            SETTINGS_KEY_WINDOW_TIPS_SEEN,
             SETTINGS_KEY_SOUND_ON,
             SETTINGS_KEY_MUSIC_PERCENT,
             SETTINGS_KEY_EFFECTS_PERCENT,
@@ -231,5 +242,43 @@ mod tests {
             assert!(allowed.contains(&key), "{key}");
         }
         assert!(t.is_ascii() && t.chars().count() <= SETTINGS_MAX_CHARS);
+    }
+
+    #[test]
+    fn 옛_저장_글자는_그대로_읽히고_옛_tip은_무시된다() {
+        // US-125가 쓰던 글자 모양 (tip=). 깨지지 않고 읽히고, 창 안내는 모두 "안 봤다"
+        let old = settings_from_text("1;tutorial=1;tip=0;sound=1;music=70;effects=80");
+        assert!(old.tutorial_done && old.sound_on);
+        assert_eq!((old.music_percent, old.effects_percent), (70, 80));
+        assert_eq!(old.window_tips_seen, WindowTipsSeen::default());
+        // 옛 tip=1이어도 새 칸을 건드리지 않는다
+        let old_seen = settings_from_text("1;tutorial=1;tip=1;music=30");
+        assert_eq!(old_seen.window_tips_seen, WindowTipsSeen::default());
+        assert_eq!(old_seen.music_percent, 30);
+        // 다시 쓰면 새 이름(tips)이 되고 tip=은 사라진다
+        let rewritten = settings_to_text(&old_seen);
+        assert!(rewritten.contains("tips=0") && !rewritten.contains("tip=1"), "{rewritten}");
+    }
+
+    #[test]
+    fn 창_안내_본_창들은_글자로_왕복한다() {
+        for bits in 0..=WindowTipsSeen::ALL_BITS {
+            let s = Settings { window_tips_seen: WindowTipsSeen::from_bits(bits).unwrap(), ..Settings::default() };
+            let text = settings_to_text(&s);
+            assert!(text.contains(&format!("tips={bits}")), "{text}");
+            assert_eq!(settings_from_text(&text), s);
+        }
+    }
+
+    #[test]
+    fn 창_안내_숫자가_이상하면_그_항목만_기본값() {
+        for bad in ["64", "255", "256", "-1", "1.5", "abc", "", "0x3"] {
+            let s = settings_from_text(&format!("1;tutorial=1;tips={bad};music=40"));
+            assert_eq!(s.window_tips_seen, WindowTipsSeen::default(), "{bad}");
+            assert!(s.tutorial_done, "멀쩡한 항목은 산다 ({bad})");
+            assert_eq!(s.music_percent, 40, "{bad}");
+        }
+        assert_eq!(settings_from_text("1;tips=63").window_tips_seen.bits(), 63);
+        assert_eq!(settings_from_text("1;tips=7;tips=1").window_tips_seen.bits(), 7, "첫 번째만");
     }
 }

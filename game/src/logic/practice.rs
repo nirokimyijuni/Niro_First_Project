@@ -15,15 +15,6 @@ use crate::config::{
 };
 use macroquad::math::{Rect, Vec2};
 
-/// 몬스터 종류 값. 화면은 이것을 보고 그림을 고른다 (밤 몬스터와 다르게 그린다).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MonsterKind {
-    /// 밤에 나오는 몬스터 (좀비·스켈레톤). 이 파일의 몬스터는 아니다.
-    Night,
-    /// 연습용 (임시 이름. 진짜 이름·생김새·색은 아이가 정한다)
-    Practice,
-}
-
 /// 화면(로건)이 보고 표시·소리를 낼 일. `at`은 몸 가운데. `CombatEvent`와 따로 `Game::take_practice_events`로 받는다.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PracticeEvent {
@@ -56,10 +47,6 @@ impl PracticeMonster {
         }
     }
 
-    pub fn kind(&self) -> MonsterKind {
-        MonsterKind::Practice
-    }
-
     pub fn rect(&self) -> Rect {
         Rect::new(self.pos.x, self.pos.y, PRACTICE_MONSTER_WIDTH, PRACTICE_MONSTER_HEIGHT)
     }
@@ -67,11 +54,6 @@ impl PracticeMonster {
     /// 막 맞아서 반짝여야 하면 true.
     pub fn is_flashing(&self) -> bool {
         self.flash_left > 0.0
-    }
-
-    /// 사라지기까지 남은 초.
-    pub fn seconds_left(&self) -> f32 {
-        self.seconds_left
     }
 
     /// 한 번 맞는다. 쓰러졌으면 true.
@@ -127,13 +109,6 @@ mod tests {
             assert_eq!(fell, hit == PRACTICE_MONSTER_HP);
         }
         assert_eq!(m.hp, 0);
-    }
-
-    #[test]
-    fn kind_is_practice_not_night() {
-        let m = PracticeMonster::new(0.0, GROUND_Y);
-        assert_eq!(m.kind(), MonsterKind::Practice);
-        assert_ne!(m.kind(), MonsterKind::Night);
     }
 
     #[test]

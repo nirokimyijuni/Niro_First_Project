@@ -926,6 +926,51 @@ pub const TUTORIAL_CHEER_TEXT: &str = "와, 잘했어요! 짝짝!";
 /// 건너뛰기 버튼 글 (임시. 다른 이름은 아이에게 물어볼 카드)
 pub const TUTORIAL_SKIP_TEXT: &str = "건너뛰기";
 
+// ---- 창 한 줄 안내 (US-121, 수산나: 임시 문구와 초. 그림은 로건) ----
+/// 한 줄 안내가 보이는 초 (실제 초, 임시). 창을 닫으면 그 전에도 사라진다.
+pub const WINDOW_TIP_SECONDS: f32 = 5.0;
+/// 창 한 줄 안내 글 (임시. 캐릭터 Niro가 귀엽게, 25자 안쪽, 정답은 알려 주지 않는다).
+/// 순서: 수학 퀴즈, 영어 퀴즈, 제작대, 상점, 가방, 깜짝 미션 (`TipWindow::index`).
+pub const WINDOW_TIP_TEXT_PC: [&str; 6] = [
+    "숫자 키로 답을 쓰고 Enter를 눌러요~",
+    "그림이나 낱말을 보고 1~4 키로 골라요~",
+    "칸을 클릭해서 재료를 놓아 봐요~",
+    "코인으로 물건을 살 수 있어요~",
+    "가진 물건을 보고 쓸 수 있어요~",
+    "미스가 낸 숙제예요~ 위쪽에 진행이 보여요",
+];
+pub const WINDOW_TIP_TEXT_TOUCH: [&str; 6] = [
+    "숫자판을 눌러 답을 넣어요~ 천천히 해요!",
+    "그림이나 낱말을 보고 맞는 걸 눌러요~",
+    "칸을 눌러서 재료를 놓아 봐요~",
+    "코인으로 물건을 살 수 있어요~",
+    "가진 물건을 보고 쓸 수 있어요~",
+    "미스가 낸 숙제예요~ 위쪽에 진행이 보여요",
+];
+
+// ---- 물음표(?) 버튼과 조작 안내 한 장 (US-122, 수산나: 초와 임시 문구. 그림은 로건) ----
+/// 물음표 버튼이 보이는 초 (실제 초, 부모님 값 2026-11-21). 플레이를 시작하고 이 시간 동안만 보인다.
+pub const HELP_BUTTON_SECONDS: f32 = 30.0;
+/// 조작 안내 한 장에 들어가는 줄 수 (넘지 않게)
+pub const HELP_LINES_MAX: usize = 8;
+/// 조작 안내 (무엇을 하는지, 어떻게 하는지). 지금 게임의 실제 키·버튼이다 (임시 문구).
+pub const HELP_LINES_PC: [(&str, &str); 6] = [
+    ("걷기", "← → 화살표 키"),
+    ("점프", "Space 키 또는 ↑ 키"),
+    ("공격", "Q 키"),
+    ("캐기", "E 키를 꾹 눌러요"),
+    ("가방", "I 키"),
+    ("멈춤", "Esc 키"),
+];
+pub const HELP_LINES_TOUCH: [(&str, &str); 6] = [
+    ("걷기", "왼쪽 동그라미를 밀어요"),
+    ("점프", "동그라미를 위로 밀어요"),
+    ("공격", "오른쪽 아래 공격 버튼"),
+    ("캐기", "캐기 버튼을 꾹 눌러요"),
+    ("가방", "가방 버튼을 눌러요"),
+    ("멈춤", "왼쪽 위 멈춤 버튼"),
+];
+
 // ---- 튜토리얼 말풍선 화면 (US-119·120, 로건). 자리는 가상 화면 960×540 기준 ----
 /// 말풍선 카드: 가로·세로, 위 끝. 미션 진행 줄(아래 끝 159)·성공/실패 글(아래 끝 165) 바로 아래, 캔 것 팝업(위 끝 228) 바로 위에 들어간다. 가운데 정렬.
 /// 폰은 왼쪽 멈춤 버튼(오른쪽 끝 168)을 가로로 비켜서 PC와 같은 높이다.
@@ -959,6 +1004,39 @@ pub const TUTORIAL_FACE_BACK_COLOR: [f32; 4] = [0.68, 0.85, 1.0, 1.0];
 pub const TUTORIAL_FACE_RING_COLOR: [f32; 4] = [1.0, 0.82, 0.20, 1.0];
 pub const TUTORIAL_SKIP_FILL_COLOR: [f32; 4] = [1.0, 0.82, 0.25, 1.0];
 pub const TUTORIAL_SKIP_TEXT_COLOR: [f32; 4] = [0.13, 0.16, 0.36, 1.0];
+
+// ---- 창 한 줄 안내 그림 (US-121, 로건). 자리는 가상 화면 960×540 기준 ----
+/// 한 줄 카드: 글자 크기, 높이, 글 양옆 여백, 왼쪽 별 그림 폭
+pub const WINDOW_TIP_TEXT_SIZE: f32 = 21.0;
+pub const WINDOW_TIP_HEIGHT: f32 = 34.0;
+pub const WINDOW_TIP_PAD: f32 = 16.0;
+pub const WINDOW_TIP_ICON_W: f32 = 30.0;
+/// 창마다 카드 자리 (가운데 x, 위 y, 가장 넓을 때 폭). 순서는 `TipWindow::index`: 수학, 영어, 제작대, 상점, 가방, 깜짝 미션.
+/// 창 글자·칸·버튼이 없는 빈 곳에 놓는다 (창 모양이 바뀌면 `view::window_tip`의 시험이 겹침을 잡는다).
+pub const WINDOW_TIP_SPOTS: [(f32, f32, f32); 6] = [
+    (640.0, 495.0, 600.0),
+    (565.0, 16.0, 640.0),
+    (632.0, 422.0, 576.0),
+    (480.0, 482.0, 700.0),
+    (520.0, 26.0, 440.0),
+    (480.0, 236.0, 616.0),
+];
+
+// ---- 물음표(?) 버튼과 조작 안내 한 장 그림 (US-122, 로건). 자리는 가상 화면 960×540 기준 ----
+/// 물음표 버튼 (왼쪽 위 얼굴·물건 칸 아래). PC는 물건 칸(아래 끝 117) 바로 아래, 폰은 "멈춤" 버튼(아래 끝 178) 바로 아래.
+/// 폰 667×375에서 지름 56 화면 픽셀 (손가락으로 누르기 쉽게). 부모님이 고를 시안 값.
+pub const HELP_BUTTON_LEFT: f32 = 14.0;
+pub const HELP_BUTTON_TOP_PC: f32 = 126.0;
+pub const HELP_BUTTON_TOP_TOUCH: f32 = 188.0;
+pub const HELP_BUTTON_SIZE_PC: f32 = 64.0;
+pub const HELP_BUTTON_SIZE_TOUCH: f32 = 80.0;
+pub const HELP_BUTTON_COLOR: [f32; 4] = [1.0, 0.80, 0.22, 1.0];
+pub const HELP_BUTTON_MARK_COLOR: [f32; 4] = [0.13, 0.16, 0.36, 1.0];
+/// 조작 안내 한 장: 카드 자리, 제목, 닫기 버튼
+pub const HELP_SHEET: [f32; 4] = [70.0, 22.0, 820.0, 496.0];
+pub const HELP_TITLE_TEXT: &str = "이렇게 해요!";
+pub const HELP_CLOSE_TEXT: &str = "알았어요!";
+pub const HELP_CLOSE: [f32; 4] = [340.0, 436.0, 280.0, 70.0];
 
 // ---- 연습용 몬스터 그림 (US-124, 로건). 이름·생김새·색은 아이 질문 카드라서 임시 모양 ----
 /// 밤 좀비 그림에 곱하는 부드러운 민트색 (밤 몬스터와 한눈에 다르게)
@@ -1064,7 +1142,8 @@ pub const SETTINGS_ITEM_SEPARATOR: char = ';';
 pub const SETTINGS_VALUE_SEPARATOR: char = '=';
 /// 항목 이름 (글자에 쓰는 이름)
 pub const SETTINGS_KEY_TUTORIAL_DONE: &str = "tutorial";
-pub const SETTINGS_KEY_WINDOW_TIP_SEEN: &str = "tip";
+/// 창 한 줄 안내를 본 창들 (여섯 칸 숫자 0~63). 옛 `tip=`는 쓰지 않고, 있어도 읽을 때 무시한다.
+pub const SETTINGS_KEY_WINDOW_TIPS_SEEN: &str = "tips";
 pub const SETTINGS_KEY_SOUND_ON: &str = "sound";
 pub const SETTINGS_KEY_MUSIC_PERCENT: &str = "music";
 pub const SETTINGS_KEY_EFFECTS_PERCENT: &str = "effects";

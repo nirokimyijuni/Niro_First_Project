@@ -14,7 +14,7 @@ use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent};
 use logic::mission::MissionKind;
 use logic::player::{Facing, PlayerInput};
-use logic::practice::{MonsterKind, PracticeEvent};
+use logic::practice::PracticeEvent;
 use logic::settings::Settings;
 use logic::tutorial::{TutorialEvent, TutorialState, TutorialStep};
 use logic::weapon::Weapon;
@@ -228,7 +228,6 @@ fn practice_monster_comes_in_front_on_screen_when_attack_step_starts_in_first_da
     let events = g.take_practice_events();
     assert!(matches!(events.as_slice(), [PracticeEvent::Appeared { .. }]));
     let monster = g.practice.as_ref().unwrap();
-    assert_eq!(monster.kind(), MonsterKind::Practice);
     assert_eq!(monster.hp, PRACTICE_MONSTER_HP);
     let player_x = g.player.rect().center().x;
     assert!(g.world.is_on_screen(monster.rect().center().x, player_x), "화면 안에 나온다");
@@ -443,4 +442,39 @@ fn restart_after_down_does_not_show_tutorial_again() {
     g2.tutorial = next;
     assert!(!g2.start_tutorial(&Settings::default(), false));
     assert_eq!(g2.tutorial.state(), TutorialState::Finished);
+}
+
+// ---- 다른 안내가 말풍선 자리를 쓸 때 칭찬이 가려지지 않는다 (BUG-040) ----
+
+#[test]
+fn cheer_waits_while_another_notice_is_up_and_then_shows_in_full() {
+    let mut g = open_game();
+    start(&mut g);
+    walk_right(&mut g, TUTORIAL_WALK_DISTANCE + 20.0);
+    assert!(g.tutorial.is_cheering());
+    // 곡괭이 안내(4초)가 떠 있는 동안: 화면이 매 프레임 "안내 중"을 알려 준다
+    for _ in 0..(10.0 / FRAME) as usize {
+        g.tutorial.set_notice_up(true);
+        g.update(&idle(), FRAME);
+    }
+    assert!(g.tutorial.is_cheering(), "안내 동안 칭찬 시간은 흐르지 않는다");
+    assert_eq!(step_of(&g), Some(TutorialStep::Move));
+    // 안내가 끝나면 칭찬 1.5초를 처음부터 보고 나서 다음 말풍선
+    g.tutorial.set_notice_up(false);
+    run(&mut g, idle(), TUTORIAL_CHEER_SECONDS - 0.2);
+    assert!(g.tutorial.is_cheering());
+    run(&mut g, idle(), 0.4);
+    assert!(!g.tutorial.is_cheering());
+    assert_ne!(step_of(&g), Some(TutorialStep::Move));
+}
+
+#[test]
+fn notice_does_not_block_doing_the_step_and_skip_still_works() {
+    let mut g = open_game();
+    start(&mut g);
+    g.tutorial.set_notice_up(true);
+    walk_right(&mut g, TUTORIAL_WALK_DISTANCE + 20.0);
+    assert!(g.tutorial.is_cheering(), "안내 중에 해낸 일도 센다");
+    assert!(g.skip_tutorial(), "건너뛰기는 언제나 된다");
+    assert!(!g.tutorial.is_cheering());
 }

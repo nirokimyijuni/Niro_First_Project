@@ -5,7 +5,10 @@
 
 use crate::config::*;
 
-use crate::logic::settings::{settings_cleared, settings_from_text, settings_to_text, Settings};
+use crate::logic::settings::{settings_cleared, Settings};
+// 글자 만들고 읽기는 브라우저(wasm)에서만 쓴다. PC(네이티브)는 저장이 없어서 가져오면 안 쓰는 경고가 난다.
+#[cfg(target_arch = "wasm32")]
+use crate::logic::settings::{settings_from_text, settings_to_text};
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "env")]
 extern "C" {
@@ -152,6 +155,7 @@ extern "C" {
 }
 
 /// 바이트들을 저장 글자로 바꾼다. 너무 길거나 UTF-8이 깨졌으면 빈 글자(= 기본값).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // 브라우저(wasm)에서만 쓴다. PC 실행은 저장이 없다.
 fn settings_text_from_bytes(bytes: &[u8]) -> String {
     match String::from_utf8(bytes.to_vec()) {
         Ok(t) if t.chars().count() <= SETTINGS_MAX_CHARS => t,
