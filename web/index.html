@@ -181,6 +181,38 @@
                 localStorage.setItem(BEST_DAYS_KEY, String(days));
             } catch (e) {}
         };
+        // 설정 저장 (game/src/view/web.rs, US-125). 새 키 하나. 못 쓰거나 값이 이상하면 조용히 넘어간다.
+        // 한계: 이 브라우저 안에만 저장된다 (다른 기기·시크릿 창·브라우저 데이터 지움이면 사라진다).
+        var SETTINGS_KEY = "miss-game.settings";
+        var SETTINGS_MAX_CHARS = 200; // config.rs의 SETTINGS_MAX_CHARS와 같게
+        var settingsLoaded = null; // 읽은 글자의 바이트 (0번째를 부를 때 새로 읽는다)
+        var settingsSaving = [];
+        importObject.env.settings_load_byte = function (i) {
+            try {
+                if (i === 0 || settingsLoaded === null) {
+                    var t = localStorage.getItem(SETTINGS_KEY);
+                    settingsLoaded = typeof t === "string" && t.length <= SETTINGS_MAX_CHARS
+                        ? new TextEncoder().encode(t) : new Uint8Array(0);
+                }
+                return i < settingsLoaded.length ? settingsLoaded[i] : -1;
+            } catch (e) {
+                return -1;
+            }
+        };
+        importObject.env.settings_save_begin = function () { settingsSaving = []; };
+        importObject.env.settings_save_byte = function (b) {
+            if (settingsSaving.length < SETTINGS_MAX_CHARS * 4) settingsSaving.push(b & 255);
+        };
+        importObject.env.settings_save_end = function () {
+            try {
+                localStorage.setItem(SETTINGS_KEY, new TextDecoder().decode(new Uint8Array(settingsSaving)));
+            } catch (e) {}
+        };
+        importObject.env.settings_clear = function () {
+            try {
+                localStorage.removeItem(SETTINGS_KEY);
+            } catch (e) {}
+        };
         // 최고 점수 (US-069). 버틴 날 최고 기록과 따로 저장한다.
         var BEST_SCORE_KEY = "miss-game.best-score";
         importObject.env.best_score_load = function () {

@@ -230,6 +230,10 @@ async fn main() {
     // 최고 기록 (US-044). 브라우저 저장소에서 읽고, 새 기록이 나오면 저장한다.
     let mut best_days = view::web::load_best_days();
     let mut best_score = view::web::load_best_score();
+    // 설정 (US-125): 시작할 때 한 번 읽는다. 값을 바꾸는 쪽(튜토리얼·소리 스토리)이 바뀔 때만 view::web::save_settings(&settings)를 부른다.
+    // 게임 규칙 상태(Game)가 아니라 여기(화면 쪽)에 둔다. 아직 쓰는 곳이 없다.
+    #[allow(unused_variables, unused_mut)]
+    let mut settings = view::web::load_settings();
     // 시험용 단축 (엘리용, 부모님 결정 2026-11-14). 주소에 ?qa가 있을 때만 켜진다.
     let mut qa = view::qa::Qa::new(view::web::qa_mode());
 

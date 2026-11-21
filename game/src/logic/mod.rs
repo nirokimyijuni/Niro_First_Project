@@ -16,6 +16,7 @@ pub mod miss;
 pub mod mission;
 pub mod monster;
 pub mod player;
+pub mod settings;
 pub mod shop;
 pub mod skeleton;
 pub mod weapon;

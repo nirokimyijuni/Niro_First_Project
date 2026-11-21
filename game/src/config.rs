@@ -957,3 +957,26 @@ pub const LOGO_STUDIO_FADE: (f32, f32) = (4.0, 4.4);
 pub const LOADING_SPINNER_TURN_SECONDS: f32 = 1.0;
 /// "눌러서 시작" 글자가 천천히 깜빡이는 한 번 (진해졌다 흐려졌다 다시 진해지기까지)
 pub const TAP_TO_START_BLINK_SECONDS: f32 = 1.6;
+
+// ---- 설정 저장 (US-125, 수산나: 값 모양과 이름. 브라우저 읽기·쓰기는 로건) ----
+/// 브라우저 저장소에 쓰는 키 이름 (새 틀 하나. 옛 best-days·best-score 키는 따로 그대로)
+pub const SETTINGS_STORAGE_KEY: &str = "miss-game.settings";
+/// 저장 글자의 모양 버전 (맨 앞에 쓴다. 모양이 바뀌면 올린다)
+pub const SETTINGS_VERSION: u32 = 1;
+/// 저장 글자가 이보다 길면 이상한 값으로 보고 새 게임 값으로 읽는다
+pub const SETTINGS_MAX_CHARS: usize = 200;
+/// 항목 사이를 가르는 글자와, 이름과 값 사이를 가르는 글자
+pub const SETTINGS_ITEM_SEPARATOR: char = ';';
+pub const SETTINGS_VALUE_SEPARATOR: char = '=';
+/// 항목 이름 (글자에 쓰는 이름)
+pub const SETTINGS_KEY_TUTORIAL_DONE: &str = "tutorial";
+pub const SETTINGS_KEY_WINDOW_TIP_SEEN: &str = "tip";
+pub const SETTINGS_KEY_SOUND_ON: &str = "sound";
+pub const SETTINGS_KEY_MUSIC_PERCENT: &str = "music";
+pub const SETTINGS_KEY_EFFECTS_PERCENT: &str = "effects";
+/// 소리 크기는 0~100 정수(퍼센트)로 저장한다
+pub const SETTINGS_VOLUME_MAX_PERCENT: u8 = 100;
+/// 처음 값 (새 게임)
+pub const SETTINGS_DEFAULT_SOUND_ON: bool = true;
+pub const SETTINGS_DEFAULT_MUSIC_PERCENT: u8 = 70;
+pub const SETTINGS_DEFAULT_EFFECTS_PERCENT: u8 = 80;
