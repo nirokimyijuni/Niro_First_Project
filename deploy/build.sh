@@ -34,9 +34,46 @@ if ! grep -q "mq_js_bundle.js?v=${VERSION}" "$DIST/index.html" \
     exit 1
 fi
 echo "버전 꼬리: ?v=${VERSION}"
+# 소개 페이지와 공유 그림 (로건, 2026-11-21). 대표 주소 자리는 index.html처럼 아래에서 채운다.
+cp "$ROOT/web/about.html" "$DIST/about.html"
+cp "$ROOT/web/og-image.png" "$DIST/og-image.png"
+# 아이콘 (로건, 2026-11-21): 탭 아이콘, 홈 화면 아이콘, 앱 설명서(manifest)
+cp "$ROOT/web/favicon.ico" "$DIST/favicon.ico"
+cp "$ROOT/web/manifest.webmanifest" "$DIST/manifest.webmanifest"
+cp -r "$ROOT/web/icons" "$DIST/icons"
 # 그림·글꼴·소리: 게임이 "assets/..." 경로로 불러오므로 dist/assets 로 복사한다 (.gitkeep 제외)
 cp -r "$ROOT/game/assets" "$DIST/assets"
 find "$DIST/assets" -name .gitkeep -delete
+
+# 구글 검색 준비 (부모 결정 2026-11-21): robots.txt와 sitemap.xml을 dist 맨 위에 넣는다.
+# 대표 주소는 deploy/seo/site-url.txt 한 곳에만 둔다 (끝에 / 포함). web/의 canonical·og·twitter 주소도
+# __SITE_URL__ 자리표시로 두고 여기서 채운다. AWS에도 같은 파일이 올라가지만 주소는 대표 주소만 가리킨다.
+# lastmod는 빌드 날짜(UTC).
+SITE_URL="$(tr -d '\r\n' < "$ROOT/deploy/seo/site-url.txt")"
+case "$SITE_URL" in
+    https://*/) ;;
+    *) echo "오류: deploy/seo/site-url.txt는 https://로 시작하고 /로 끝나야 해요: $SITE_URL" >&2; exit 1 ;;
+esac
+for f in index.html about.html; do
+    sed -i "s|__SITE_URL__|${SITE_URL}|g" "$DIST/$f"
+    if grep -q "__SITE_URL__" "$DIST/$f"; then
+        echo "오류: dist/$f에 대표 주소 자리표시가 남았어요" >&2
+        exit 1
+    fi
+done
+LASTMOD="$(date -u +%Y-%m-%d)"
+for f in robots.txt sitemap.xml; do
+    sed -e "s|__SITE_URL__|${SITE_URL}|g" -e "s|__LASTMOD__|${LASTMOD}|g" \
+        "$ROOT/deploy/seo/$f" > "$DIST/$f"
+    if grep -q "__[A-Z_]*__" "$DIST/$f"; then
+        echo "오류: dist/$f에 채우지 못한 자리가 남았어요" >&2
+        exit 1
+    fi
+done
+# Search Console 소유 확인용 HTML 파일(google로 시작)이 있으면 그대로 dist 맨 위에 둔다. 비밀 값 아님.
+for f in "$ROOT"/deploy/seo/google*.html; do
+    if [ -e "$f" ]; then cp "$f" "$DIST/"; fi
+done
 
 # 글꼴 줄이기 (부모 결정 2026-11-14): game/src와 web/의 글자 + 안전용 글자만 남긴 글꼴로
 # dist 쪽 파일을 같은 이름으로 바꾼다. 원본 game/assets/fonts/Jua-Regular.ttf는 그대로.

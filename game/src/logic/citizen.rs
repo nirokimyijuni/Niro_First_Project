@@ -72,18 +72,9 @@ impl WalkingCitizen {
     /// `place` 장소 가운데쯤에 선다. 막혀 있으면 가장 가까운 빈 땅이다.
     /// 걷는 쪽과 첫 걷기 시간은 시드로 정한다 (네 명이 한꺼번에 멈추지 않게).
     fn in_place(place: usize, random: &mut SeededRandom, world: &World) -> WalkingCitizen {
-        const SEARCH_STEP: usize = 8;
         let room = SCREEN_WIDTH - WALKING_CITIZEN_WIDTH;
         let middle = place as f32 * SCREEN_WIDTH + room / 2.0;
-        let body_at = |x: f32| {
-            Rect::new(x, world.ground_y - WALKING_CITIZEN_HEIGHT, WALKING_CITIZEN_WIDTH, WALKING_CITIZEN_HEIGHT)
-        };
-        let rect = (0..(room / 2.0) as usize)
-            .step_by(SEARCH_STEP)
-            .flat_map(|offset| [middle - offset as f32, middle + offset as f32])
-            .map(body_at)
-            .find(|body| !is_blocked(*body, world))
-            .unwrap_or(body_at(middle));
+        let rect = nearest_free_body(place, middle, world).unwrap_or(body_on_ground(middle, world));
         let facing = if random.next_unit() < 0.5 { Facing::Left } else { Facing::Right };
         let seconds_left = random.next_unit() * WALKING_CITIZEN_WALK_SECONDS;
         WalkingCitizen { rect, facing, place, walking: true, seconds_left }
@@ -96,6 +87,12 @@ impl WalkingCitizen {
 
     /// `dt`초 지낸다: 걷기와 멈춤을 번갈아 하고, 걷다가 앞이 막히면 그 자리에서 돌아선다.
     fn walk(&mut self, dt: f32, world: &World) {
+        // 상자 같은 것과 몸이 겹쳐 있으면 (낀 채로는 양쪽 다 막혀 못 움직인다) 가장 가까운 빈 땅으로 비켜 선다.
+        if is_blocked(self.rect, world) {
+            if let Some(free) = nearest_free_body(self.place, self.rect.x, world) {
+                self.rect = free;
+            }
+        }
         self.seconds_left -= dt.max(0.0);
         if self.seconds_left <= 0.0 {
             self.walking = !self.walking;
@@ -119,6 +116,25 @@ impl WalkingCitizen {
 
 fn is_blocked(body: Rect, world: &World) -> bool {
     world.monster_walls().any(|wall| really_overlaps(wall, body))
+}
+
+/// 왼쪽이 `x`인, 땅에 선 일반 시민 몸.
+fn body_on_ground(x: f32, world: &World) -> Rect {
+    Rect::new(x, world.ground_y - WALKING_CITIZEN_HEIGHT, WALKING_CITIZEN_WIDTH, WALKING_CITIZEN_HEIGHT)
+}
+
+/// `place` 장소 안에서 왼쪽이 `start_x`에 가장 가까운, 막히지 않은 몸 자리. 빈 곳이 없으면 None.
+/// 8픽셀씩 양옆으로 넓혀 가며 찾는다 (장소 폭만큼만 찾고 끝난다).
+fn nearest_free_body(place: usize, start_x: f32, world: &World) -> Option<Rect> {
+    const SEARCH_STEP: usize = 8;
+    let place_left = place as f32 * SCREEN_WIDTH;
+    let place_right = place_left + SCREEN_WIDTH - WALKING_CITIZEN_WIDTH;
+    (0..SCREEN_WIDTH as usize)
+        .step_by(SEARCH_STEP)
+        .flat_map(|offset| [start_x - offset as f32, start_x + offset as f32])
+        .filter(|x| place_left <= *x && *x <= place_right)
+        .map(|x| body_on_ground(x, world))
+        .find(|body| !is_blocked(*body, world))
 }
 
 /// 맵의 시민 전부. 긴 맵에만 있다.

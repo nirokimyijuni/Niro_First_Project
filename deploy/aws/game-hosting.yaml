@@ -1,6 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 # 미쓰 찾기 게임 — AWS 정적 호스팅 (S3 + CloudFront + GitHub Actions OIDC 역할 + 예산 알림)
 # 관리: 케빈(에이전트). 부모 결정 2026-11-20: 도메인 없이 cloudfront.net 주소, GitHub Pages와 두 곳 다 배포.
+# 부모 결정 2026-11-21: 게임 주소 findmis.niro-studio.com. DomainName·AcmCertificateArn·HostedZoneId 파라미터로 켠다
+#   (비우면 예전과 똑같이 cloudfront.net만). 안내서: deploy/aws/도메인.md
 # 이 파일은 부모님이 AWS 콘솔(CloudFormation)에서 직접 올린다. 케빈은 AWS에 아무것도 만들지 않는다.
 # 권장 리전: ap-northeast-2 (서울). 비밀 값(키·토큰)은 이 파일에 없다.
 Description: Miss-game static hosting - private S3 + CloudFront (OAC, HTTPS) + GitHub OIDC deploy role (main only) + monthly budget alert
@@ -48,6 +50,23 @@ Parameters:
     Type: String
     Default: ""
     Description: 예산 알림 받을 부모님 메일 (콘솔에서만 입력, 파일에 적지 않는다)
+  # ---------- 내 도메인 (부모 결정 2026-11-21: findmis.niro-studio.com). 셋 다 비우면 지금처럼 cloudfront.net 주소만 ----------
+  DomainName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+    Description: 게임 주소 (예 findmis.niro-studio.com). 비우면 도메인 없이 cloudfront.net 주소만
+  AcmCertificateArn:
+    Type: String
+    Default: ""
+    # CloudFront는 us-east-1(버지니아) 인증서만 받는다. 다른 리전 ARN은 여기서 막는다.
+    AllowedPattern: "^$|^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$"
+    Description: us-east-1(버지니아)에서 발급(Issued)된 ACM 인증서 ARN. DomainName과 함께 넣는다
+  HostedZoneId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^Z[A-Z0-9]+$"
+    Description: Route 53 호스팅 존 ID (niro-studio.com, Z로 시작). 넣으면 findmis 별칭(A·AAAA) 레코드를 이 스택이 만든다
 
 # REVIEW-027 1번: 공급자를 안 만들 거면 기존 ARN이 꼭 있어야 한다. 스택 만들기 전에 막는다.
 Rules:
@@ -56,9 +75,31 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref ExistingOidcProviderArn, ""]]
         AssertDescription: CreateOidcProvider가 false이면 ExistingOidcProviderArn을 넣어 주세요
+  # 도메인과 인증서는 둘 다 넣거나 둘 다 비운다. 하나만 넣으면 CloudFront가 실패하므로 미리 막는다.
+  DomainNeedsCertificate:
+    RuleCondition: !Not [!Equals [!Ref DomainName, ""]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AcmCertificateArn, ""]]
+        AssertDescription: DomainName을 넣었으면 AcmCertificateArn(us-east-1)도 넣어 주세요
+  CertificateNeedsDomain:
+    RuleCondition: !Not [!Equals [!Ref AcmCertificateArn, ""]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref DomainName, ""]]
+        AssertDescription: AcmCertificateArn을 넣었으면 DomainName도 넣어 주세요
+  HostedZoneNeedsDomain:
+    RuleCondition: !Not [!Equals [!Ref HostedZoneId, ""]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref DomainName, ""]]
+        AssertDescription: HostedZoneId를 넣었으면 DomainName과 AcmCertificateArn도 넣어 주세요
 
 Conditions:
   MakeOidcProvider: !Equals [!Ref CreateOidcProvider, "true"]
+  UseCustomDomain: !And
+    - !Not [!Equals [!Ref DomainName, ""]]
+    - !Not [!Equals [!Ref AcmCertificateArn, ""]]
+  MakeDnsRecords: !And
+    - !Condition UseCustomDomain
+    - !Not [!Equals [!Ref HostedZoneId, ""]]
   MakeBudget: !And
     - !Equals [!Ref CreateBudget, "true"]
     - !Not [!Equals [!Ref BudgetAlertEmail, ""]]
@@ -118,9 +159,18 @@ Resources:
           Compress: true
           # AWS 관리형 정책 "CachingOptimized" (기본 캐시). 배포 때마다 /* 무효화로 새 파일을 보이게 한다.
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-        # 기본 인증서(*.cloudfront.net)로 https. 도메인은 나중에.
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: true
+        # 도메인을 넣으면 그 이름으로도 열린다. cloudfront.net 주소는 어느 쪽이든 계속 열린다.
+        Aliases: !If
+          - UseCustomDomain
+          - [!Ref DomainName]
+          - !Ref AWS::NoValue
+        # 도메인 없으면 기본 인증서(*.cloudfront.net). 있으면 ACM 인증서 + SNI(추가 요금 없음) + TLS 1.2 이상.
+        ViewerCertificate: !If
+          - UseCustomDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
 
   SiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -148,6 +198,33 @@ Resources:
             Condition:
               Bool:
                 aws:SecureTransport: "false"
+
+  # ---------- 도메인 → CloudFront 별칭 레코드 (HostedZoneId를 넣었을 때만) ----------
+  # Z2FDTNDATAQYW2 = CloudFront 별칭 대상에 쓰는 AWS 고정 호스팅 존 ID (모든 계정 같음, 비밀 아님).
+  # 별칭 조회는 Route 53 요금이 없다.
+  DomainRecordA:
+    Type: AWS::Route53::RecordSet
+    Condition: MakeDnsRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt SiteDistribution.DomainName
+        EvaluateTargetHealth: false
+
+  DomainRecordAAAA:
+    Type: AWS::Route53::RecordSet
+    Condition: MakeDnsRecords
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt SiteDistribution.DomainName
+        EvaluateTargetHealth: false
 
   # ---------- GitHub Actions가 키 없이 들어오는 길 (OIDC) ----------
   GitHubOidcProvider:
@@ -254,3 +331,7 @@ Outputs:
   DeployRoleArn:
     Description: GitHub 저장소 변수 AWS_DEPLOY_ROLE_ARN 에 넣을 값 (이게 있어야 AWS 배포가 켜진다)
     Value: !GetAtt DeployRole.Arn
+  PublicDomain:
+    Condition: UseCustomDomain
+    Description: GitHub 저장소 변수 AWS_PUBLIC_DOMAIN 에 넣을 값 (플레이 주소 https://<이 값>/)
+    Value: !Ref DomainName

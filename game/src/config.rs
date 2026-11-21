@@ -170,6 +170,32 @@ pub const MONSTER_MAX_ON_SCREEN: usize = 6;
 /// M5 나올 차례에 좀비 대신 스켈레톤이 나올 확률. 나오는 시간은 `ZOMBIE_SPAWN_SECONDS`를 같이 쓴다.
 pub const SKELETON_SPAWN_CHANCE: f32 = 0.5;
 
+// ---- 날이 지날수록 몬스터가 많아진다 ([임시] 부모님 요청 2026-11-21, 해 보고 고친다) ----
+// 1일째는 위의 값(`ZOMBIE_SPAWN_SECONDS`, `MONSTERS_PER_SPAWN`, `MONSTER_MAX_ON_SCREEN`, `ZOMBIE_MAX_ON_SCREEN`) 그대로다.
+// 날 번호는 시계의 날(1일째 낮·밤 = 1)이다. 상자에서 나오는 몬스터도 같은 상한을 쓴다.
+//
+// 날  | 나오는 간격(초) | 한 번에 | 화면 최대 | 좀비 최대
+//  1  | 10.0           | 2       | 6         | 4
+//  2  |  9.3           | 2       | 7         | 4
+//  3  |  8.6           | 2       | 8         | 5
+//  4  |  7.9           | 3       | 9         | 6
+//  5  |  7.2           | 3       | 10        | 6
+//  6  |  6.5           | 3       | 11        | 7
+//  7  |  6.0 (하한)    | 4       | 12 (상한) | 8
+
+/// 하루마다 나오는 간격이 이만큼 짧아진다 (초).
+pub const SPAWN_SECONDS_SHORTER_PER_DAY: f32 = 0.7;
+/// 나오는 간격은 이보다 짧아지지 않는다 (초).
+pub const SPAWN_SECONDS_SHORTEST: f32 = 6.0;
+/// 이 날 수마다 한 번에 나오는 수가 1 는다 (1일째부터 센다: 4일째 +1, 7일째 +2).
+pub const MONSTERS_PER_SPAWN_MORE_EVERY_DAYS: u32 = 3;
+/// 한 번에 나오는 수는 이보다 많아지지 않는다.
+pub const MONSTERS_PER_SPAWN_MOST: usize = 4;
+/// 하루마다 화면 최대 수가 이만큼 는다.
+pub const MONSTER_MAX_MORE_PER_DAY: usize = 1;
+/// 화면 최대 수는 이보다 많아지지 않는다. 좀비 최대는 1일째 비율(4/6)대로 따라간다 (내림).
+pub const MONSTER_MAX_MOST: usize = 12;
+
 /// M5 스켈레톤 크기 (가로, 세로)
 pub const SKELETON_WIDTH: f32 = 48.0;
 pub const SKELETON_HEIGHT: f32 = 64.0;
@@ -637,8 +663,12 @@ pub const SKATES_OFF_TEXT: &str = "아침이 되어 스케이트를 벗었어요
 /// 갑옷 시간이 끝날 때 나오는 글 (`ShopEvent::ArmorOff`)
 pub const ARMOR_OFF_TEXT: &str = "갑옷 시간이 끝났어요";
 
-/// 임시-25 스케이트를 신으면 걷는 빠르기가 이만큼 곱해진다. 산 뒤 처음 오는 06:00에 벗겨진다.
+/// 임시-25 스케이트를 신으면 걷는 빠르기가 이만큼 곱해진다.
 pub const SKATES_SPEED_MULTIPLIER: f32 = 1.5;
+/// 스케이트가 벗겨지는 아침 (부모님 결정 2026-11-21): 낮에 신으면 다음 06:00(1번째 아침),
+/// 밤(18:00~06:00)에 신으면 하루 더 지난 06:00(2번째 아침)에 벗겨진다. 상자에서 얻어 신어도 같다.
+pub const SKATES_MORNINGS_WHEN_WORN_BY_DAY: u32 = 1;
+pub const SKATES_MORNINGS_WHEN_WORN_AT_NIGHT: u32 = 2;
 
 /// 임시-26 갑옷 무적 시간 (게임 속 초 = 빨리감기 배수만큼 빨리 준다, D71). 다이아몬드 12분, 무지개 72초.
 pub const DIAMOND_ARMOR_SECONDS: f32 = 12.0 * 60.0;
@@ -899,3 +929,29 @@ mod tests {
         assert_eq!(NIGHT_GAME_MINUTES as f32 / NIGHT_SECONDS, 1.2);
     }
 }
+
+// ---- 로고·시작 화면 (US-109, 로건: 화면 전용 시간 값. 그림 값은 view/logo.rs) ----
+/// 로고 전체 길이 (초, [임시-105] 5~6초)
+pub const LOGO_SECONDS: f32 = 5.8;
+/// 1·2·3이 끝나는 때 (숫자 하나에 1/3씩)
+pub const LOGO_COUNT_END: f32 = 2.5;
+/// "Hey"가 끝나고 "Lucky Mis!"가 나오는 때
+pub const LOGO_HEY_END: f32 = 3.5;
+/// 글자가 통통 튀어나오는 시간
+pub const LOGO_POP_SECONDS: f32 = 0.35;
+/// 글자가 작아지며 사라지는 시간 (다음 글자 바로 전)
+pub const LOGO_OUT_SECONDS: f32 = 0.18;
+/// 미스가 아래에서 올라오는 때 (시작, 끝)
+pub const LOGO_MIS_RISE: (f32, f32) = (3.65, 4.25);
+/// 미스 눈 깜빡이는 때 (두 번)과 길이
+pub const LOGO_BLINKS: [f32; 2] = [4.5, 4.85];
+pub const LOGO_BLINK_SECONDS: f32 = 0.12;
+/// 미스가 살짝 뿅 뛰는 때와 길이
+pub const LOGO_HOP_START: f32 = 5.1;
+pub const LOGO_HOP_SECONDS: f32 = 0.35;
+/// "NIRO STUDIO"가 나타나는 때 (시작, 끝)
+pub const LOGO_STUDIO_FADE: (f32, f32) = (4.0, 4.4);
+/// "Now Loading..." 도는 점이 한 바퀴 도는 시간 (web/index.html의 CSS 1s와 같아야 한다)
+pub const LOADING_SPINNER_TURN_SECONDS: f32 = 1.0;
+/// "눌러서 시작" 글자가 천천히 깜빡이는 한 번 (진해졌다 흐려졌다 다시 진해지기까지)
+pub const TAP_TO_START_BLINK_SECONDS: f32 = 1.6;

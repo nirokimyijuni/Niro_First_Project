@@ -214,11 +214,17 @@ impl M6Art {
 }
 
 impl Assets {
-    pub async fn load() -> Assets {
+    /// 글꼴만 먼저 불러온다 (US-109: 로고는 글꼴만 있으면 그릴 수 있다). (글꼴, 파일 내용)
+    pub async fn load_font() -> (Font, Vec<u8>) {
         let font_bytes = load_file(FONT_PATH)
             .await
             .expect("한글 글꼴(Jua)을 불러오지 못했어요");
         let font = load_ttf_font_from_bytes(&font_bytes).expect("한글 글꼴(Jua)을 읽지 못했어요");
+        (font, font_bytes)
+    }
+
+    /// 글꼴을 뺀 나머지 그림을 불러온다. 로고가 나오는 동안 같이 불러온다 (US-109).
+    pub async fn load_with_font(font: Font, font_bytes: Vec<u8>) -> Assets {
         let title = TitleArt::new(&font_bytes);
         let bytes = load_file(CHARACTER_SHEET_PATH)
             .await

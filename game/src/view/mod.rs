@@ -11,6 +11,7 @@ pub mod gameover;
 pub mod gather;
 pub mod hud;
 pub mod items;
+pub mod logo;
 pub mod input;
 pub mod math;
 pub mod mission;

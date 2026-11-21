@@ -1,0 +1,6 @@
+# 검색 로봇 안내 (케빈 관리, 부모 결정 2026-11-21)
+# 모두 허용. 대표 주소는 deploy/seo/site-url.txt 한 곳에서 바꾼다 (빌드 때 deploy/build.sh가 채움).
+User-agent: *
+Allow: /
+
+Sitemap: __SITE_URL__sitemap.xml

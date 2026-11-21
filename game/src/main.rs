@@ -214,11 +214,16 @@ fn window_conf() -> Conf {
 async fn main() {
     // 흉내 마우스는 다른 손가락이 움직이면 탭 자리가 덮어써진다. 터치는 fingers()로만 받는다.
     simulate_mouse_with_touch(false);
-    let assets = Assets::load().await;
+    // 폰 터치 조작 (D16). 터치가 들어오면 터치 모드(조이스틱·버튼 보이기), 키보드를 누르면 다시 숨긴다.
+    // 로고도 같은 것을 써서, 로고를 넘긴 손가락이 타이틀에서 새 누름이 되지 않는다 (US-109).
+    let mut touch = TouchControls::new();
+    // 시작 화면 (US-109): 글꼴만 먼저 받고, Now Loading 동안 나머지 그림을 받는다 → "눌러서 시작" → 니로 스튜디오 로고.
+    // 게임을 열 때 한 번만 (장면 루프 밖). ?qa에서는 눌러서 시작과 로고를 건너뛴다.
+    let (font, font_bytes) = Assets::load_font().await;
+    let loading = macroquad::experimental::coroutines::start_coroutine(Assets::load_with_font(font.clone(), font_bytes));
+    let assets = view::logo::play_logo(&font, &mut touch, view::web::qa_mode(), || loading.retrieve()).await;
     let mut scene = Scene::Title;
     let mut first_frame = true;
-    // 폰 터치 조작 (D16). 터치가 들어오면 터치 모드(조이스틱·버튼 보이기), 키보드를 누르면 다시 숨긴다.
-    let mut touch = TouchControls::new();
     let mut touch_mode = false;
     // 웹 배포 버전 (타이틀 구석에 작게). 로컬 실행이면 None.
     let version = view::web::game_version();
@@ -557,7 +562,7 @@ async fn main() {
             draw_rotate_hint(&TextPainter::new(&assets.font, screen_dpi_scale()), sw, sh);
         }
         if first_frame {
-            // 첫 그림을 그렸으니 웹페이지의 "불러오는 중..." 글자를 치운다.
+            // 첫 그림을 그렸으니 웹페이지의 "Now Loading..." 화면을 치운다.
             view::web::hide_loading_screen();
             first_frame = false;
         }

@@ -7,7 +7,7 @@ use crate::config::{
     USE_NO_MONSTER_NEAR_TEXT, USE_NO_MONSTER_ON_SCREEN_TEXT, DIAMOND_ARMOR_PRICE, DIAMOND_ARMOR_SECONDS, GOLD_SELL_PRICE, HEALTH_POTION_NAME,
     HEALTH_POTION_PRICE, POISON_POTION_NAME, POISON_POTION_PRICE, RAINBOW_ARMOR_NAME, RAINBOW_ARMOR_PRICE, RAINBOW_ARMOR_SECONDS,
     SHOP_ALREADY_HAVE_TEXT, SHOP_NONE_TO_SELL_TEXT, SHOP_NOT_ENOUGH_COINS_TEXT, SILVER_SELL_PRICE, SKATES_NAME, SKATES_PRICE,
-    SKATES_SPEED_MULTIPLIER,
+    SKATES_MORNINGS_WHEN_WORN_AT_NIGHT, SKATES_MORNINGS_WHEN_WORN_BY_DAY, SKATES_SPEED_MULTIPLIER,
 };
 use macroquad::math::Vec2;
 
@@ -209,6 +209,8 @@ pub struct Shop {
     health_potions: u32,
     poison_potions: u32,
     skates_on: bool,
+    /// 스케이트가 벗겨질 때까지 남은 06:00 수.
+    skate_mornings_left: u32,
     armor: Option<Armor>,
     armor_seconds_left: f32,
 }
@@ -255,13 +257,29 @@ impl Shop {
         self.skates_on
     }
 
+    /// 낮에 신는다: 다음 06:00에 벗겨진다.
     pub fn put_on_skates(&mut self) {
-        self.skates_on = true;
+        self.put_on_skates_when(false);
     }
 
-    /// 06:00에 부른다. 신고 있었으면 벗고 true.
+    /// 스케이트를 신는다. 밤(18:00~06:00)에 신으면 하루 더 지난 06:00에 벗겨진다 (부모님 결정 2026-11-21).
+    pub fn put_on_skates_when(&mut self, at_night: bool) {
+        self.skates_on = true;
+        self.skate_mornings_left =
+            if at_night { SKATES_MORNINGS_WHEN_WORN_AT_NIGHT } else { SKATES_MORNINGS_WHEN_WORN_BY_DAY };
+    }
+
+    /// 06:00에 부른다. 벗을 아침이 되었으면 벗고 true. 아직이면 남은 아침만 하나 줄고 false.
     pub fn take_off_skates(&mut self) -> bool {
-        std::mem::replace(&mut self.skates_on, false)
+        if !self.skates_on {
+            return false;
+        }
+        self.skate_mornings_left = self.skate_mornings_left.saturating_sub(1);
+        if self.skate_mornings_left > 0 {
+            return false;
+        }
+        self.skates_on = false;
+        true
     }
 
     /// 걷는 빠르기에 곱하는 수: 스케이트를 신으면 `SKATES_SPEED_MULTIPLIER`, 아니면 1.

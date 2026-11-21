@@ -429,6 +429,8 @@ impl Game {
         if self.cleared {
             return;
         }
+        // 날이 지날수록 몬스터가 많아진다 (상자 몬스터도 같은 상한).
+        self.combat.day_number = self.clock.day_number();
         if self.math.is_open() {
             self.wait_after_math_answer(dt, events);
             return;
@@ -789,7 +791,7 @@ impl Game {
         match item {
             ShopItem::HealthPotion => self.shop.add_potion(Potion::Health),
             ShopItem::PoisonPotion => self.shop.add_potion(Potion::Poison),
-            ShopItem::Skates => self.shop.put_on_skates(),
+            ShopItem::Skates => self.shop.put_on_skates_when(self.clock.is_night()),
             ShopItem::RainbowArmor => self.shop.put_on_armor(Armor::Rainbow),
             ShopItem::DiamondArmor => self.shop.put_on_armor(Armor::Diamond),
         }
@@ -1100,7 +1102,7 @@ impl Game {
             }
             SurpriseItem::HealthPotion => self.shop.add_potion(Potion::Health),
             SurpriseItem::PoisonPotion => self.shop.add_potion(Potion::Poison),
-            SurpriseItem::Skates => self.shop.put_on_skates(),
+            SurpriseItem::Skates => self.shop.put_on_skates_when(self.clock.is_night()),
             SurpriseItem::RainbowArmor => self.shop.put_on_armor(Armor::Rainbow),
             SurpriseItem::DiamondArmor => self.shop.put_on_armor(Armor::Diamond),
             SurpriseItem::SyringeGun => bag.syringe_guns += 1,
@@ -1121,7 +1123,8 @@ impl Game {
             let rect = self.boxes.list[index].rect;
             let someone_there = really_overlaps(rect, self.body_on_map())
                 || self.combat.any_monster_touches(rect)
-                || self.citizens.list.iter().any(|citizen| really_overlaps(citizen.rect, rect));
+                || self.citizens.list.iter().any(|citizen| really_overlaps(citizen.rect, rect))
+                || self.citizens.walkers.iter().any(|walker| really_overlaps(walker.rect, rect));
             if someone_there {
                 continue;
             }

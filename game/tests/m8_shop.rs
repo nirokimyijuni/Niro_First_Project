@@ -481,19 +481,90 @@ fn skates_stay_on_until_the_next_six_am() {
     assert_eq!(g.buy(ShopItem::Skates), Ok(()));
 }
 
+/// 밤(18:00~06:00)에 산 스케이트는 첫 06:00에는 그대로이고, 하루 더 지난 06:00에 벗겨진다 (부모님 결정 2026-11-21).
+fn check_night_skates_last_until_the_second_six_am(g: &mut Game) {
+    g.missions.turn_off_all();
+    give_coins(g, SKATES_PRICE);
+    g.buy(ShopItem::Skates).unwrap();
+    let until_first_six = g.clock.seconds_left_in_phase();
+    pass_game_time(g, until_first_six - 2.0);
+    assert!(g.shop.has_skates(), "첫 06:00 바로 전");
+    pass_game_time(g, 3.0);
+    assert_eq!(g.clock.day_number(), 2);
+    assert!(g.shop.has_skates(), "첫 06:00에는 그대로다");
+    assert!(!g.take_shop_events().contains(&ShopEvent::SkatesOff));
+    assert_eq!(g.buy(ShopItem::Skates), Err(CantBuy::AlreadyHave));
+    let until_second_six = g.clock.seconds_left_in_phase() + NIGHT_SECONDS;
+    pass_game_time(g, until_second_six - 2.0);
+    assert_eq!(g.clock.day_number(), 2);
+    assert!(g.shop.has_skates(), "둘째 06:00 바로 전");
+    pass_game_time(g, 3.0);
+    assert_eq!(g.clock.day_number(), 3);
+    assert!(!g.shop.has_skates(), "둘째 06:00에 벗겨진다");
+    assert!(g.take_shop_events().contains(&ShopEvent::SkatesOff));
+}
+
 #[test]
-fn skates_bought_at_five_am_come_off_an_hour_later() {
+fn skates_bought_at_night_come_off_on_the_second_six_am() {
+    // 1일째 밤 22:00쯤에 산다.
+    let mut g = empty_game();
+    skip_to_night(&mut g);
+    g.clock.update(4.0 * 60.0 / 1.2 + 0.5);
+    assert!(g.clock.is_night());
+    assert_eq!(g.clock.hour_minute().0, 22);
+    check_night_skates_last_until_the_second_six_am(&mut g);
+}
+
+#[test]
+fn skates_bought_at_five_am_last_until_the_next_days_six_am() {
+    // 05:00도 밤(18:00~06:00)이다: 1시간 뒤 06:00이 아니라 하루 더 지난 06:00에 벗겨진다 (부모님 결정 2026-11-21).
     let mut g = empty_game();
     g.clock.update(DAY_SECONDS + 11.0 * 60.0 / 1.2);
     assert_eq!(g.clock.hour_minute(), (5, 0));
     g.update(&idle(), 0.0);
+    check_night_skates_last_until_the_second_six_am(&mut g);
+}
+
+#[test]
+fn skates_bought_right_at_six_pm_count_as_night_and_at_six_am_as_day() {
+    // 18:00 바로 그 순간은 밤이다.
+    let mut g = empty_game();
+    skip_to_night(&mut g);
+    assert_eq!(g.clock.hour_minute(), (18, 0));
+    check_night_skates_last_until_the_second_six_am(&mut g);
+
+    // 06:00 바로 그 순간은 낮이다: 다음 06:00에 벗겨진다.
+    let mut g = empty_game();
+    g.missions.turn_off_all();
+    g.clock.update(DAY_SECONDS + NIGHT_SECONDS);
+    assert_eq!((g.clock.day_number(), g.clock.hour_minute()), (2, (6, 0)));
+    g.update(&idle(), 0.0);
     give_coins(&mut g, SKATES_PRICE);
     g.buy(ShopItem::Skates).unwrap();
-    let one_hour = 60.0 / 1.2;
-    pass_game_time(&mut g, one_hour - 2.0);
+    pass_game_time(&mut g, DAY_SECONDS + NIGHT_SECONDS - 2.0);
     assert!(g.shop.has_skates());
     pass_game_time(&mut g, 3.0);
-    assert!(!g.shop.has_skates());
+    assert_eq!(g.clock.day_number(), 3);
+    assert!(!g.shop.has_skates(), "낮에 산 것은 다음 06:00에 벗겨진다");
+}
+
+#[test]
+fn time_does_not_pass_while_buying_skates_at_night() {
+    // 상점 안에서는 시계가 멈춘다: 05:59에 들어가 오래 있다가 사도 아직 밤에 산 것이다.
+    let mut g = new_game();
+    g.missions.turn_off_all();
+    g.clock.update(DAY_SECONDS + NIGHT_SECONDS - 1.0);
+    g.update(&idle(), 0.0);
+    answer_quiz_if_open(&mut g);
+    enter_shop(&mut g);
+    run(&mut g, idle(), 5.0);
+    assert!(g.clock.is_night() && g.clock.day_number() == 1, "상점 안에서 06:00이 지나가지 않는다");
+    give_coins(&mut g, SKATES_PRICE);
+    g.buy(ShopItem::Skates).unwrap();
+    g.close_shop();
+    pass_game_time(&mut g, 3.0);
+    assert_eq!(g.clock.day_number(), 2);
+    assert!(g.shop.has_skates(), "첫 06:00에는 그대로다");
 }
 
 // ---- US-070 갑옷 ----

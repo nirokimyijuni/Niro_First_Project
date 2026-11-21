@@ -10,9 +10,10 @@ use super::skeleton::{ProjectileKind, Skeleton, SkeletonStage, Skeletons};
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     BOX_MONSTER_WAIT_SECONDS, CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
-    HOUSE_DOOR_REACH, MONSTERS_PER_SPAWN, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
+    HOUSE_DOOR_REACH, MONSTERS_PER_SPAWN, MONSTERS_PER_SPAWN_MORE_EVERY_DAYS, MONSTERS_PER_SPAWN_MOST, MONSTER_MAX_MORE_PER_DAY,
+    MONSTER_MAX_MOST, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
     PLAYER_ATTACK_RANGE, PLAYER_HP_PER_LEVEL, POISON_DAMAGE, POISON_RANGE, PLAYER_HURT_INVINCIBLE_SECONDS, PLAYER_START_HP, SCREEN_WIDTH,
-    SKELETON_SPAWN_CHANCE, SKELETON_WIDTH, ZOMBIE_ATTACK, ZOMBIE_FLOAT_CHANCE, ZOMBIE_MAX_ON_SCREEN,
+    SKELETON_SPAWN_CHANCE, SKELETON_WIDTH, SPAWN_SECONDS_SHORTER_PER_DAY, SPAWN_SECONDS_SHORTEST, ZOMBIE_ATTACK, ZOMBIE_FLOAT_CHANCE, ZOMBIE_MAX_ON_SCREEN,
     ZOMBIE_SPAWN_SECONDS, ZOMBIE_WIDTH,
 };
 use macroquad::math::{Rect, Vec2};
@@ -176,6 +177,34 @@ pub fn is_reached_on_either_side(player_rect: Rect, range: f32, target: Rect) ->
     both_sides.overlaps(&target)
 }
 
+/// 그날 몬스터가 나오는 정도 (날이 지날수록 많아진다, [임시] 부모님 요청 2026-11-21). 숫자는 config에 있다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MonstersOnDay {
+    /// 다음 차례까지 (초).
+    pub spawn_seconds: f32,
+    /// 한 차례에 나오는 수.
+    pub per_spawn: usize,
+    /// 좀비와 스켈레톤을 합쳐 함께 있을 수 있는 수.
+    pub max_on_screen: usize,
+    /// 좀비만 함께 있을 수 있는 수.
+    pub max_zombies: usize,
+}
+
+impl MonstersOnDay {
+    /// `day`일째(1부터) 값. 1일째는 `ZOMBIE_SPAWN_SECONDS`·`MONSTERS_PER_SPAWN`·`MONSTER_MAX_ON_SCREEN`·`ZOMBIE_MAX_ON_SCREEN` 그대로다.
+    pub fn for_day(day: u32) -> MonstersOnDay {
+        let days_after_first = day.max(1) - 1;
+        let spawn_seconds =
+            (ZOMBIE_SPAWN_SECONDS - SPAWN_SECONDS_SHORTER_PER_DAY * days_after_first as f32).max(SPAWN_SECONDS_SHORTEST);
+        let per_spawn =
+            (MONSTERS_PER_SPAWN + (days_after_first / MONSTERS_PER_SPAWN_MORE_EVERY_DAYS) as usize).min(MONSTERS_PER_SPAWN_MOST);
+        let max_on_screen =
+            (MONSTER_MAX_ON_SCREEN + MONSTER_MAX_MORE_PER_DAY * days_after_first as usize).min(MONSTER_MAX_MOST);
+        let max_zombies = ZOMBIE_MAX_ON_SCREEN * max_on_screen / MONSTER_MAX_ON_SCREEN;
+        MonstersOnDay { spawn_seconds, per_spawn, max_on_screen, max_zombies }
+    }
+}
+
 /// 한 판의 싸움 상태. 새 게임을 하면 새로 만든다.
 pub struct Combat {
     pub health: PlayerHealth,
@@ -191,6 +220,8 @@ pub struct Combat {
     pub monsters_given_experience: u32,
     /// 나올 차례에 스켈레톤이 나올 확률. 테스트는 0으로 두어 좀비만 있는 밤을 만든다.
     pub skeleton_chance: f32,
+    /// 지금 며칠째인지 (1부터). 날이 지날수록 몬스터가 많아진다 (`MonstersOnDay`). `Game`이 시계를 보고 채운다.
+    pub day_number: u32,
     seconds_to_next_spawn: f32,
     random: SeededRandom,
     was_night: bool,
@@ -209,6 +240,7 @@ impl Combat {
             monsters_defeated: 0,
             monsters_given_experience: 0,
             skeleton_chance: SKELETON_SPAWN_CHANCE,
+            day_number: 1,
             seconds_to_next_spawn: 0.0,
             random: SeededRandom::new(seed),
             was_night: false,
@@ -452,12 +484,13 @@ impl Combat {
         if self.seconds_to_next_spawn > 0.0 {
             return;
         }
-        self.seconds_to_next_spawn += ZOMBIE_SPAWN_SECONDS;
+        let today = self.monsters_today();
+        self.seconds_to_next_spawn += today.spawn_seconds;
 
         // 왼쪽·오른쪽 번갈아 나온다. 마릿수 상한에 닿으면 이번 차례는 거기까지다.
         let first_from_left = pick_left_side(&mut self.random);
         let mut taken = Vec::new();
-        for turn in 0..MONSTERS_PER_SPAWN {
+        for turn in 0..today.per_spawn {
             if self.is_map_full() {
                 break;
             }
@@ -468,13 +501,13 @@ impl Combat {
 
     /// 부서진 상자에서 몬스터 하나가 나온다 (임시-69). 가운데가 `center_x`인 땅 위에 서서
     /// `BOX_MONSTER_WAIT_SECONDS`초 가만히 있다가 움직인다. 보통 몬스터와 같아서 쓰러지면 경험치를 준다.
-    /// 몬스터가 모두 `MONSTER_MAX_ON_SCREEN`마리면 나오지 않고 None이다. 좀비가 꽉 찼으면 좀비 대신 스켈레톤이 나온다.
+    /// 몬스터가 그날 화면 최대 수(`MonstersOnDay`)만큼 있으면 나오지 않고 None이다. 좀비가 꽉 찼으면 좀비 대신 스켈레톤이 나온다.
     /// 스켈레톤은 지금 레벨의 단계로 나온다.
     pub fn spawn_from_box(&mut self, center_x: f32, ground_y: f32, wanted: BoxMonster) -> Option<CombatEvent> {
         if self.is_map_full() || self.health.is_down() {
             return None;
         }
-        let zombies_full = self.zombies.list.len() >= ZOMBIE_MAX_ON_SCREEN;
+        let zombies_full = self.are_zombies_full();
         if wanted == BoxMonster::Skeleton || zombies_full {
             let stage = SkeletonStage::for_level(self.level);
             let skeleton = Skeleton::waiting(center_x - SKELETON_WIDTH / 2.0, ground_y, stage, BOX_MONSTER_WAIT_SECONDS);
@@ -490,8 +523,17 @@ impl Combat {
         }
     }
 
+    /// 오늘 몬스터가 나오는 정도.
+    pub fn monsters_today(&self) -> MonstersOnDay {
+        MonstersOnDay::for_day(self.day_number)
+    }
+
     fn is_map_full(&self) -> bool {
-        self.zombies.list.len() + self.skeletons.list.len() >= MONSTER_MAX_ON_SCREEN
+        self.zombies.list.len() + self.skeletons.list.len() >= self.monsters_today().max_on_screen
+    }
+
+    fn are_zombies_full(&self) -> bool {
+        self.zombies.list.len() >= self.monsters_today().max_zombies
     }
 
     /// 좀비나 스켈레톤을 하나 뽑아 내보내고 나온 x를 돌려준다. 나올 자리가 없으면 이번 차례는 건너뛴다.
@@ -503,7 +545,7 @@ impl Combat {
         taken: &[f32],
         events: &mut Vec<CombatEvent>,
     ) -> Option<f32> {
-        if self.zombies.list.len() >= ZOMBIE_MAX_ON_SCREEN || self.random.next_unit() < self.skeleton_chance {
+        if self.are_zombies_full() || self.random.next_unit() < self.skeleton_chance {
             let stage = SkeletonStage::for_level(self.level);
             let x = spawn_x_on_side(from_left, player_rect, SKELETON_WIDTH, world, taken)?;
             let skeleton = Skeleton::new(x, world.ground_y, stage);

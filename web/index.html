@@ -3,7 +3,33 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-    <title>미스 찾기</title>
+    <title>미스 찾기 - 가족이 함께 만든 생존 게임</title>
+    <!-- 아이콘 (헤일리 그림, 부모님 승인 2026-11-21). 주소는 상대 경로. -->
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#87cefa">
+    <meta name="apple-mobile-web-app-title" content="미스 찾기">
+    <!-- 검색·미리보기 (부모님 결정 2026-11-21). 주소는 대표 주소 기준 (아직 확정 전, 처음 값).
+         소개 글은 게임 화면을 건드리지 않게 about.html에 따로 둔다. -->
+    <meta name="description" content="낮에는 나무와 광석을 캐고, 밤에는 몬스터를 물리치며 7일을 버텨요. 숨은 미스를 찾고 퀴즈도 푸는, 가족이 함께 만든 브라우저 게임이에요.">
+    <link rel="canonical" href="__SITE_URL__">
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="ko_KR">
+    <meta property="og:site_name" content="미스 찾기">
+    <meta property="og:url" content="__SITE_URL__">
+    <meta property="og:title" content="미스 찾기 - 가족이 함께 만든 생존 게임">
+    <meta property="og:description" content="낮에는 캐고 모으고, 밤에는 몬스터를 물리치며 7일을 버텨요. 숨은 미스를 찾아보세요!">
+    <meta property="og:image" content="__SITE_URL__og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="아이가 그린 Niro, Ellie, Logan 그림과 게임 캐릭터들">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="미스 찾기 - 가족이 함께 만든 생존 게임">
+    <meta name="twitter:description" content="낮에는 캐고 모으고, 밤에는 몬스터를 물리치며 7일을 버텨요. 숨은 미스를 찾아보세요!">
+    <meta name="twitter:image" content="__SITE_URL__og-image.png">
     <style>
         html, body, canvas {
             margin: 0;
@@ -22,7 +48,9 @@
             -webkit-tap-highlight-color: transparent;
         }
         canvas:focus { outline: none; }
-        /* 글꼴·그림을 받는 동안 보이는 "불러오는 중..." (시스템 글꼴).
+        /* 글꼴·그림을 받는 동안 보이는 도는 점 + "Now Loading..." (시스템 글꼴).
+           로고 첫 화면과 같은 빨강(#FF0000, game/src/view/logo.rs LOGO_RED)이라 로고로 넘어갈 때 깜빡이지 않는다.
+           게임 안의 같은 화면(logo.rs draw_loading)과 모양·빠르기(점 8개, 1초에 한 바퀴)를 맞췄다.
            macroquad는 불러오는 동안에도 매 프레임 캔버스를 검게 지우므로 캔버스 "위"에 덮어 두고,
            게임이 첫 화면을 그리면 loading_done()으로 치운다. */
         #loading {
@@ -30,20 +58,51 @@
             inset: 0;
             z-index: 10;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: #87cefa;
-            color: #1f2a5c;
+            gap: 5vmin;
+            background: #ff0000;
+            color: #ffffff;
             font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
-            font-size: clamp(28px, 7vmin, 64px);
+            font-size: clamp(24px, 7vmin, 64px);
             font-weight: bold;
+            text-shadow: 0.06em 0.06em 0 rgba(115, 0, 0, 0.45);
             pointer-events: none;
+        }
+        #loading .spinner {
+            position: relative;
+            width: clamp(50px, 14vmin, 126px);
+            height: clamp(50px, 14vmin, 126px);
+            animation: loading-spin 1s steps(8) infinite;
+        }
+        #loading .spinner i {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 18%;
+            height: 18%;
+            margin: -9% 0 0 -9%;
+            border-radius: 50%;
+            background: #ffffff;
+            transform: rotate(calc(var(--k) * 45deg)) translateY(-260%);
+        }
+        @keyframes loading-spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <canvas id="glcanvas" tabindex="1"></canvas>
-    <div id="loading">불러오는 중...</div>
+    <div id="loading">
+        <div class="spinner" aria-hidden="true">
+            <i style="--k:0;opacity:.125"></i><i style="--k:1;opacity:.25"></i>
+            <i style="--k:2;opacity:.375"></i><i style="--k:3;opacity:.5"></i>
+            <i style="--k:4;opacity:.625"></i><i style="--k:5;opacity:.75"></i>
+            <i style="--k:6;opacity:.875"></i><i style="--k:7;opacity:1"></i>
+        </div>
+        <div>Now Loading...</div>
+    </div>
     <script src="mq_js_bundle.js"></script>
     <script>
         // 게임(Rust)이 첫 화면을 그린 뒤 부른다 (game/src/view/web.rs).
@@ -118,6 +177,22 @@
             } catch (e) {}
         }
         canvasEl.addEventListener("touchend", goFullscreen);
+        // 폰에서는 기본으로 가로 (부모님 결정 2026-11-21): "눌러서 시작"을 누르는 첫 입력이 터치가 아니어도
+        // (펜, 블루투스 키보드 등) 전체화면 + 가로로 바꾼다. 게임 안 코드는 "사용자 동작"이 아니라서 여기 웹페이지 이벤트에서 부른다.
+        // 터치 기기(주 입력이 손가락)에서만: PC는 키·클릭으로 누르면 전체화면이 되지 않는다 (PC 전체화면은 원래 방식 그대로).
+        // 이 이벤트는 게임 입력을 막거나 바꾸지 않는다: 누른 것이 로고 넘기기·게임 시작으로 새지 않는 것은 게임(view/logo.rs)이 지킨다.
+        var touchDevice = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+        if (touchDevice) {
+            window.addEventListener("keydown", function (e) {
+                // Esc, 누르고 있어서 반복되는 키, Ctrl/Alt/Meta 조합은 건너뛴다 (Esc로 나간 뒤 Shift·F12로 다시 전체화면이 되지 않게)
+                if (e.key === "Escape" || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+                goFullscreen();
+            });
+            // 손가락은 위의 touchend가 이미 부르므로 펜만 (두 번 부르지 않게)
+            window.addEventListener("pointerup", function (e) {
+                if (e.pointerType === "pen") goFullscreen();
+            });
+        }
         // 폰 확인용: 주소 끝에 ?debug 를 붙이면 화면 맨 위에 크기와 마지막 터치 자리를 보여 준다.
         if (location.search.indexOf("debug") >= 0) {
             var debugBox = document.createElement("div");

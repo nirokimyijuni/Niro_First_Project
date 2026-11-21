@@ -111,6 +111,19 @@ impl<'a> TextPainter<'a> {
         self.centered_zoomed(text, center_x, baseline_y, size, 1.0, color);
     }
 
+    /// 테두리 없이 `color` 글자와 `shadow` 그림자만 그린다 (US-109 로고: 빨간 바탕에 흰 둥근 글자).
+    /// 글꼴 단계는 `size`로 고르고 `zoom`만 바꿔서, 커졌다 작아져도 새 글꼴 크기를 만들지 않는다 (BUG-029).
+    pub fn plain_zoomed(&self, text: &str, center_x: f32, baseline_y: f32, size: f32, zoom: f32, color: Color, shadow: Color) {
+        if zoom <= 0.0 {
+            return;
+        }
+        let shown = size * zoom;
+        let x = center_x - self.width_zoomed(text, size, zoom) / 2.0;
+        let d = (shown * 0.05).max(1.5);
+        draw_text_ex(text, x + d, baseline_y + d, self.params_zoomed(size, zoom, shadow));
+        draw_text_ex(text, x, baseline_y, self.params_zoomed(size, zoom, color));
+    }
+
     /// `centered`와 같은데 `size × zoom` 크기로 보인다. 크기가 움직이는 글자는 `size`를 고정하고 `zoom`만 바꾼다.
     pub fn centered_zoomed(&self, text: &str, center_x: f32, baseline_y: f32, size: f32, zoom: f32, color: Color) {
         let shown = size * zoom;

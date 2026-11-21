@@ -19,7 +19,7 @@ extern "C" {
     fn qa_mode_on() -> i32;
 }
 
-/// "불러오는 중..." 글자를 치운다. 게임이 첫 화면을 그린 뒤에 한 번 부른다.
+/// 웹페이지의 "Now Loading..." 화면(도는 점 + 글자)을 치운다. 게임이 첫 화면을 그린 뒤에 한 번 부른다.
 pub fn hide_loading_screen() {
     #[cfg(target_arch = "wasm32")]
     unsafe {
