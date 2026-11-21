@@ -20,6 +20,8 @@ extern "C" {
     fn best_score_save(score: u32);
     /// 주소에 `?qa`가 있으면 1, 아니면 0 (시험용 단축).
     fn qa_mode_on() -> i32;
+    /// 주소가 `?qa=tutorial`이면 1 (시험용인데 튜토리얼 말풍선은 보고 싶을 때, US-123).
+    fn qa_tutorial_on() -> i32;
 }
 
 /// 웹페이지의 "Now Loading..." 화면(도는 점 + 글자)을 치운다. 게임이 첫 화면을 그린 뒤에 한 번 부른다.
@@ -104,8 +106,32 @@ pub fn qa_mode() -> bool {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::env::args().skip(1).any(|a| a == "qa")
+        std::env::args().skip(1).any(|a| qa_arg_is_on(&a))
     }
+}
+
+/// `cargo run -- qa`나 `cargo run -- qa=tutorial`이면 시험용 단축이 켜진다 (브라우저의 `?qa`, `?qa=tutorial`과 같다).
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn qa_arg_is_on(arg: &str) -> bool {
+    arg == "qa" || arg == "qa=tutorial"
+}
+
+/// 튜토리얼 말풍선을 켜서 볼지 (US-123, 임시-131). 브라우저는 주소가 `?qa=tutorial`일 때만, PC 실행은 `cargo run -- qa=tutorial`일 때만 true.
+/// 그냥 `?qa`는 false라서 안내가 나오지 않는다. 저장은 `?qa=tutorial`에서도 읽지도 쓰지도 않는다.
+pub fn qa_tutorial_mode() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        unsafe { qa_tutorial_on() == 1 }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::args().skip(1).any(|a| a == "qa=tutorial")
+    }
+}
+
+/// 이번 판에 안내(말풍선)를 끌지: `?qa`일 때만 끄고, `?qa=tutorial`이면 켠다. 평소 주소에서는 켜 둔다.
+pub fn no_guide() -> bool {
+    qa_mode() && !qa_tutorial_mode()
 }
 
 // ---- 설정 저장 (US-125) ----
@@ -158,7 +184,6 @@ pub fn load_settings() -> Settings {
 }
 
 /// 값이 바뀔 때만 부른다 (매 프레임 X). `?qa`와 PC에서는 아무 일도 안 한다.
-#[allow(dead_code)] // 튜토리얼·소리 스토리(US-112, US-119~121)가 쓴다
 pub fn save_settings(settings: &Settings) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -197,6 +222,16 @@ mod tests {
         assert_eq!(settings_text_from_bytes(b"1;tutorial=1"), "1;tutorial=1");
         assert_eq!(settings_text_from_bytes(&[0xff, 0xfe]), "");
         assert_eq!(settings_text_from_bytes(&vec![b'a'; SETTINGS_MAX_CHARS + 1]), "");
+    }
+
+    #[test]
+    fn qa_arguments_turn_the_shortcuts_on_and_only_qa_tutorial_shows_the_guide() {
+        assert!(qa_arg_is_on("qa"));
+        assert!(qa_arg_is_on("qa=tutorial"));
+        assert!(!qa_arg_is_on("tutorial"));
+        assert!(!qa_arg_is_on("qa=other"));
+        // 시험 실행에는 qa 인자가 없으니 평소처럼 안내를 끄지 않는다
+        assert!(!no_guide());
     }
 
     #[test]

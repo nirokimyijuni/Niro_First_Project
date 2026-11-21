@@ -78,6 +78,14 @@
   .feed .who { min-width: 70px; }
   .feed .t { color: #a3b1c2; min-width: 64px; }
   .feed .what { word-break: break-all; }
+  .today { background: var(--card); border: 3px solid var(--line); border-radius: 20px; padding: 14px 16px; margin-bottom: 20px; }
+  .today h2 { margin: 0 0 8px; }
+  .today .sum { font-size: 20px; }
+  .today ul { margin: 8px 0 0; padding-left: 20px; font-size: 15px; color: var(--muted); }
+  .did { border-top: 1px dashed var(--line); padding-top: 8px; font-size: 14px; color: var(--muted); line-height: 1.5; }
+  .did b { color: var(--ink); font-weight: normal; }
+  .did ol { margin: 4px 0 0; padding-left: 20px; }
+  .did ol span { color: #a3b1c2; }
   .empty { color: var(--muted); padding: 14px 0; }
   @media (max-width: 600px) {
     header { padding: 14px 16px; } h1 { font-size: 26px; } main { padding: 16px; }
@@ -95,6 +103,7 @@
     <div class="track" id="track"></div>
     <div class="detail" id="detail"></div>
   </section>
+  <section class="today" id="today"></section>
   <div class="grid" id="grid"></div>
   <h2>📜 방금 일어난 일</h2>
   <div class="feed" id="feed"></div>
@@ -114,6 +123,30 @@ const NAME = Object.fromEntries(AGENTS.map(a => [a.key, a.name]));
 // 이름이 바뀐 에이전트: 예전 이름으로 남은 기록도 새 카드에 모은다
 const ALIAS = { joshua: "susanna" };
 NAME.joshua = NAME.susanna;
+
+let todayData = null;
+const clock = ts => new Date(ts * 1000).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+
+// 카드 아래 "오늘 한 일": 서버가 센 진짜 기록. 기록이 없으면 있는 그대로 말한다.
+function didToday(key) {
+  if (!todayData) return "";
+  const t = todayData.agents[key];
+  if (!t) return `<div class="did">오늘 기록 없음</div>`;
+  const files = t.top_files.map(f => `<li>${esc(f.path)} <span>×${f.count}</span></li>`).join("");
+  return `<div class="did">📅 오늘 <b>${clock(t.first)} ~ ${clock(t.last)}</b><br>
+    도구 <b>${t.calls}번</b> (읽기 ${t.read} · 고치기 ${t.edit} · 명령 ${t.run} · 기타 ${t.other})
+    ${files ? `<br>많이 만진 파일<ol>${files}</ol>` : ""}</div>`;
+}
+
+function renderToday() {
+  const el = document.getElementById("today");
+  if (!todayData) { el.innerHTML = ""; return; }
+  const d = todayData;
+  el.innerHTML = `<h2>📅 오늘 (${esc(d.date)}) 한 일</h2>
+    <div class="sum">에이전트 <b>${d.active_agents}명</b>이 일했고, 도구를 <b>${d.total_calls}번</b> 썼어요
+      (기록 ${d.total_lines}줄)</div>
+    ${d.commits.length ? `<ul>${d.commits.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}`;
+}
 
 const base = p => p ? String(p).split(/[\\/]/).pop() : "";
 
@@ -207,6 +240,7 @@ function render(records) {
       <div class="now">${esc(nowText)}</div>
       ${task ? `<div class="task">맡은 일: <b>${esc(task.input.description || "")}</b> (${ago(task.ts)})</div>` : ""}
       <ul class="recent">${recent}</ul>
+      ${didToday(a.key)}
     </div>`;
   }).join("");
 
@@ -243,6 +277,13 @@ function renderRoadmap(milestones) {
     : `<div class="head">🎉 모든 단계를 끝냈어요!</div>`;
 }
 
+let todayAt = 0;
+async function loadToday() {
+  if (Date.now() - todayAt < 10000) return;  // 오늘 요약은 10초마다만
+  todayAt = Date.now();
+  try { todayData = await (await fetch("/api/today", { cache: "no-store" })).json(); renderToday(); } catch {}
+}
+
 let roadmapAt = 0;
 async function loadRoadmap() {
   if (Date.now() - roadmapAt < 5000) return;  // 로드맵은 5초마다만
@@ -253,6 +294,7 @@ async function loadRoadmap() {
 let lastData = [];
 async function tick() {
   loadRoadmap();
+  loadToday();
   const live = document.getElementById("live");
   try {
     const res = await fetch("/api/activity", { cache: "no-store" });

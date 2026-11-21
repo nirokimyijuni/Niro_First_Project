@@ -20,6 +20,7 @@ use crate::config::{
 use crate::logic::game::{ItemEvent, SlamPower};
 use crate::logic::combat::{attack_box, attack_box_with_range, CombatEvent};
 use crate::logic::player::Facing;
+use crate::logic::practice::PracticeEvent;
 use crate::logic::weapon::Weapon;
 use macroquad::prelude::*;
 use std::f32::consts::TAU;
@@ -269,6 +270,15 @@ impl Effects {
             CombatEvent::HealthRefilled => self.heart_sparkle_age = Some(0.0),
             CombatEvent::PlayerHurt { amount, .. } => self.hurt = Some((amount, 0.0)),
             _ => {}
+        }
+    }
+
+    /// 연습용 몬스터 일 (US-124): 나타나면 연기, 맞으면 작은 번쩍, 쓰러지면 별과 "쓰러졌어요", 사라지면 연기. 피는 없다.
+    pub fn on_practice_event(&mut self, event: PracticeEvent) {
+        match event {
+            PracticeEvent::Appeared { at } | PracticeEvent::Vanished { at } => self.burst(BurstKind::Smoke, at),
+            PracticeEvent::Hit { at, .. } => self.burst(BurstKind::Spark, at),
+            PracticeEvent::Defeated { at } => self.burst(BurstKind::Defeated, at),
         }
     }
 
@@ -774,6 +784,22 @@ fn draw_burst(text: &TextPainter, burst: &Burst, words: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn practice_monster_events_show_gentle_effects_and_end() {
+        let at = vec2(300.0, 400.0);
+        let mut effects = Effects::new();
+        effects.on_practice_event(PracticeEvent::Appeared { at });
+        effects.on_practice_event(PracticeEvent::Hit { at, hp_left: 1 });
+        effects.on_practice_event(PracticeEvent::Defeated { at });
+        effects.on_practice_event(PracticeEvent::Vanished { at });
+        let kinds: Vec<BurstKind> = effects.bursts.iter().map(|b| b.kind).collect();
+        assert!(kinds == vec![BurstKind::Smoke, BurstKind::Spark, BurstKind::Defeated, BurstKind::Smoke]);
+        for _ in 0..300 {
+            effects.update(1.0 / 60.0);
+        }
+        assert!(effects.bursts.is_empty(), "5초 안에 모두 사라진다");
+    }
 
     #[test]
     fn potions_show_a_cloud_and_hearts_for_a_moment() {

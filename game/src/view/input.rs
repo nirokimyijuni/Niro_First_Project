@@ -83,6 +83,15 @@ pub const SWITCH_KEY: (KeyCode, &str) = (KeyCode::Tab, "Tab");
 /// 가방 열고 닫기 키 (부모님 결정 2026-11-15: Tab 대신 I).
 pub const BAG_KEY: (KeyCode, &str) = (KeyCode::I, "I");
 
+/// 튜토리얼 말풍선 건너뛰기 키 (US-120, 임시-128). Esc(멈춤 창)·Enter·Space(결정·점프)·Tab(무기 바꾸기)·I(가방)·
+/// Q·E·R·F·Y·G·1~3(공격·캐기·물건)·←→↑(걷기·점프)와 겹치지 않는 N. 마우스 클릭은 버튼 위만 건너뛰기다.
+pub const TUTORIAL_SKIP_KEY: (KeyCode, &str) = (KeyCode::N, "N");
+
+/// 건너뛰기 키: N을 "새로 누른" 프레임에만 true.
+pub fn tutorial_skip_key_pressed() -> bool {
+    is_key_pressed(TUTORIAL_SKIP_KEY.0)
+}
+
 /// 무기 바꾸기: Tab을 "새로 누른" 프레임에만 true (꾹 눌러도 한 번).
 pub fn switch_weapon_pressed() -> bool {
     is_key_pressed(SWITCH_KEY.0)

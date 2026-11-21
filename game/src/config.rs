@@ -897,6 +897,100 @@ pub const MISSION_FAIL_SHOW_SECONDS: f32 = 2.0;
 /// 그다음 잠깐 퀴즈를 연다. 기다리는 동안 퀴즈가 열린 것처럼 시계·몬스터·주인공이 멈춘다 (BUG-025: 퀴즈보다 몬스터가 먼저 나오지 않게).
 pub const QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS: f32 = MISSION_FAIL_SHOW_SECONDS;
 
+// ---- 튜토리얼 말풍선 규칙 (US-119·120, 수산나: 숫자와 임시 문구. 그림은 로건) ----
+/// ① 이동: 이만큼 걸으면 넘어간다 (픽셀, 임시)
+pub const TUTORIAL_WALK_DISTANCE: f32 = 200.0;
+/// 한 단계를 해내면 "잘했어요!"를 이만큼 보여 준 뒤 다음 말풍선 (실제 초, 임시)
+pub const TUTORIAL_CHEER_SECONDS: f32 = 1.5;
+/// ⑤ 미스 찾기: 말만 하고 이만큼 지나면 저절로 사라진다 (실제 초, 임시)
+pub const TUTORIAL_FIND_MISS_SECONDS: f32 = 6.0;
+/// 말풍선 글 (임시 문구. 캐릭터 Niro가 귀엽게 말한다. 아이와 같이 "이 말 쉬워?" 보고 고친다).
+/// 순서: ① 이동 ② 공격 ③ 캐기 ④ 점프 ⑤ 미스 찾기. PC(키보드)와 폰(터치)은 따로 둔다 (D16).
+pub const TUTORIAL_TEXT_PC: [&str; 5] = [
+    "왼쪽, 오른쪽 화살표로 걸어 봐요~",
+    "Q 키로 친구를 톡톡 쳐 봐요~",
+    "나무나 돌 옆에서 E 키를 꾹 눌러 봐요~",
+    "스페이스 키로 폴짝 뛰어 봐요~",
+    "하얀 미스를 찾아 봐요~ 어디 있을까요?",
+];
+pub const TUTORIAL_TEXT_TOUCH: [&str; 5] = [
+    "왼쪽 동그라미를 밀어서 걸어 봐요~",
+    "공격 버튼을 눌러 친구를 쳐 봐요~",
+    "나무나 돌 옆에서 캐기 버튼을 꾹 눌러 봐요~",
+    // 폰에는 점프 버튼이 없다: 왼쪽 동그라미를 위로 밀면 뛴다 (US-063)
+    "왼쪽 동그라미를 위로 밀어서 폴짝 뛰어 봐요~",
+    "하얀 미스를 찾아 봐요~ 어디 있을까요?",
+];
+/// 단계를 해냈을 때 한 줄 (임시)
+pub const TUTORIAL_CHEER_TEXT: &str = "와, 잘했어요! 짝짝!";
+/// 건너뛰기 버튼 글 (임시. 다른 이름은 아이에게 물어볼 카드)
+pub const TUTORIAL_SKIP_TEXT: &str = "건너뛰기";
+
+// ---- 튜토리얼 말풍선 화면 (US-119·120, 로건). 자리는 가상 화면 960×540 기준 ----
+/// 말풍선 카드: 가로·세로, 위 끝. 미션 진행 줄(아래 끝 159)·성공/실패 글(아래 끝 165) 바로 아래, 캔 것 팝업(위 끝 228) 바로 위에 들어간다. 가운데 정렬.
+/// 폰은 왼쪽 멈춤 버튼(오른쪽 끝 168)을 가로로 비켜서 PC와 같은 높이다.
+pub const TUTORIAL_BUBBLE_WIDTH: f32 = 616.0;
+pub const TUTORIAL_BUBBLE_HEIGHT: f32 = 62.0;
+pub const TUTORIAL_BUBBLE_TOP_PC: f32 = 166.0;
+pub const TUTORIAL_BUBBLE_TOP_TOUCH: f32 = 166.0;
+/// 큰 알림 글이 말풍선 아래로 비켜 쌓이도록 말풍선 아래에 두는 틈
+pub const TUTORIAL_BUBBLE_GAP_BELOW: f32 = 6.0;
+/// 글자 크기와 줄 간격(글자 크기에 대한 비율). 폰 667×375에서 16 화면 픽셀 안팎
+pub const TUTORIAL_TEXT_SIZE: f32 = 24.0;
+pub const TUTORIAL_LINE_STEP: f32 = 1.1;
+/// 말풍선 안 여백, Niro 얼굴 동그라미 반지름, 얼굴과 풍선 틈, 풍선 모서리
+pub const TUTORIAL_PAD: f32 = 12.0;
+pub const TUTORIAL_FACE_RADIUS: f32 = 28.0;
+pub const TUTORIAL_FACE_GAP: f32 = 10.0;
+pub const TUTORIAL_CORNER: f32 = 14.0;
+/// 얼굴이 살랑 위아래로 움직이는 폭(픽셀)과 빠르기
+pub const TUTORIAL_FACE_BOB: f32 = 1.5;
+pub const TUTORIAL_FACE_BOB_SPEED: f32 = 4.0;
+/// 건너뛰기 버튼 크기 (폰 667 폭에서도 가로 48 화면 픽셀 이상)
+pub const TUTORIAL_SKIP_WIDTH: f32 = 132.0;
+pub const TUTORIAL_SKIP_HEIGHT: f32 = 56.0;
+pub const TUTORIAL_SKIP_TEXT_SIZE: f32 = 26.0;
+/// 색 (r, g, b, a)
+pub const TUTORIAL_BUBBLE_COLOR: [f32; 4] = [0.13, 0.16, 0.36, 0.88];
+pub const TUTORIAL_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+pub const TUTORIAL_CHEER_COLOR: [f32; 4] = [1.0, 0.85, 0.25, 1.0];
+pub const TUTORIAL_FACE_BACK_COLOR: [f32; 4] = [0.68, 0.85, 1.0, 1.0];
+/// Niro 얼굴 둘레 (Niro 노란 상의)
+pub const TUTORIAL_FACE_RING_COLOR: [f32; 4] = [1.0, 0.82, 0.20, 1.0];
+pub const TUTORIAL_SKIP_FILL_COLOR: [f32; 4] = [1.0, 0.82, 0.25, 1.0];
+pub const TUTORIAL_SKIP_TEXT_COLOR: [f32; 4] = [0.13, 0.16, 0.36, 1.0];
+
+// ---- 연습용 몬스터 그림 (US-124, 로건). 이름·생김새·색은 아이 질문 카드라서 임시 모양 ----
+/// 밤 좀비 그림에 곱하는 부드러운 민트색 (밤 몬스터와 한눈에 다르게)
+pub const PRACTICE_TINT: [f32; 4] = [0.72, 1.0, 0.86, 1.0];
+/// 머리 위 별 표시: 머리 위로 띄우는 높이, 반지름, 위아래 움직임 폭, 돌아가는 빠르기, 색
+pub const PRACTICE_MARK_ABOVE: f32 = 12.0;
+pub const PRACTICE_MARK_RADIUS: f32 = 9.0;
+pub const PRACTICE_MARK_BOB: f32 = 3.0;
+pub const PRACTICE_MARK_TURN_SPEED: f32 = 1.5;
+pub const PRACTICE_MARK_COLOR: [f32; 4] = [1.0, 0.86, 0.30, 1.0];
+
+// ---- 연습용 몬스터 (US-124, 수산나). 이름·생김새·색은 아이가 정한다: 지금은 "연습용" 임시 하나 ----
+/// 연습용 몬스터를 맞춰서 쓰러뜨릴 때까지 맞는 횟수 (무기와 상관없이 한 번에 1, 임시)
+pub const PRACTICE_MONSTER_HP: u32 = 2;
+/// 한 번 맞을 때 주는 피해 (무기 힘과 상관없이 같다)
+pub const PRACTICE_MONSTER_HIT_DAMAGE: u32 = 1;
+/// 안 때리고 두면 저절로 사라지는 시간 (게임 속 시간 아닌 실제 초, 임시)
+pub const PRACTICE_MONSTER_LIFE_SECONDS: f32 = 60.0;
+/// 걷는 빠르기 (밤 좀비보다 느리다)
+pub const PRACTICE_MONSTER_WALK_SPEED: f32 = 40.0;
+/// 플레이어와 몸 가운데끼리 이만큼 가까워지면 더 안 따라온다 (공격이 닿는 거리 안쪽)
+pub const PRACTICE_MONSTER_STOP_DISTANCE: f32 = 70.0;
+/// 말풍선 ②가 시작될 때 플레이어 바라보는 쪽으로 이만큼 떨어져 나온다 (화면 안, 폭 960 안쪽)
+pub const PRACTICE_MONSTER_SPAWN_DISTANCE: f32 = 220.0;
+pub const PRACTICE_MONSTER_WIDTH: f32 = 40.0;
+pub const PRACTICE_MONSTER_HEIGHT: f32 = 48.0;
+/// 맞았을 때 반짝이는 시간
+pub const PRACTICE_MONSTER_FLASH_SECONDS: f32 = ZOMBIE_HIT_FLASH_SECONDS;
+
+/// 연습용 몬스터가 한 프레임에 나누어 움직이는 최대 횟수 (아주 긴 프레임에서도 끝나게)
+pub const PRACTICE_STEP_LIMIT: u32 = 200;
+
 #[cfg(test)]
 mod tests {
     use super::*;

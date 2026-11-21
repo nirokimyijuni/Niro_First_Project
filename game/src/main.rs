@@ -10,6 +10,8 @@ use logic::character::CharacterKind;
 use logic::combat::CombatEvent;
 use logic::game::{Game, GameEvent, GatherEvent};
 use logic::player::PlayerInput;
+use logic::settings::Settings;
+use logic::tutorial::{Tutorial, TutorialEvent, TutorialState};
 use macroquad::prelude::*;
 use view::assets::Assets;
 use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
@@ -42,6 +44,8 @@ enum Scene {
         game: Game,
         /// D12 빨리감기(F). 새 게임은 `config::DEV_FAST_FORWARD_AT_START`대로 시작한다 (D33).
         fast_forward: bool,
+        /// 튜토리얼 중에 사용자가 F를 직접 눌렀으면 true. 그러면 튜토리얼 중에도 빨리감기를 따른다 (BUG-039).
+        ff_by_hand: bool,
         /// 코인·공격·좀비 효과 (화면 전용)
         effects: Effects,
         /// 쓰러졌으면 그 화면 상태 (US-043)
@@ -63,10 +67,32 @@ enum Scene {
     },
 }
 
-fn start_play(kind: CharacterKind) -> Scene {
+fn start_play(kind: CharacterKind, settings: &Settings, no_guide: bool, carried: Option<Tutorial>) -> Scene {
     // 판마다 좀비가 다르게 나오도록 지금 시각(밀리초)을 시드로 쓴다.
     let seed = (macroquad::miniquad::date::now() * 1000.0) as u64 as u32;
-    Scene::Play { game: Game::new(kind, seed), fast_forward: config::DEV_FAST_FORWARD_AT_START, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false, pause_pick: PauseTap::Resume, pause_buddy: PauseBuddy::Miss, bag: BagView::new() }
+    let mut game = Game::new(kind, seed);
+    match carried {
+        // "다시하기"·"처음으로" 뒤: 이미 시작한 안내는 다시 나오지 않는다 (저장은 하지 않는다)
+        Some(tutorial) => game.tutorial = tutorial,
+        // 처음 한 번만: 새 판 맨 처음에 시작한다. 이미 본 사람과 ?qa(안내 없음)는 시작하지 않는다
+        None => {
+            game.start_tutorial(settings, no_guide);
+        }
+    }
+    Scene::Play { game, fast_forward: config::DEV_FAST_FORWARD_AT_START, ff_by_hand: false, effects: Effects::new(), ended: None, walk_lock: false, gathered: GatherView::new(), shop_view: ShopView::new(), paused: false, pause_pick: PauseTap::Resume, pause_buddy: PauseBuddy::Miss, bag: BagView::new() }
+}
+
+/// 이번 프레임에 빨리감기를 쓸지 (BUG-039, 부모님 결정 2026-11-21). 튜토리얼이 진행 중이면 시계를 보통 속도로 둔다.
+/// 그때 사용자가 F를 직접 눌렀으면(`by_hand`) 존중한다. 끝나거나 건너뛰면, 시작 안 했으면 설정(D33)·F 상태를 그대로 따른다.
+fn fast_forward_now(on: bool, by_hand: bool, tutorial: TutorialState) -> bool {
+    on && (by_hand || !matches!(tutorial, TutorialState::Running(_)))
+}
+
+/// 튜토리얼이 끝났거나 건너뛰었으면(`Finished`/`Skipped`) 저장할 새 설정. 이미 같은 값이면 None이라 다시 쓰지 않는다.
+fn settings_to_save(events: &[TutorialEvent], tutorial: &Tutorial, settings: &Settings) -> Option<Settings> {
+    let over = events.iter().any(|e| matches!(e, TutorialEvent::Finished | TutorialEvent::Skipped));
+    let after = tutorial.settings_after(settings);
+    (over && after != *settings).then_some(after)
 }
 
 fn kind_index(kind: CharacterKind) -> usize {
@@ -231,9 +257,14 @@ async fn main() {
     let mut best_days = view::web::load_best_days();
     let mut best_score = view::web::load_best_score();
     // 설정 (US-125): 시작할 때 한 번 읽는다. 값을 바꾸는 쪽(튜토리얼·소리 스토리)이 바뀔 때만 view::web::save_settings(&settings)를 부른다.
-    // 게임 규칙 상태(Game)가 아니라 여기(화면 쪽)에 둔다. 아직 쓰는 곳이 없다.
-    #[allow(unused_variables, unused_mut)]
+    // 게임 규칙 상태(Game)가 아니라 여기(화면 쪽)에 둔다. 지금은 튜토리얼이 끝나거나 건너뛸 때만 바뀐다 (US-120).
     let mut settings = view::web::load_settings();
+    // ?qa에서는 튜토리얼 말풍선이 나오지 않는다. ?qa=tutorial이면 나온다 (US-123). 저장은 둘 다 읽지도 쓰지도 않는다.
+    let no_guide = view::web::no_guide();
+    // 쓰러진 뒤 "다시하기"·"처음으로"를 하면 새 판에 이어 줄 튜토리얼 상태 (이미 시작했으면 다시 안 나온다)
+    let mut carried_tutorial: Option<Tutorial> = None;
+    // 건너뛰기 버튼을 누른 손가락: 뗄 때까지 조이스틱·버튼에 넘기지 않는다
+    let mut skip_finger: Option<u64> = None;
     // 시험용 단축 (엘리용, 부모님 결정 2026-11-14). 주소에 ?qa가 있을 때만 켜진다.
     let mut qa = view::qa::Qa::new(view::web::qa_mode());
 
@@ -298,14 +329,14 @@ async fn main() {
                         *picked += 1;
                     }
                     if let Some(i) = menu.tap.and_then(screens::select_card_at) {
-                        Some(start_play(CharacterKind::ALL[i]))
+                        Some(start_play(CharacterKind::ALL[i], &settings, no_guide, carried_tutorial.take()))
                     } else if menu.confirm {
-                        Some(start_play(CharacterKind::ALL[*picked]))
+                        Some(start_play(CharacterKind::ALL[*picked], &settings, no_guide, carried_tutorial.take()))
                     } else {
                         None
                     }
                 }
-                Scene::Play { game, fast_forward, effects, ended, walk_lock, gathered, shop_view, paused, pause_pick, pause_buddy, bag } => {
+                Scene::Play { game, fast_forward, ff_by_hand, effects, ended, walk_lock, gathered, shop_view, paused, pause_pick, pause_buddy, bag } => {
                     // 상점의 "샀어요!"는 진짜 시간으로 흐른다 (게임은 멈춰 있어도)
                     shop_view.update(dt);
                     // 가방 버튼 반짝임과 아래 키 안내 8초: 창(멈춤·가방·퀴즈·상점·제작대)이 열린 동안은 안내 시간이 줄지 않는다 (임시-76)
@@ -318,10 +349,25 @@ async fn main() {
                     // 누르는 자리 목록 맨 뒤는 가방 버튼(장난감 상자)이다: `pocket_pressed == Some(물건 수)`면 가방을 연다
                     let buttons = play_buttons_with_mine(game.can_switch(), mine_button_label(game).is_some());
                     let pocket_spots = view::hud::pocket_tap_rects(game);
+                    // 튜토리얼 건너뛰기 (US-120): N 키, 버튼 클릭, 버튼에 새로 댄 손가락. 누른 손가락은 뗄 때까지
+                    // 조이스틱·버튼에 넘기지 않는다 (왼쪽 반을 누르면 조이스틱이 되어 걷는 것을 막는다).
+                    let skip_on = ended.is_none() && !window_open && !*paused && !qa.open && !bag.open && view::tutorial::bubble_text(game, touch_mode, effects.mission.miss_is_talking() || gathered.recipe_hint_showing()).is_some();
+                    let skip_rect = view::tutorial::skip_rect(touch_mode);
+                    if skip_finger.is_some_and(|id| !fingers.iter().any(|f| f.id == id)) {
+                        skip_finger = None;
+                    }
+                    let claimed = if skip_on { view::tutorial::claim_skip_finger(&fingers, skip_rect) } else { None };
+                    if let Some(finger) = claimed {
+                        skip_finger = Some(finger.id);
+                    }
+                    if skip_on && view::tutorial::skip_pressed(view::input::tutorial_skip_key_pressed(), menu.tap, claimed.map(|f| f.pos), skip_rect) {
+                        game.skip_tutorial();
+                    }
+                    let game_fingers = view::tutorial::without_finger(&fingers, skip_finger);
                     let touched = if ended.is_none() && !window_open && !*paused && !qa.open && !bag.open {
                         let mut spots: Vec<Rect> = pocket_spots.iter().map(|(_, r)| *r).collect();
                         spots.push(bag_button_rect(true));
-                        touch.update_with_pockets(&fingers, &buttons, &spots, touch_mode)
+                        touch.update_with_pockets(&game_fingers, &buttons, &spots, touch_mode)
                     } else {
                         TouchFrame::default()
                     };
@@ -354,6 +400,7 @@ async fn main() {
                             Some(PauseTap::Quit) => {
                                 keep_record(game.clock.nights_survived(), &mut best_days);
                                 keep_score(game.score(), &mut best_score);
+                                carried_tutorial = Some(game.tutorial.for_next_game());
                                 Some(Scene::Select { picked: kind_index(game.player.kind) })
                             }
                             None => None,
@@ -393,6 +440,7 @@ async fn main() {
                     } else if back == Some(BackAction::Leave) || retry {
                         keep_record(game.clock.nights_survived(), &mut best_days);
                         keep_score(game.score(), &mut best_score);
+                        carried_tutorial = Some(game.tutorial.for_next_game());
                         Some(Scene::Select { picked: kind_index(game.player.kind) })
                     } else if ended.is_none() && !window_open && bag_opens(bag_key, menu.tap, touch_mode, touched.pocket_pressed == Some(pocket_spots.len())) {
                         // 가방 열기 (I, 장난감 상자 버튼). 이번 프레임부터 게임이 멈춘다
@@ -427,6 +475,7 @@ async fn main() {
                             }
                             if fast_forward_pressed() {
                                 *fast_forward = !*fast_forward;
+                                *ff_by_hand = true;
                             }
                             if ended.is_none() && (switch_weapon_pressed() || touched.switch_pressed) {
                                 game.switch_weapon();
@@ -454,7 +503,7 @@ async fn main() {
                             effects.start_swing(game.weapons.held());
                         }
                         let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
-                        let events = if *fast_forward {
+                        let events = if fast_forward_now(*fast_forward, *ff_by_hand, game.tutorial.state()) {
                             update_with_time_scale(game, &input, dt, config::DEV_FAST_FORWARD_SCALE)
                         } else {
                             game.update(&input, dt)
@@ -497,6 +546,16 @@ async fn main() {
                         for event in game.take_item_events() {
                             effects.on_item_event(event);
                         }
+                        // 연습용 몬스터 (US-124): 나타남·맞음·쓰러짐·사라짐 효과. 소리는 소리 스토리(US-112~)가 오면 여기서 낸다
+                        for event in game.take_practice_events() {
+                            effects.on_practice_event(event);
+                        }
+                        // 튜토리얼 (US-119·120): 끝까지 봤거나 건너뛰면 "봤다"를 저장한다 (바뀔 때만, ?qa에서는 save_settings가 안 쓴다)
+                        let tutorial_events = game.take_tutorial_events();
+                        if let Some(after) = settings_to_save(&tutorial_events, &game.tutorial, &settings) {
+                            settings = after;
+                            view::web::save_settings(&settings);
+                        }
                         // 깜짝 미션 (US-086): 미스 말풍선, 성공·실패 글. 클리어한 아침의 실패 글은 띄우지 않는다
                         for event in game.take_mission_events() {
                             effects.mission.on_event(event, game.is_cleared());
@@ -526,8 +585,8 @@ async fn main() {
         match &scene {
             Scene::Title => screens::draw_title(&assets, &text, config::GROUND_Y, version.as_deref()),
             Scene::Select { picked } => screens::draw_select(&assets, &text, config::GROUND_Y, *picked),
-            Scene::Play { game, fast_forward, effects, ended, gathered, shop_view, paused, pause_pick, pause_buddy, bag, .. } => {
-                screens::draw_play(&assets, &text, game, *fast_forward, effects, ended.as_ref(), touch_mode, gathered, bag);
+            Scene::Play { game, fast_forward, ff_by_hand, effects, ended, gathered, shop_view, paused, pause_pick, pause_buddy, bag, .. } => {
+                screens::draw_play(&assets, &text, game, fast_forward_now(*fast_forward, *ff_by_hand, game.tutorial.state()), effects, ended.as_ref(), touch_mode, gathered, bag);
                 if ended.is_none() && game.math.is_open() {
                     draw_math(&text, &game.math, &assets.m6.miss, &assets.english);
                     if *paused {
@@ -903,6 +962,57 @@ mod tests {
         assert_eq!(best, 3);
         keep_record(4, &mut best);
         assert_eq!(best, 4);
+    }
+
+    #[test]
+    fn fast_forward_is_off_while_tutorial_runs_unless_pressed_by_hand() {
+        use logic::tutorial::TutorialStep;
+        let running = TutorialState::Running(TutorialStep::Move);
+        assert!(!fast_forward_now(true, false, running), "튜토리얼 중 시작 상태는 보통 속도");
+        assert!(fast_forward_now(true, true, running), "F를 직접 눌렀으면 존중");
+        assert!(!fast_forward_now(false, true, running), "꺼져 있으면 그대로 꺼짐");
+        assert!(fast_forward_now(true, false, TutorialState::Finished));
+        assert!(fast_forward_now(true, false, TutorialState::Skipped));
+        // 안 시작한 경우(이미 봄, ?qa)는 아무것도 안 바뀐다
+        let game = Game::new(CharacterKind::ALL[0], 1);
+        assert!(fast_forward_now(true, false, game.tutorial.state()));
+        assert!(!fast_forward_now(false, false, game.tutorial.state()));
+    }
+
+    #[test]
+    fn tutorial_is_saved_once_only_when_it_ends_or_is_skipped() {
+        let fresh = Settings::default();
+        let mut game = Game::new(CharacterKind::Niro, 1);
+        assert!(game.start_tutorial(&fresh, false));
+        let started = game.take_tutorial_events();
+        assert_eq!(settings_to_save(&started, &game.tutorial, &fresh), None, "시작만으로는 저장하지 않는다");
+        assert!(game.skip_tutorial());
+        let skipped = game.take_tutorial_events();
+        let saved = settings_to_save(&skipped, &game.tutorial, &fresh).expect("건너뛰면 저장");
+        assert!(saved.tutorial_done);
+        assert_eq!(settings_to_save(&skipped, &game.tutorial, &saved), None, "이미 저장한 값이면 다시 쓰지 않는다");
+    }
+
+    #[test]
+    fn first_game_starts_the_tutorial_but_seen_and_qa_do_not() {
+        let fresh = Settings::default();
+        let Scene::Play { game, .. } = start_play(CharacterKind::Ellie, &fresh, false, None) else { panic!() };
+        assert!(game.tutorial.current_step().is_some(), "처음 하는 판은 말풍선 ①");
+        let Scene::Play { game, .. } = start_play(CharacterKind::Ellie, &fresh, true, None) else { panic!() };
+        assert!(game.tutorial.current_step().is_none(), "?qa는 안내 없음");
+        let seen = Settings { tutorial_done: true, ..fresh };
+        let Scene::Play { game, .. } = start_play(CharacterKind::Ellie, &seen, false, None) else { panic!() };
+        assert!(game.tutorial.current_step().is_none(), "이미 본 사람은 안 나온다");
+    }
+
+    #[test]
+    fn retry_carries_the_tutorial_so_it_does_not_show_again() {
+        let fresh = Settings::default();
+        let Scene::Play { game, .. } = start_play(CharacterKind::Niro, &fresh, false, None) else { panic!() };
+        // 쓰러져서 다시하기: 저장은 안 했어도(settings 그대로) 새 판에 말풍선이 다시 나오지 않는다
+        let carried = game.tutorial.for_next_game();
+        let Scene::Play { game: next, .. } = start_play(CharacterKind::Niro, &fresh, false, Some(carried)) else { panic!() };
+        assert!(next.tutorial.current_step().is_none());
     }
 
     #[test]

@@ -120,6 +120,11 @@ impl MissionView {
         }
     }
 
+    /// 미스가 말풍선으로 미션을 말하는 중이다 (위쪽 가운데를 쓴다). 그동안 튜토리얼 말풍선은 비켜 있는다.
+    pub fn miss_is_talking(&self) -> bool {
+        matches!(self.now, Some((Banner::MissSays(_), _)))
+    }
+
     /// 지금 보이는 알림과 지난 시간.
     pub fn banner(&self) -> Option<(&Banner, f32)> {
         self.now.as_ref().map(|(b, age)| (b, *age))
@@ -208,7 +213,7 @@ pub fn look(view: &MissionView, mission: Option<&Mission>, gap: (f32, f32), widt
 }
 
 /// 둥근 네모 판 (말풍선).
-fn draw_round_rect(r: Rect, corner: f32, color: Color) {
+pub(super) fn draw_round_rect(r: Rect, corner: f32, color: Color) {
     let c = corner.min(r.w / 2.0).min(r.h / 2.0);
     draw_rectangle(r.x + c, r.y, r.w - c * 2.0, r.h, color);
     draw_rectangle(r.x, r.y + c, c, r.h - c * 2.0, color);

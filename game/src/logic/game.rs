@@ -14,6 +14,9 @@ use super::math::{MathQuiz, MathResult};
 use super::miss::Miss;
 use super::mission::{Mission, MissionEvent, MissionKind, Missions};
 use super::player::{Facing, Player, PlayerInput};
+use super::practice::{practice_spawn_x, PracticeEvent, PracticeMonster};
+use super::settings::Settings;
+use super::tutorial::{Tutorial, TutorialEvent, TutorialFacts};
 use super::shop::{sell_price, Armor, BuyRow, CantBuy, CantSell, CantUse, Pocket, Potion, SellRow, Shop, ShopEvent, ShopItem, SELLABLE};
 use super::weapon::{Weapon, Weapons};
 use super::world::{really_overlaps, shortest_dx, World};
@@ -24,7 +27,7 @@ use crate::config::{
     HOUSE_DOOR_BUTTON_TEXT, PLAYER_WALK_SPEED, SHOP_PAUSES_GAME, CAR_SPEED_MULTIPLIER, DIAMOND_PICKAXE_SLAM_DIAMONDS,
     DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT, DIAMOND_PICKAXE_SLAM_SCORE, ENDER_FRUIT_SLAM_DIAMONDS, ENDER_FRUIT_SLAM_DIAMONDS_TEXT,
     ENDER_FRUIT_SLAM_SCORE, SLAM_BEACH_LEFT, SLAM_BEACH_RIGHT, SYRINGE_GUN_SCORE, MISSION_FAIL_HP_LOSS, MISSION_REWARD_COINS,
-    QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS,
+    QUIZ_WAIT_AFTER_DAY_MISSION_FAIL_SECONDS, PHYSICS_STEP_SECONDS, PRACTICE_STEP_LIMIT,
 };
 use macroquad::math::{Rect, Vec2};
 
@@ -178,6 +181,14 @@ pub struct Game {
     pub missions: Missions,
     /// 18:00 낮 미션 실패 글을 보여 주는 동안 남은 실제 초 (BUG-034). 0보다 크면 퀴즈를 열기 전에 기다리는 중이다.
     quiz_wait_seconds: f32,
+    /// 튜토리얼 말풍선 규칙 (US-119·120). 시작은 `start_tutorial`, 건너뛰기는 `skip_tutorial`, 일어난 일은 `take_tutorial_events`.
+    pub tutorial: Tutorial,
+    tutorial_events: Vec<TutorialEvent>,
+    /// 연습용 몬스터 (US-124). 밤 몬스터 목록(`combat`)과 따로다: 코인·경험치·킬 수·미션에 들지 않는다.
+    pub practice: Option<PracticeMonster>,
+    practice_events: Vec<PracticeEvent>,
+    /// 이번 프레임에 연습용 몬스터를 맞혔다 (튜토리얼 ②를 위해 `update`가 읽고 지운다)
+    practice_hit_flag: bool,
 }
 
 impl Game {
@@ -201,6 +212,11 @@ impl Game {
         Game {
             missions,
             quiz_wait_seconds: 0.0,
+            tutorial: Tutorial::new(),
+            tutorial_events: Vec::new(),
+            practice: None,
+            practice_events: Vec::new(),
+            practice_hit_flag: false,
             gathering: Gathering::on_world(&world, &cave_world, seed),
             crafting: Crafting::default(),
             in_cave: false,
@@ -260,11 +276,17 @@ impl Game {
         let input = if crafting || shopping { &stand_still } else { input };
 
         self.player.walk_speed = self.walk_speed();
+        let (x_before, was_on_ground, was_in_cave) = (self.player.pos.x, self.player.on_ground, self.in_cave);
         self.player.update(input, dt, if self.in_cave { &self.cave_world } else { &self.world });
+        // 튜토리얼이 보는 값: 걸은 거리와 점프 시작 (US-119)
+        let walked = if was_in_cave == self.in_cave { shortest_dx(x_before, self.player.pos.x).abs() } else { 0.0 };
+        let jumped = input.jump_pressed && was_on_ground && !self.player.on_ground;
 
         for clock_event in self.clock.update(world_dt) {
             let happened = match clock_event {
                 ClockEvent::NightStarted => {
+                    // 연습용 몬스터는 밤이 오기 전에 반드시 사라진다 (US-124). 퀴즈가 열려도 남지 않게 여기서 치운다.
+                    self.remove_practice_monster();
                     // 18:00: 낮 미션을 먼저 끝내고 잠깐 퀴즈를 연다 (임시-49).
                     // 실패했으면 실패 글을 먼저 보여 주고 퀴즈는 조금 뒤에 연다 (BUG-034).
                     if self.end_day_mission(&mut events) && !self.is_over() {
@@ -318,7 +340,10 @@ impl Game {
         let miss_found = events[events_before..].iter().filter(|e| matches!(e, GameEvent::MissFound { .. })).count();
         self.count_for_mission(MissionKind::FindMiss, miss_found as u32);
         self.update_boxes(dt);
+        let mined_before = self.count_mined_events();
         self.update_gathering(dt, &mut events);
+        let mined = self.count_mined_events() > mined_before;
+        self.update_tutorial(dt, walked, jumped, mined, miss_found > 0);
         self.give_night_mission_after_quiz();
         events
     }
@@ -453,8 +478,9 @@ impl Game {
             let held = self.weapons.held();
             let reach = self.attack_reach();
             let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), reach);
+            let hit_practice = self.hit_practice_monster(player_rect, reach);
             // 닿는 몬스터가 있으면 몬스터만 맞고 상자는 그대로다 (임시-64).
-            let hit_a_monster = hits.iter().any(|hit| {
+            let hit_a_monster = hit_practice || hits.iter().any(|hit| {
                 matches!(
                     hit,
                     CombatEvent::ZombieHit { .. }
@@ -476,6 +502,7 @@ impl Game {
             let happened = self.combat.update(dt, self.clock.is_night(), player_rect, &self.world);
             events.extend(happened.into_iter().map(GameEvent::Combat));
         }
+        self.update_practice_monster(dt, player_rect);
         if !self.combat.health.is_down() {
             self.update_miss_and_weapons(dt, events);
             self.update_citizens(dt, events);
@@ -1174,6 +1201,133 @@ impl Game {
                 let happened = self.combat.citizen_blast(at, player_rect);
                 events.extend(happened.into_iter().map(GameEvent::Combat));
             }
+        }
+    }
+}
+
+/// 튜토리얼 말풍선(US-119·120)과 연습용 몬스터(US-124). 화면은 아래 함수만 부르고 읽는다.
+impl Game {
+    /// 튜토리얼을 시작한다. 이미 본 사람(`settings.tutorial_done`)이나 안내 없음(`?qa`, `no_guide`)이면 시작하지 않고 false.
+    /// 새 판 맨 처음 한 번 부른다. 시작하면 말풍선 ①이 나온다.
+    pub fn start_tutorial(&mut self, settings: &Settings, no_guide: bool) -> bool {
+        let event = self.tutorial.start(settings, no_guide);
+        self.tutorial_events.extend(event);
+        event.is_some()
+    }
+
+    /// 건너뛰기. 말풍선이 모두 끝나고 연습용 몬스터도 사라진다. 진행 중이 아니면 false.
+    pub fn skip_tutorial(&mut self) -> bool {
+        let Some(event) = self.tutorial.skip() else {
+            return false;
+        };
+        self.tutorial_events.push(event);
+        self.practice = None;
+        true
+    }
+
+    /// 지난번 뒤로 생긴 튜토리얼 일을 모두 받는다. `Finished`·`Skipped`가 오면
+    /// `self.tutorial.settings_after(&settings)`를 저장한다.
+    pub fn take_tutorial_events(&mut self) -> Vec<TutorialEvent> {
+        std::mem::take(&mut self.tutorial_events)
+    }
+
+    /// 지난번 뒤로 생긴 연습용 몬스터 일을 모두 받는다.
+    pub fn take_practice_events(&mut self) -> Vec<PracticeEvent> {
+        std::mem::take(&mut self.practice_events)
+    }
+
+    /// 1일째 낮이고 동굴 밖이면 연습용 몬스터를 내보내도 된다.
+    fn practice_allowed_now(&self) -> bool {
+        self.clock.day_number() == 1 && !self.clock.is_night() && !self.in_cave && !self.is_over()
+    }
+
+    /// 연습용 몬스터를 플레이어 앞에 내보낸다. 이미 있거나 낮이 아니거나 자리가 없으면 false.
+    /// 튜토리얼 ②가 시작될 때 `update`가 알아서 부른다 (화면이 직접 부를 일은 없다).
+    pub fn spawn_practice_monster(&mut self) -> bool {
+        if self.practice.is_some() || !self.practice_allowed_now() {
+            return false;
+        }
+        let Some(x) = practice_spawn_x(self.player.rect(), self.player.facing, &self.world) else {
+            return false;
+        };
+        let monster = PracticeMonster::new(x, self.world.ground_y);
+        self.practice_events.push(PracticeEvent::Appeared { at: monster.rect().center() });
+        self.practice = Some(monster);
+        true
+    }
+
+    /// 공격이 연습용 몬스터에 닿았으면 한 번 맞힌다 (무기 힘과 상관없이 1번). 맞혔으면 true.
+    fn hit_practice_monster(&mut self, player_rect: Rect, reach: f32) -> bool {
+        if self.combat.health.is_down() {
+            return false;
+        }
+        let facing = self.player.facing;
+        let Some(monster) = self.practice.as_mut().filter(|m| is_reached(player_rect, facing, reach, m.rect())) else {
+            return false;
+        };
+        let at = monster.rect().center();
+        if monster.take_hit() {
+            self.practice = None;
+            self.practice_events.push(PracticeEvent::Defeated { at });
+        } else {
+            self.practice_events.push(PracticeEvent::Hit { at, hp_left: monster.hp });
+        }
+        self.practice_hit_flag = true;
+        true
+    }
+
+    /// 연습용 몬스터를 치운다 (있었으면 `Vanished`가 온다).
+    fn remove_practice_monster(&mut self) {
+        if let Some(monster) = self.practice.take() {
+            self.practice_events.push(PracticeEvent::Vanished { at: monster.rect().center() });
+        }
+    }
+
+    /// 연습용 몬스터 시간을 흘린다:천천히 따라오고, 60초가 지나거나 밤이 되면 저절로 사라진다. 플레이어는 다치지 않는다.
+    fn update_practice_monster(&mut self, dt: f32, player_rect: Rect) {
+        let Some(monster) = self.practice.as_mut() else {
+            return;
+        };
+        let mut gone = self.clock.is_night();
+        if !gone && !self.in_cave && !self.combat.health.is_down() {
+            let mut time_left = dt.max(0.0);
+            // 아주 긴 프레임에도 횟수가 정해져 있다.
+            for _ in 0..PRACTICE_STEP_LIMIT {
+                if time_left <= 0.0 || gone {
+                    break;
+                }
+                let step = time_left.min(PHYSICS_STEP_SECONDS);
+                gone = monster.step(step, player_rect.center().x, &self.world);
+                time_left -= step;
+            }
+        }
+        if gone {
+            self.practice_events.push(PracticeEvent::Vanished { at: monster.rect().center() });
+            self.practice = None;
+        }
+    }
+
+    fn count_mined_events(&self) -> usize {
+        self.gather_events.iter().filter(|e| matches!(e, GatherEvent::Mined { .. })).count()
+    }
+
+    /// 이번 프레임에 일어난 일을 튜토리얼에 알린다. 말풍선 ②가 시작되면 연습용 몬스터를 내보낸다.
+    fn update_tutorial(&mut self, dt: f32, walked: f32, jumped: bool, mined: bool, found_miss: bool) {
+        let hit_practice = std::mem::take(&mut self.practice_hit_flag);
+        let facts = TutorialFacts {
+            walked,
+            jumped,
+            hit_practice,
+            mined,
+            found_miss,
+            practice_present: self.practice.is_some(),
+            practice_allowed: self.practice_allowed_now(),
+        };
+        for event in self.tutorial.update(dt, &facts) {
+            if event == TutorialEvent::StepStarted(super::tutorial::TutorialStep::Attack) {
+                self.spawn_practice_monster();
+            }
+            self.tutorial_events.push(event);
         }
     }
 }

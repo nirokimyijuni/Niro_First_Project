@@ -17,9 +17,14 @@ use super::screen::{set_shake, shake, Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
 use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
+use super::touch;
+use super::tutorial;
 use super::items;
 use super::shop;
-use crate::config::{CITIZEN_HELP_TEXT, DEV_FAST_FORWARD_SCALE};
+use crate::config::{
+    CITIZEN_HELP_TEXT, DEV_FAST_FORWARD_SCALE, PRACTICE_MARK_BOB, PRACTICE_MARK_ABOVE, PRACTICE_MARK_COLOR, PRACTICE_MARK_RADIUS, PRACTICE_MARK_TURN_SPEED, PRACTICE_MONSTER_HEIGHT,
+    PRACTICE_MONSTER_STOP_DISTANCE, PRACTICE_TINT, ZOMBIE_HEIGHT,
+};
 use crate::logic::character::CharacterKind;
 use crate::logic::game::Game;
 use crate::logic::monster::ZombieState;
@@ -355,6 +360,37 @@ fn draw_zombies(assets: &Assets, game: &Game, tint: Color) {
     }
 }
 
+/// 연습용 몬스터 그림 높이: 좀비 그림을 몸 네모 비율만큼 줄인다 (밤 좀비보다 작다).
+fn practice_sprite_height() -> f32 {
+    ZOMBIE_SPRITE_HEIGHT * PRACTICE_MONSTER_HEIGHT / ZOMBIE_HEIGHT
+}
+
+/// 연습용 몬스터 (US-124): 좀비 그림을 부드러운 민트색·작은 크기로 쓰고 머리 위에 반짝 별 표시를 단다 (밤 몬스터와 한눈에 다르다).
+/// 새 그림 파일은 없다. 이름·생김새·색은 아이 질문 카드라서 임시 모양이다. 맞으면 좀비처럼 번쩍, 피는 없다.
+fn draw_practice(assets: &Assets, game: &Game, tint: Color) {
+    let Some(monster) = &game.practice else { return };
+    let frozen = game.is_over();
+    let player_x = game.player.rect().center().x;
+    let r = nearest_copy(monster.rect(), view_center(game));
+    let t = if frozen { 0.0 } else { time() };
+    let near = shortest_dx(player_x, r.center().x).abs() <= PRACTICE_MONSTER_STOP_DISTANCE;
+    let pose = sprites::pose(if near { Motion::Idle } else { Motion::Walk }, t, false);
+    let facing = if shortest_dx(player_x, r.center().x) > 0.0 { Facing::Left } else { Facing::Right };
+    let feet = vec2(r.center().x, r.y + r.h);
+    let soft = PRACTICE_TINT;
+    let tint = Color::new(tint.r * soft[0], tint.g * soft[1], tint.b * soft[2], tint.a * soft[3]);
+    let height = practice_sprite_height();
+    draw_character(&assets.zombie, feet, height, facing, pose, tint);
+    if monster.is_flashing() {
+        draw_character(&assets.zombie_flash, feet, height, facing, pose, ZOMBIE_FLASH);
+    }
+    // 머리 위 별 표시 (살랑살랑 위아래, 빙글)
+    let bob = (t * 3.0).sin() * PRACTICE_MARK_BOB;
+    let mark = vec2(r.center().x, feet.y - height - PRACTICE_MARK_ABOVE - PRACTICE_MARK_RADIUS + bob);
+    let c = PRACTICE_MARK_COLOR;
+    touch::draw_star(mark, PRACTICE_MARK_RADIUS, t * PRACTICE_MARK_TURN_SPEED, Color::new(c[0], c[1], c[2], c[3]));
+}
+
 /// 스켈레톤: 플레이어 쪽을 보고, 걸을 때 통통, 서 있으면 숨쉬기, 피할 때 뒤로 젖히고, 맞으면 번쩍.
 /// 좀비와 같은 밤 색을 받고, 쓰러진 화면에서는 멈춘다.
 fn draw_skeletons(assets: &Assets, game: &Game, tint: Color) {
@@ -506,6 +542,7 @@ pub fn draw_play(
         draw_dropped_weapons(assets, game);
         boxes::draw_dropped_items(&assets.m6, game, view_x, time());
         draw_zombies(assets, game, tint);
+        draw_practice(assets, game, tint);
         draw_skeletons(assets, game, tint);
     }
     if let Some(fallen) = ended.filter(|e| !e.cleared) {
@@ -559,10 +596,13 @@ pub fn draw_play(
     } else {
         None
     };
+    // 튜토리얼 말풍선 (US-119): 있으면 큰 알림 글이 그 아래로 쌓인다
+    let tutorial_text = if ended.is_none() { tutorial::bubble_text(game, touch_mode, effects.mission.miss_is_talking() || gathered.recipe_hint_showing()) } else { None };
     let info_bottom = if show_info {
         let hud = hud::hud_bottom(hud::has_row(game), touch_mode && ended.is_none());
         let hud = mission_look.as_ref().map_or(hud, |l| l.rect().bottom().max(hud));
-        gathered.recipe_hint_bottom().map_or(hud, |b| b.max(hud))
+        let hud = gathered.recipe_hint_bottom().map_or(hud, |b| b.max(hud));
+        tutorial::bottom(game, touch_mode, effects.mission.miss_is_talking() || gathered.recipe_hint_showing()).filter(|_| tutorial_text.is_some()).map_or(hud, |b| b.max(hud))
     } else {
         0.0
     };
@@ -601,6 +641,9 @@ pub fn draw_play(
         }
         if let Some(look) = &mission_look {
             mission::draw(text, look, &assets.m6.miss, effects.mission.banner().map_or(0.0, |(_, age)| age));
+        }
+        if let Some(words) = tutorial_text {
+            tutorial::draw(assets, text, words, game.tutorial.is_cheering(), touch_mode, super::input::TUTORIAL_SKIP_KEY.1);
         }
     }
     // PC 아래 키 안내 한 줄은 처음 8초만 (임시-76). 폰에는 없다.

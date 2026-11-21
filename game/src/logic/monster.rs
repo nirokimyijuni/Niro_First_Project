@@ -199,7 +199,7 @@ fn step_aside_from_taken(mut x: f32, away: f32, width: f32, world: &World, taken
 }
 
 /// `x`가 상자나 구멍에 걸리면 `away`(-1 왼쪽, 1 오른쪽) 쪽의 가장 가까운 빈 땅 (임시-1).
-fn free_ground_x(mut x: f32, away: f32, width: f32, world: &World) -> f32 {
+pub(super) fn free_ground_x(mut x: f32, away: f32, width: f32, world: &World) -> f32 {
     let height = ZOMBIE_HEIGHT.max(SKELETON_HEIGHT);
     for _ in 0..=world.obstacles.len() + 1 {
         let body = Rect::new(x, world.ground_y - height, width, height);

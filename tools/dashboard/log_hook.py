@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT / ".claude" / "activity"
 LOG_FILE = LOG_DIR / "activity.jsonl"
 # 기록 파일이 이보다 커지면 뒤쪽 절반만 남긴다.
-MAX_BYTES = 2_000_000
+MAX_BYTES = 20_000_000
 
 
 def short(text, limit=140):
