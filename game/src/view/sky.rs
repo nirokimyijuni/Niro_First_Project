@@ -735,6 +735,23 @@ fn horizon_haze(look: &SkyLook) -> Color {
     mix(mix(HAZE_DAY, HAZE_NIGHT, look.d), HAZE_DUSK, look.dusk)
 }
 
+/// 화면 양옆·위아래 띠를 채울 색 줄 (가상 y, 색): 하늘 그라데이션 → 바다(보일 때) 또는 수평선 색 → 땅 선 바로 위.
+/// 땅 아래는 `places::edge_ground`가 이어 준다. 게임 규칙 없음, 그림 값만.
+pub fn edge_column(look: &SkyLook, ground_y: f32, sea: bool) -> Vec<(f32, Color)> {
+    let mut stops: Vec<(f32, Color)> = (0..=SKY_ROWS).map(|i| { let t = i as f32 / SKY_ROWS as f32; (t * HORIZON_Y, sky_color(t, look.d, look.dusk)) }).collect();
+    let d = look.d;
+    let warm = look.dusk * SEA_DUSK_AMOUNT;
+    if sea {
+        let sea_h = ground_y - HORIZON_Y;
+        stops.push((HORIZON_Y + 1.0, mix(mix(SEA_FAR, NIGHT_SEA_FAR, d), SEA_DUSK, warm)));
+        stops.push((HORIZON_Y + sea_h * 0.35, mix(mix(SEA_MID, NIGHT_SEA_FAR, d), SEA_DUSK, warm * 0.5)));
+        stops.push((ground_y, mix(mix(SEA_NEAR, NIGHT_SEA_NEAR, d), SEA_DUSK, warm * 0.2)));
+    } else {
+        stops.push((ground_y, sky_color(1.0, d, look.dusk)));
+    }
+    stops
+}
+
 pub fn draw_sea(c: &mut impl Canvas, look: &SkyLook, ground_y: f32) {
     let d = look.d;
     let warm = look.dusk * SEA_DUSK_AMOUNT;
@@ -808,6 +825,19 @@ fn draw_light_path(c: &mut impl Canvas, body: &Body, color: Color, strength: f32
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn edge_column_goes_down_the_screen_and_changes_with_sea() {
+        let look = SkyLook::play(0.0, 12 * 60, 0.0);
+        for sea in [true, false] {
+            let stops = edge_column(&look, 440.0, sea);
+            assert!(stops.windows(2).all(|s| s[0].0 < s[1].0), "y가 커지는 순서");
+            assert_eq!(stops.first().unwrap().0, 0.0);
+            assert_eq!(stops.last().unwrap().0, 440.0);
+        }
+        let (sea, land) = (edge_column(&look, 440.0, true), edge_column(&look, 440.0, false));
+        assert_ne!(sea.last().unwrap().1.b, land.last().unwrap().1.b);
+    }
+
     use super::*;
 
     #[test]

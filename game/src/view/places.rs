@@ -32,7 +32,7 @@ pub const BEACH_END: f32 = 1000.0;
 /// 띠 한 칸 폭. 칸을 맵 격자에 맞춰서 걸어도 땅 모양이 떨리지 않는다.
 const STRIP_STEP: f32 = 8.0;
 /// 땅 윗부분 띠 두께 (해변은 젖은 모래)
-const GROUND_LIP: f32 = 16.0;
+pub const GROUND_LIP: f32 = 16.0;
 
 // ---- 색: `[해변, 화산, 산, 집]` ----
 const GROUND_TOP: [Color; 4] = [
@@ -307,6 +307,12 @@ fn draw_grass(x: f32, y: f32, pick: f32, d: f32) {
     if pick < 0.25 {
         draw_circle(x, y - 10.0, 3.5, night(FLOWERS[(pick * 12.0) as usize % FLOWERS.len()], d));
     }
+}
+
+/// 맵 `x` 가장자리의 땅 색 [땅 선 위, 가운데, 깊은 곳]: 화면 양옆 띠를 채울 때 쓴다.
+pub fn edge_ground(look: &SkyLook, x: f32) -> [Color; 3] {
+    let d = look.d * GROUND_NIGHT_AMOUNT;
+    [night(place_color(&GROUND_TOP, x), d), night(place_color(&GROUND_MID, x), d), night(place_color(&GROUND_DEEP, x), d)]
 }
 
 /// 땅 선 위: 먼 땅(화산·산) → 앞 언덕 → 나무·바위·집.
@@ -610,5 +616,13 @@ mod tests {
         assert_eq!(snow_bottom(VOLCANO_X, 178.0), 178.0);
         assert!(snow_bottom(MOUNTAINS[1].0, 148.0) >= SNOW_Y);
         assert_eq!(snow_bottom(3000.0, 300.0), 300.0);
+    }
+
+    #[test]
+    fn side_fill_ground_is_darker_at_night() {
+        let (day, night) = (edge_ground(&SkyLook::play(0.0, 12 * 60, 0.0), 100.0), edge_ground(&SkyLook::play(1.0, 22 * 60, 0.0), 100.0));
+        for i in 0..3 {
+            assert!(night[i].r + night[i].g + night[i].b < day[i].r + day[i].g + day[i].b);
+        }
     }
 }

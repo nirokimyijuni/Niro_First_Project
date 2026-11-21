@@ -343,6 +343,8 @@ pub const CITIZEN_TALK_SHARE: f32 = 0.5;
 pub const ZOMBIE_APPEAR_TEXT: &str = "얍얍 공격하라";
 pub const SKELETON_DODGE_TEXT: &str = "만세";
 pub const CITIZEN_HELP_TEXT: &str = "도움이 필요해요";
+/// 세로로 열렸을 때 "가로로 돌려 주세요" 아래 한 줄. 안드로이드는 "자동 회전", 아이폰은 "세로 방향 잠금"이라 한 문장에 둘 다 담는다.
+pub const ROTATE_HINT_LOCK_TEXT: &str = "자동 회전(세로 잠금)이 켜져 있으면 꺼 주세요";
 
 /// 임시 일반 시민: 장소마다 1명, 모두 `PLACE_NAMES` 수만큼. 크기는 미스와 같고, 걷는 속도는 초당 픽셀이다.
 pub const WALKING_CITIZEN_WIDTH: f32 = MISS_WIDTH;

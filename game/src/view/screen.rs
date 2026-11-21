@@ -13,6 +13,11 @@ thread_local! {
     static SHAKE: std::cell::Cell<Vec2> = const { std::cell::Cell::new(Vec2::ZERO) };
 }
 
+/// 지금 걸린 흔들기 값.
+pub fn shake() -> Vec2 {
+    SHAKE.with(|s| s.get())
+}
+
 /// 이제부터 `look_at`이 거는 카메라를 `offset`만큼 흔든다. 터치 버튼·정보판을 그리기 전에 `Vec2::ZERO`로 되돌린다.
 pub fn set_shake(offset: Vec2) {
     SHAKE.with(|s| s.set(offset));

@@ -481,6 +481,10 @@ pub fn draw_rotate_hint(text: &TextPainter, width: f32, height: f32) {
 
     let size = (width * 0.1).clamp(28.0, 72.0);
     text.centered("가로로 돌려 주세요", width / 2.0, c.y + 100.0 * s + size, size, WHITE);
+    // 둘째 줄: 폰 폭에 꼭 맞게 글자 크기를 줄인다 (세로 375폭에서도 화면 밖으로 안 나가게)
+    let lock = crate::config::ROTATE_HINT_LOCK_TEXT;
+    let lock_size = (size * 0.55).min(width * 0.92 / lock.chars().count() as f32); // 한글 한 자 = 글자 크기 한 칸
+    text.centered(lock, width / 2.0, c.y + 100.0 * s + size + lock_size * 1.6, lock_size, Color::new(1.0, 1.0, 1.0, 0.85));
 }
 
 #[cfg(test)]

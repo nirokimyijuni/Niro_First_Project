@@ -13,7 +13,7 @@ use super::bag::{self, BagView};
 use super::hud;
 use super::mission;
 use super::places;
-use super::screen::{set_shake, Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
+use super::screen::{set_shake, shake, Letterbox, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::{self, mix, night, Canvas, GpuCanvas, SkyArt, SkyLook};
 use super::sprites::{self, draw_character, draw_projectile, fit_size, flip_weapon, PLAY_SPRITE_HEIGHT, ZOMBIE_SPRITE_HEIGHT};
 use super::text::TextPainter;
@@ -198,9 +198,54 @@ fn draw_wood_box(r: Rect, d: f32) {
     draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, night(WOOD_EDGE, amount));
 }
 
+/// 화면 양옆(또는 위아래)의 남는 띠를 장면에 맞춰 이어 칠한다: 하늘·바다·땅 색을 가장자리에서 늘린다.
+/// 창 전체를 기본 카메라(창 좌표)로 칠하고 나서 게임 그림이 가운데를 덮는다. 규칙·터치 좌표와 상관없다.
+fn draw_side_fill(look: &SkyLook, ground_y: f32, camera_x: f32) {
+    let lb = Letterbox::current();
+    if lb.offset.x < 0.5 && lb.offset.y < 0.5 {
+        return;
+    }
+    lb.end();
+    let (sw, sh) = (screen_width(), screen_height());
+    let sea = places::sea_visible(camera_x);
+    let sky = sky::edge_column(look, ground_y, sea);
+    let lip = ground_y + places::GROUND_LIP;
+    let to_window = |y: f32| lb.offset.y + y * lb.scale;
+    // 땅 색은 왼쪽 가장자리 → 오른쪽 가장자리로 가로로 서서히 섞는다 (세로로 긴 창에서 가운데 줄이 안 보이게)
+    let left = places::edge_ground(look, camera_x);
+    let right = places::edge_ground(look, camera_x + VIRTUAL_WIDTH);
+    let mut stops: Vec<(f32, Color, Color)> = vec![(-1.0, sky[0].1, sky[0].1)];
+    stops.extend(sky.iter().map(|&(y, c)| (to_window(y), c, c)));
+    stops.extend([
+        (to_window(ground_y), left[0], right[0]),
+        (to_window(lip), left[1], right[1]),
+        (to_window(VIRTUAL_HEIGHT), left[2], right[2]),
+        (sh + 1.0, left[2], right[2]),
+    ]);
+    // 창 y가 커지는 순서만 남긴다
+    stops.dedup_by(|b, a| b.0 <= a.0);
+    let mut vertices = Vec::with_capacity(stops.len() * 2);
+    let mut indices = Vec::new();
+    for (i, &(y, l, r)) in stops.iter().enumerate() {
+        vertices.push(Vertex::new(0.0, y, 0.0, 0.0, 0.0, l));
+        vertices.push(Vertex::new(sw, y, 0.0, 1.0, 0.0, r));
+        if i > 0 {
+            let b = (i as u16 - 1) * 2;
+            indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
+        }
+    }
+    draw_mesh(&Mesh { vertices, indices, texture: None });
+    // 하늘·바다는 흔들리지 않으므로 흔들기 없이 카메라를 다시 건다
+    let keep = shake();
+    set_shake(Vec2::ZERO);
+    lb.look_at(0.0);
+    set_shake(keep);
+}
+
 /// 화면에 고정된 하늘·바다 → 카메라를 걸고 맵의 땅. 타이틀·고르기·플레이가 모두 같은 하늘을 쓴다.
 /// 끝나면 카메라가 `camera_x`에 걸려 있다.
 fn draw_background(assets: &Assets, look: &SkyLook, ground_y: f32, camera_x: f32) {
+    draw_side_fill(look, ground_y, camera_x);
     let mut canvas = GpuCanvas { art: &assets.sky };
     sky::draw_sky(&mut canvas, look);
     if places::sea_visible(camera_x) {
@@ -411,7 +456,7 @@ pub fn draw_play(
     let (camera_x, view_x) = (game.camera_left(), view_center(game));
     // 쿵 하면 맵 그림이 잠깐 흔들린다 (정보판·버튼은 그대로)
     set_shake(effects.shake());
-    // 여기부터 맵 좌표: 아래 `look_at(0.0)`까지는 카메라를 따라 움직인다.
+    // 여기부터 맵 좌표: 아래 `look_at(0.0)`(화면 좌표로 되돌리는 곳)까지는 카메라를 따라 움직인다. 이 줄을 지우면 정보판·터치 버튼이 걸을 때 같이 밀린다 (BUG-037).
     // 움직이는 것은 화면에 가장 가까운 한 자리(`nearest_copy`)에만 그려서 두 번 보이지 않는다 (D61).
     // 동굴 안(임시-12)은 따로 된 한 화면: 맵의 미스·상자·코인·시민·무기·몬스터를 그리지 않는다.
     let on_map = !game.in_cave;
@@ -623,5 +668,21 @@ mod tests {
     fn horizon_is_above_ground() {
         assert!(sky::HORIZON_Y < crate::config::GROUND_Y);
         assert!(sky::HORIZON_Y + 40.0 < crate::config::GROUND_Y, "안개가 모래까지 내려오지 않는다");
+    }
+}
+
+#[cfg(test)]
+mod hud_camera_tests {
+    /// BUG-037: 맵을 그린 뒤 정보판·터치 버튼 전에 카메라를 화면 좌표로 되돌리는 `look_at(0.0)`이 있어야 한다.
+    /// (GPU 그림이라 좌표를 직접 못 재므로, 지워지면 바로 알아채게 소스에서 순서를 확인한다.)
+    #[test]
+    fn hud_is_drawn_with_the_screen_camera_after_the_map() {
+        let src = include_str!("screens.rs");
+        let play = &src[src.find("pub fn draw_play(").unwrap()..];
+        let reset = play.find("set_shake(Vec2::ZERO);").unwrap();
+        let after = &play[reset..];
+        let look = after.find("Letterbox::current().look_at(0.0);").expect("look_at(0.0) 사라짐");
+        let hud = after.find("effects.draw_on_screen(").unwrap();
+        assert!(look < hud, "정보판보다 먼저 카메라를 되돌려야 한다");
     }
 }
