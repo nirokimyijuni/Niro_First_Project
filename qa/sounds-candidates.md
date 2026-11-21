@@ -1,5 +1,41 @@
 # 소리 후보 목록 (받기 전, 부모님 승인용)
 
+## 타이틀 곡 더 밝은 후보 (2026-11-21)
+
+부모님 요청: "타이틀 음악이 조금 더 밝았으면". 지금 곡은 Classical Pop (Chiptune). **아래는 모두 내장 브라우저로 페이지를 열어 읽기만 했다 (파일은 안 받음, 로그인 없음). 곡을 직접 듣지는 못했다.** 분위기는 페이지의 태그·설명·댓글 근거다. "CC0 하나뿐"은 페이지의 License(s) 칸을 눈으로 본 결과다.
+
+**부모님이 직접 고른 곡: 1번 Children's March Theme ("이거 좋은데").** 페이지 확인 결과 쓸 수 있다.
+
+**교체 결과 (2026-11-21)**: 부모님이 zip을 `art/sounds-download/`에 직접 넣어 줬다. zip 안은 mp3·ogg·wav·readme.txt 4개뿐, 경로 이상 없음, readme.txt에도 "Creative Commons Zero (CC0)"라고 적혀 페이지와 같다. 원본 ogg(320kbps, 64.0초)를 libvorbis 96kbps로 다시 만들어 **704,434바이트 (약 0.70MB), 63.99초**. `music/title_children_march.ogg`로 넣고 `title_classical_pop.ogg`는 지웠다 (옛 파일은 git f880c4d에 있어 되돌릴 수 있다). 소리 합계 4,045,912바이트 (약 3.86MB, 5MB 이내). **듣기 확인은 부모님 몫.**
+
+**코인 소리 교체 (2026-11-21)**: 슈퍼마리오 느낌의 "띠링"을 닌텐도 파일 없이 **직접 합성**했다 (ffmpeg aevalsrc 사각파, 988Hz 0.08초 다음 1319Hz 약 0.32초, 끝으로 줄어듦, 모노 22.05kHz). `sfx/coin_pickup.wav`(17,718바이트, 0.40초, 최대 -7.9dB, 평균 -12.3dB)로 덮어씀, 이름이 같아 코드는 안 고침. 옛 소리는 Kenney RPG Audio handleCoins2 (0.34초, 15KB)이고 파일은 지움. 대안으로 Kenney Digital Audio twoTone1, RPG Audio handleCoins가 있다 (zip에 있음, 이번엔 비교 안 함). 사인파를 섞은 더 부드러운 버전(평균 -7.3dB)도 만들어 봤으나 쓰지 않음. **직접 듣지 못했다. 듣기 확인은 부모님 몫.**
+
+| 번호 | 곡 이름 | 만든 사람 | 소리 페이지 (여기서 미리 듣기 가능) | 라이선스 | 길이 | 형식·크기 | 반복 이음새 | 분위기 한 줄 | 지금 곡과 다른 점 |
+|---|---|---|---|---|---|---|---|---|---|
+| **1 (부모님 선택)** | Children's March Theme | CleytonKauffman | https://opengameart.org/content/childrens-march-theme | **CC0 하나뿐 확인함** | 1분 4초 | 압축 파일 하나 15.4MB 안에 WAV·MP3·OGG 세 가지 (곡 하나씩 따로 받는 길은 없음). 게임용 ogg로 다시 만들면 64kbps 약 0.5MB, 96kbps 약 0.77MB로 예상 (예상일 뿐) | **"이음새 없이 반복: 예"** 작가가 적음. mp3는 틈이 생기니 ogg나 wav를 쓰라고 작가가 적음 | 태그: 신나는(upbeat), 귀여운, 아이 같은(children), 즐거운, 장난스러운, 행진, 트롬본·작은북·플루트. 작가 설명: 아이 같은 가벼운 행진곡. 무섭지 않아 보임 | 지금 곡(칩튠 팝, 84초)보다 길이는 짧고, 칩튠 대신 **진짜 악기 소리 행진곡** 느낌. 더 밝고 장난스러운지는 들어 봐야 앎 |
+| 2 | Flowerbed Fields [Loop] | Zane Little Music | https://opengameart.org/content/flowerbed-fields-loop | CC0 하나뿐 확인함 | 페이지에 없음 | ogg 1.7MB (그대로 쓰면 1MB 넘음, 줄이면 약 0.8MB 예상), wav 37.4MB | 제목에 [Loop], 태그 loop | "모험을 시작하는 귀여운 칩튠". 태그: 밝은, 귀여운, NES, 게임보이. 댓글: "통통 튀는 곡" | 지금 곡과 같은 칩튠 계열이지만 더 귀엽고 밝다고 적혀 있음. 바꿈 폭은 작음 |
+| 3 | Catsong | Dan Knoflicek (올린 사람은 josepharaoh99, 페이지에 그렇게 적음) | https://opengameart.org/content/catsong | CC0 하나뿐 확인함 | 짧은 곡(길이 안 적힘) | ogg 1MB, mp3 1.1MB | 반복 표시 없음 | "행복하고 웃긴 분위기, 오르락내리락, 웃음 나는 곡". 짧음 | 아주 장난스러움. 짧아서 질릴 수 있음 |
+| 4 | Toy Soldiers | Zane Little Music | https://opengameart.org/content/toy-soldiers | CC0 하나뿐 확인함 | 페이지에서 확인 못 함 | 페이지 앞부분만 읽어 파일 크기 못 봄 | 못 봄 | 태그: 장난감, 귀여운, 행복, 재미, 칩튠, 행진. 장난감 병정이 행진하는 곡 | 1번과 비슷한 행진 느낌인데 칩튠 |
+| 5 | Beach Sports Theme (Loop) | Trex0n (Cal McEachern) | https://opengameart.org/content/beach-sports-theme-loop | CC0 하나뿐 확인함 | 페이지에 없음 | ogg 611.6KB (작아서 그대로 가능) | 제목에 (Loop) | 해변 + 스포츠 태그뿐, 설명은 "친구 게임용 짧은 반복 곡, 피크민에서 영감". 해변 화면에 어울릴 수 있으나 근거 약함 | 해변 타이틀 화면 느낌. 밝은지는 근거 부족 |
+
+**뺀 곡**: The Rainbow Train(라이선스 칸에 CC-BY 등이 여럿 같이 적혀 있어 뺌, 크기 8.5MB), Happy Clappy Loop(wav 6.2MB뿐), Loop Town(ogg 2.4MB, 빠른 곡), Summers(mp3 3.6MB, 작가가 "크레딧 부탁"), Montage·Happy Loop(mp3뿐, 이음새 틈 걱정), Sunny Day Day 6(wav 24.6MB), Summer Sunday(wav 5.7MB), vintage hawaii(우쿨렐레 느낌이지만 mp3 2.7MB, 로파이 느린 곡), Ukulele Forest(숲 느낌의 짧은 곡 묶음이라 타이틀로는 약함).
+
+**예전 표에서 아직 못 열어 봤던 곡을 이번에 열어 봄 (모두 CC0 하나뿐 확인함)**
+- M2 Adventure Theme (CleytonKauffman): 압축 11.3MB, ogg, 반복은 "no intro" 파일을 쓰라고 함. 태그가 록·빠른·레이싱·슈퍼히어로라 **타이틀로는 너무 힘차서 뺌**.
+- M3 Cool Adventure (MintoDog): mp3 4.3MB, ogg 3.8MB, 반복 가능. 태그 신스·댄스 음악(DM)이라 **크고 전자음악 느낌이라 뺌**.
+- M8 Quaint Town (neonarkade): 반복용 mp3 1.6MB / wav 18.1MB (일반 mp3 2.1MB). 태그: 마을, 평화로운, 행복한, 반복. 밝기보다 **평화로운 쪽**이라 "더 밝게"에는 약함. 쓰려면 mp3를 ogg로 바꿔야 함.
+
+**선택지**
+- A. **1번 Children's March Theme으로 바꾸기 (부모님 선택, 추천)**: 받는 것은 압축 파일 15.4MB 하나이고 그중 ogg 하나만 쓴다. 쓰면 지금 타이틀 곡 0.5MB가 빠진다 (소리 합계 약 3.67MB에서 약 0.2~0.3MB 늘어남 예상, 5MB 안쪽).
+- B. 지금 곡 (Classical Pop Chiptune) 계속 쓰기.
+- C. 2번 Flowerbed Fields (칩튠 그대로 더 귀엽게).
+
+**못 확인한 것**
+- 곡을 **직접 듣지 못했다.** 밝은지·무섭지 않은지는 부모님이 위 페이지 주소의 미리 듣기로 들어 보고 정한다.
+- 1번의 ogg 실제 크기와 앞뒤 무음은 압축 파일을 안 받아서 모른다.
+- 4번은 파일 크기를 못 봤다.
+
+
 작성: 로건 (2026-11-21) / 대상: US-112 ~ US-117 / 규칙: D113 (무료 CC0만)
 
 **지금은 아무 파일도 받지 않았다.** 이 표를 보고 부모님이 "이거 받아"라고 번호로 말해 주면 그때 받는다.

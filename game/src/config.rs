@@ -1177,7 +1177,7 @@ pub const SOUND_PAUSED_MUSIC_FACTOR: f32 = 0.4;
 pub const MUSIC_FADE_SECONDS: f32 = 2.0;
 
 /// 음악 파일 이름 (`SOUNDS_MUSIC_DIR` 아래). 밤과 동굴은 같은 곡이다.
-pub const MUSIC_TITLE_FILE: &str = "title_classical_pop.ogg";
+pub const MUSIC_TITLE_FILE: &str = "title_children_march.ogg";
 pub const MUSIC_DAY_FILE: &str = "day_overworld.ogg";
 pub const MUSIC_NIGHT_FILE: &str = "night_musicbox.ogg";
 pub const MUSIC_CAVE_FILE: &str = MUSIC_NIGHT_FILE;
@@ -1195,7 +1195,7 @@ pub const PLAYER_DOWN_FILES: [&str; 2] = ["fall_down_funny.wav", "wrong.wav"];
 pub const PLAYER_DOWN_CHOICE: usize = 0;
 
 // ---- 소리 화면 (US-112, 로건: 글과 크기. 소리 규칙 수치는 위 "소리 규칙") ----
-/// M 키·스피커 버튼을 누르면 잠깐 보이는 글과 시간 (초)
+/// M 키를 누르면 잠깐 보이는 글과 시간 (초)
 pub const SOUND_TOAST_ON_TEXT: &str = "소리를 켰어요";
 pub const SOUND_TOAST_OFF_TEXT: &str = "소리를 껐어요";
 pub const SOUND_TOAST_SECONDS: f32 = 1.0;

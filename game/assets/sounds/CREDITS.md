@@ -7,7 +7,7 @@
 | music/day_overworld.ogg | OpenGameArt.org | https://opengameart.org/content/overworld-theme-0 | CC0 | Louswan | 2026-11-21 | 낮 음악 (M1, alt 버전 41초, 그대로 사용) |
 | music/shop_urban.ogg | OpenGameArt.org | https://opengameart.org/content/urban-shop | CC0 | MintoDog | 2026-11-21 | 상점 음악 (M7, 원본 2.7MB를 ogg 96kbps로 다시 인코딩) |
 | music/night_musicbox.ogg | OpenGameArt.org | https://opengameart.org/content/4-music-box-tracks | CC0 | Aureolus_Omicron | 2026-11-21 | 밤 음악과 동굴 음악 (N1, musicbox2_cute_tune, ogg 48kbps로 다시 인코딩) |
-| music/title_classical_pop.ogg | OpenGameArt.org | https://opengameart.org/content/classical-pop-chiptune | CC0 | Pro Sensory (Alex McCulloch) | 2026-11-21 | 타이틀 음악 (mp3 320kbps를 ogg 64kbps로 바꿈) |
+| music/title_children_march.ogg | OpenGameArt.org | https://opengameart.org/content/childrens-march-theme | CC0 (페이지 License 칸 CC0 하나뿐, zip 안 readme.txt에도 CC0) | Cleyton Kauffman | 2026-11-21 | 타이틀 음악 "Children's March Theme" (원본 ogg 320kbps를 libvorbis 96kbps로 다시 만듦, 앞뒤 안 자름) |
 
 | sfx/swing_fist.wav | kenney.nl (RPG Audio, 원본 cloth2.ogg) | https://kenney.nl/assets/rpg-audio | CC0 | Kenney | 2026-11-21 | S01 맨손 휘두르기 |
 | sfx/swing_blade.wav | kenney.nl (RPG Audio, 원본 knifeSlice.ogg) | https://kenney.nl/assets/rpg-audio | CC0 | Kenney | 2026-11-21 | S02 칼·도끼 휘두르기 |
@@ -22,7 +22,7 @@
 | sfx/heavy_thud.wav | kenney.nl (Impact Sounds, 원본 impactWood_heavy_000.ogg) | https://kenney.nl/assets/impact-sounds | CC0 | Kenney | 2026-11-21 | S09 곡괭이 센 공격 "쿵" |
 | sfx/poison_fizz.wav | kenney.nl (Interface Sounds, 원본 scratch_004.ogg) | https://kenney.nl/assets/interface-sounds | CC0 | Kenney | 2026-11-21 | S10 독약 포션 |
 | sfx/box_tap.wav | kenney.nl (Impact Sounds, 원본 impactWood_light_000.ogg) | https://kenney.nl/assets/impact-sounds | CC0 | Kenney | 2026-11-21 | S11 상자 치기 |
-| sfx/coin_pickup.wav | kenney.nl (RPG Audio, 원본 handleCoins2.ogg) | https://kenney.nl/assets/rpg-audio | CC0 | Kenney | 2026-11-21 | S12 코인 줍기 |
+| sfx/coin_pickup.wav | 직접 만든 소리 (프로젝트 팀, ffmpeg 합성) | - | CC0로 공개 | 프로젝트 팀 | 2026-11-21 | S12 코인 줍기. 만든 방법: ffmpeg aevalsrc 사각파 988Hz 0.08초 다음 1319Hz 0.32초(끝으로 갈수록 줄어듦), 모노 22.05kHz, 앞뒤 짧은 페이드, 소리 크기 -6dB. 옛 소리(Kenney RPG handleCoins2)는 뺌 |
 | sfx/item_pickup.wav | kenney.nl (Digital Audio, 원본 powerUp5.ogg) | https://kenney.nl/assets/digital-audio | CC0 | Kenney | 2026-11-21 | S13 아이템 줍기 |
 | sfx/dig_wood.wav | kenney.nl (Impact Sounds, 원본 impactWood_medium_000.ogg) | https://kenney.nl/assets/impact-sounds | CC0 | Kenney | 2026-11-21 | S14 나무 캐는 중 |
 | sfx/dig_stone.wav | kenney.nl (Impact Sounds, 원본 impactMetal_light_001.ogg) | https://kenney.nl/assets/impact-sounds | CC0 | Kenney | 2026-11-21 | S14 광석 캐는 중 |

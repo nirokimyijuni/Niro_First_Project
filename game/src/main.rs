@@ -22,7 +22,7 @@ use logic::sound::{
     sfx_for_shop_event, sfx_for_swing, sfx_for_tutorial_event, MiningSound, MusicChange, MusicPlan, MusicScene, MusicSituation, Sfx, SfxMixer, SoundSettings,
 };
 use view::assets::Assets;
-use view::audio::{draw_speaker_button, draw_toast, sound_key_pressed, Audio, SoundToast, WindowFlags, WindowSounds, SPEAKER_BUTTON};
+use view::audio::{draw_toast, sound_key_pressed, Audio, SoundToast, WindowFlags, WindowSounds};
 use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
 use view::pause::{draw_pause, pause_choose, pause_sound_tap_at, PauseBuddy, PauseKeys, PauseSoundTap, PauseTap};
 use view::shop::Pocket;
@@ -346,17 +346,10 @@ async fn main() {
             }
         }
 
-        // 소리 켜기/끄기: M 키(어디서나)와 타이틀·고르기 구석 스피커 버튼 (US-112). 스피커를 누른 손가락은 장면 넘기기가 되지 않는다.
-        let speaker_tap = matches!(scene, Scene::Title | Scene::Select { .. }) && menu.tap.is_some_and(|p| SPEAKER_BUTTON.contains(p));
-        if speaker_tap {
-            menu.tap = None;
-        }
-        if !rotate_hint && (sound_key_pressed() || speaker_tap) {
+        // 소리 켜기/끄기: M 키(어디서나)와 멈춤 창의 소리 버튼 (US-112)
+        if !rotate_hint && sound_key_pressed() {
             let on = sound.toggle();
             toast.show(on);
-            if speaker_tap {
-                audio.play_sfx(Sfx::ButtonClick, sound.effects_volume());
-            }
         }
         toast.update(dt);
 
@@ -812,9 +805,6 @@ async fn main() {
                     view::qa::draw_menu(&text, &qa);
                 }
             }
-        }
-        if matches!(scene, Scene::Title | Scene::Select { .. }) {
-            draw_speaker_button(sound.is_on());
         }
         // 멈춤 창이 열려 있으면 글은 안 띄운다 (창 안의 켜짐/꺼짐 버튼이 바뀐다)
         if !matches!(&scene, Scene::Play { paused: true, ended: None, .. }) {

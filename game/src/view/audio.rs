@@ -5,7 +5,6 @@
 //! - 이 파일의 "순수 함수·구조체"(`MusicFader`, `WindowSounds`, `SoundToast`, `volume_cell_for`)는 단위 시험이 있다.
 
 use super::hud::draw_pill;
-use super::screen::VIRTUAL_WIDTH;
 use super::text::TextPainter;
 use crate::config::*;
 use crate::logic::sound::{loading_order, Sfx, Track};
@@ -173,42 +172,6 @@ pub fn volume_cell_for(percent: u8) -> usize {
     best
 }
 
-// ---------------------------------------------------------------- 스피커 버튼 (타이틀 구석)
-
-/// 타이틀·캐릭터 고르기 오른쪽 위 스피커 버튼 (가상 좌표). 폰에서도 누르기 쉬운 크기.
-pub const SPEAKER_BUTTON: Rect = Rect::new(VIRTUAL_WIDTH - 100.0, 14.0, 86.0, 86.0);
-
-pub fn draw_speaker_button(on: bool) {
-    let r = SPEAKER_BUTTON;
-    draw_circle(r.center().x, r.center().y, r.w / 2.0, Color::new(0.0, 0.0, 0.0, 0.45));
-    let c = r.center();
-    // 스피커 몸통과 나팔
-    draw_rectangle(c.x - 24.0, c.y - 10.0, 16.0, 20.0, WHITE);
-    draw_triangle(vec2(c.x - 10.0, c.y - 10.0), vec2(c.x - 10.0, c.y + 10.0), vec2(c.x + 8.0, c.y + 24.0), WHITE);
-    draw_triangle(vec2(c.x - 10.0, c.y - 10.0), vec2(c.x + 8.0, c.y - 24.0), vec2(c.x + 8.0, c.y + 24.0), WHITE);
-    if on {
-        draw_arc(c.x + 8.0, c.y, 12.0, 4.0);
-        draw_arc(c.x + 8.0, c.y, 22.0, 4.0);
-    } else {
-        // 꺼지면 X
-        draw_line(c.x + 14.0, c.y - 12.0, c.x + 34.0, c.y + 12.0, 6.0, Color::new(1.0, 0.3, 0.3, 1.0));
-        draw_line(c.x + 14.0, c.y + 12.0, c.x + 34.0, c.y - 12.0, 6.0, Color::new(1.0, 0.3, 0.3, 1.0));
-    }
-}
-
-/// 오른쪽으로 퍼지는 소리 물결 (반지름 `r`의 조각 호)
-fn draw_arc(cx: f32, cy: f32, r: f32, thickness: f32) {
-    let mut prev: Option<Vec2> = None;
-    for i in 0..=8 {
-        let a = -0.9 + 1.8 * i as f32 / 8.0;
-        let p = vec2(cx + a.cos() * r, cy + a.sin() * r);
-        if let Some(q) = prev {
-            draw_line(q.x, q.y, p.x, p.y, thickness, WHITE);
-        }
-        prev = Some(p);
-    }
-}
-
 /// M 키: 소리 켜기/끄기
 pub fn sound_key_pressed() -> bool {
     is_key_pressed(KeyCode::M)
@@ -365,6 +328,7 @@ async fn load_all(paths: Vec<String>, bank: Bank, report: Report) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::screen::VIRTUAL_WIDTH;
 
     const FRAME: f32 = 1.0 / 60.0;
 
@@ -515,12 +479,5 @@ mod tests {
         assert_eq!(volume_cell_for(100), 3);
         assert_eq!(volume_cell_for(10), 0);
         assert_eq!(volume_cell_for(15), 1);
-    }
-
-    #[test]
-    fn speaker_button_is_big_and_inside_the_screen() {
-        assert!(SPEAKER_BUTTON.x >= 0.0 && SPEAKER_BUTTON.right() <= VIRTUAL_WIDTH && SPEAKER_BUTTON.y >= 0.0);
-        // 740×360 폰(0.667배)에서도 손가락으로 누르기 쉽게 55 화면 픽셀 넘게
-        assert!(SPEAKER_BUTTON.h * 360.0 / 540.0 >= 55.0);
     }
 }
