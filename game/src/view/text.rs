@@ -55,6 +55,17 @@ pub fn font_step(pixels: f32) -> u16 {
     FONT_PIXEL_STEPS.iter().copied().find(|step| *step as f32 * STEP_STRETCH >= pixels).unwrap_or(FONT_PIXEL_STEPS[FONT_PIXEL_STEPS.len() - 1])
 }
 
+/// macroquad는 글꼴 크기에 화면 dpi를 곱해서 글자를 그려 둔다 (폰은 dpi 3 안팎). 그 곱이 이 값을 넘지 않게 글꼴 크기를
+/// 줄이고 `font_scale`로 되키운다. 폰에서 글꼴 그림(아틀라스)이 8192×8192(256MB)까지 커지고, 커질 때 0.5초씩 멈추던 것을
+/// 막는다 (qa/perf-2026-11-21.md). 대신 폰 글자가 아주 조금 부드럽다.
+pub const MAX_RASTER_DPI: f32 = 2.0;
+
+/// dpi가 `MAX_RASTER_DPI`보다 크면 단계 크기를 그만큼 줄인 글꼴 크기. 그 밖에는 단계 그대로.
+pub fn raster_font_size(step: u16, dpi: f32) -> u16 {
+    let shrink = (MAX_RASTER_DPI / dpi.max(0.1)).min(1.0);
+    ((step as f32 * shrink).round() as u16).max(1)
+}
+
 impl<'a> TextPainter<'a> {
     pub fn new(font: &'a Font, letterbox_scale: f32) -> TextPainter<'a> {
         TextPainter { font, scale: letterbox_scale.clamp(0.1, MAX_TEXT_SCALE) }
@@ -63,7 +74,7 @@ impl<'a> TextPainter<'a> {
     /// 글꼴 단계는 `size`로 고르고, 보이는 크기는 `size × zoom`. 커졌다 작아지는 글자("쿵!", "부릉!")가
     /// 프레임마다 새 글꼴 크기를 만들지 않게 한다.
     fn params_zoomed(&self, size: f32, zoom: f32, color: Color) -> TextParams<'a> {
-        let font_size = font_step(size * self.scale);
+        let font_size = raster_font_size(font_step(size * self.scale), screen_dpi_scale());
         TextParams {
             font: Some(self.font),
             font_size,
@@ -154,6 +165,21 @@ mod tests {
         }
         assert!(used.iter().all(|s| FONT_PIXEL_STEPS.contains(s)));
         assert!(used.len() <= FONT_PIXEL_STEPS.len());
+    }
+
+    #[test]
+    fn raster_size_is_capped_on_high_dpi_but_not_on_low() {
+        for step in FONT_PIXEL_STEPS {
+            assert_eq!(raster_font_size(step, 1.0), step);
+            assert_eq!(raster_font_size(step, 1.25), step);
+            assert_eq!(raster_font_size(step, 2.0), step);
+            for dpi in [2.5f32, 3.0, 4.0] {
+                let drawn = raster_font_size(step, dpi) as f32 * dpi;
+                assert!(drawn <= step as f32 * MAX_RASTER_DPI + dpi, "{step} dpi {dpi} -> {drawn}");
+            }
+        }
+        assert_eq!(raster_font_size(48, 3.0), 32);
+        assert_eq!(raster_font_size(16, 4.0), 8);
     }
 
     #[test]

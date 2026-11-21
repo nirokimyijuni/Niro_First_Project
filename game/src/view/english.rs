@@ -59,15 +59,16 @@ pub struct EnglishArt {
 }
 
 impl EnglishArt {
-    /// 낱말 표의 그림을 모두 불러온다 (Tree는 코드로 그리므로 뺀다). 없거나 읽지 못한 그림은 건너뛴다.
-    pub async fn load() -> EnglishArt {
+    /// 낱말 표의 그림(`names` 차례)을 미리 받아 둔 파일 내용으로 만든다 (Tree는 코드로 그리므로 뺀다).
+    /// 없거나 읽지 못한 그림은 건너뛴다.
+    pub fn from_files(names: &[&'static str], files: Vec<super::assets::FileResult>) -> EnglishArt {
         let mut pictures = HashMap::new();
-        for name in picture_files() {
-            let Ok(bytes) = load_file(&picture_path(name)).await else { continue };
+        for (name, file) in names.iter().zip(files) {
+            let Ok(bytes) = file else { continue };
             let Ok(image) = Image::from_file_with_format(&bytes, Some(ImageFormat::Png)) else { continue };
             let texture = Texture2D::from_image(&image);
             texture.set_filter(FilterMode::Linear);
-            pictures.insert(name, texture);
+            pictures.insert(*name, texture);
         }
         EnglishArt { pictures }
     }

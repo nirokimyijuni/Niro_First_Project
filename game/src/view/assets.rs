@@ -4,7 +4,7 @@
 //! 원화 한 장(547×428)에 세 캐릭터가 같이 있어서, 게임이 시작할 때
 //! 1) 캐릭터별 네모로 잘라 내고 2) 바깥 종이 배경을 투명하게 만든다.
 
-use super::english::EnglishArt;
+use super::english::{picture_files, picture_path, EnglishArt};
 use super::sky::SkyArt;
 use super::title::TitleArt;
 use crate::logic::character::CharacterKind;
@@ -188,29 +188,64 @@ impl M6Art {
         }
     }
 
-    async fn load() -> M6Art {
+    /// M6 그림 파일 경로들 (순서: 미스, 시민 폭탄 미스, 칼, 도끼, 총, 아이템들).
+    fn paths() -> Vec<String> {
+        [MISS_PATH, MISS_CITIZEN_BOMB_PATH, WEAPON_SWORD_PATH, WEAPON_AXE_PATH, WEAPON_GUN_PATH]
+            .into_iter()
+            .chain(ITEM_PATHS)
+            .map(String::from)
+            .collect()
+    }
+
+    /// `paths()` 차례로 미리 받아 둔 파일 내용으로 그림을 만든다.
+    fn from_files(files: Vec<FileResult>) -> M6Art {
         // 미스·시민은 손그림이라 부드럽게, 무기는 픽셀 그림이라 또렷하게 키운다.
-        async fn load(path: &str, filter: FilterMode) -> Texture2D {
-            let bytes = load_file(path).await.expect("M6 그림을 불러오지 못했어요");
+        let mut files = files.into_iter();
+        let mut next = |filter: FilterMode| {
+            let bytes = files.next().and_then(Result::ok).expect("M6 그림을 불러오지 못했어요");
             let texture = Texture2D::from_image(&cut_to_ink(&bytes));
             texture.set_filter(filter);
             texture
-        }
+        };
         M6Art {
-            miss: load(MISS_PATH, FilterMode::Linear).await,
-            miss_citizen_bomb: load(MISS_CITIZEN_BOMB_PATH, FilterMode::Linear).await,
-            weapon_sword: load(WEAPON_SWORD_PATH, FilterMode::Nearest).await,
-            weapon_axe: load(WEAPON_AXE_PATH, FilterMode::Nearest).await,
-            weapon_gun: load(WEAPON_GUN_PATH, FilterMode::Nearest).await,
-            items: {
-                let mut items = Vec::new();
-                for path in ITEM_PATHS {
-                    items.push(load(path, FilterMode::Nearest).await);
-                }
-                items
-            },
+            miss: next(FilterMode::Linear),
+            miss_citizen_bomb: next(FilterMode::Linear),
+            weapon_sword: next(FilterMode::Nearest),
+            weapon_axe: next(FilterMode::Nearest),
+            weapon_gun: next(FilterMode::Nearest),
+            items: ITEM_PATHS.iter().map(|_| next(FilterMode::Nearest)).collect(),
         }
     }
+}
+
+/// 파일 하나를 받은 결과.
+pub type FileResult = Result<Vec<u8>, macroquad::Error>;
+
+/// 파일을 모두 동시에 요청하고 다 올 때까지 기다린다. 결과는 `paths` 차례 그대로 (실패도 그 자리에).
+/// 한 장씩 차례로 받으면 서버 왕복이 쌓여 폰에서 오래 걸린다.
+pub async fn fetch_all(paths: &[String]) -> Vec<FileResult> {
+    join_in_order(paths.iter().map(|p| Box::pin(load_file(p))).collect()).await
+}
+
+/// 미래(future)들을 모두 같이 진행시키고, 다 끝나면 넣은 차례대로 결과를 돌려준다.
+async fn join_in_order<F: std::future::Future + Unpin>(mut pending: Vec<F>) -> Vec<F::Output> {
+    use std::pin::Pin;
+    use std::task::Poll;
+    let mut done: Vec<Option<F::Output>> = pending.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut left = 0;
+        for (future, result) in pending.iter_mut().zip(done.iter_mut()) {
+            if result.is_none() {
+                match Pin::new(future).poll(cx) {
+                    Poll::Ready(value) => *result = Some(value),
+                    Poll::Pending => left += 1,
+                }
+            }
+        }
+        if left == 0 { Poll::Ready(()) } else { Poll::Pending }
+    })
+    .await;
+    done.into_iter().map(|r| r.expect("모든 요청이 끝났어요")).collect()
 }
 
 impl Assets {
@@ -226,9 +261,22 @@ impl Assets {
     /// 글꼴을 뺀 나머지 그림을 불러온다. 로고가 나오는 동안 같이 불러온다 (US-109).
     pub async fn load_with_font(font: Font, font_bytes: Vec<u8>) -> Assets {
         let title = TitleArt::new(&font_bytes);
-        let bytes = load_file(CHARACTER_SHEET_PATH)
-            .await
-            .expect("캐릭터 그림을 불러오지 못했어요");
+        // 모든 그림 파일을 한꺼번에 요청한다: 캐릭터, 좀비, 스켈레톤 3, M6 그림, 영어 그림.
+        let m6_paths = M6Art::paths();
+        let english_names: Vec<&'static str> = picture_files().collect();
+        let paths: Vec<String> = [CHARACTER_SHEET_PATH, ZOMBIE_PATH]
+            .into_iter()
+            .chain(SKELETON_PATHS)
+            .map(String::from)
+            .chain(m6_paths.iter().cloned())
+            .chain(english_names.iter().map(|name| picture_path(name)))
+            .collect();
+        let mut files = fetch_all(&paths).await;
+        let english_files = files.split_off(2 + SKELETON_PATHS.len() + m6_paths.len());
+        let m6_files = files.split_off(2 + SKELETON_PATHS.len());
+        let skeleton_files = files.split_off(2);
+        let mut head = files.into_iter();
+        let bytes = head.next().and_then(Result::ok).expect("캐릭터 그림을 불러오지 못했어요");
         let sheet = Image::from_file_with_format(&bytes, Some(ImageFormat::Png))
             .expect("캐릭터 그림(PNG)을 읽지 못했어요");
         let characters = CharacterKind::ALL.map(|kind| {
@@ -236,7 +284,7 @@ impl Assets {
             texture.set_filter(FilterMode::Linear);
             texture
         });
-        let zombie_bytes = load_file(ZOMBIE_PATH).await.expect("좀비 그림을 불러오지 못했어요");
+        let zombie_bytes = head.next().and_then(Result::ok).expect("좀비 그림을 불러오지 못했어요");
         let zombie_image = cut_zombie(&zombie_bytes);
         let pixel_texture = |image: &Image| {
             let texture = Texture2D::from_image(image);
@@ -246,12 +294,22 @@ impl Assets {
         let zombie = pixel_texture(&zombie_image);
         let zombie_flash = pixel_texture(&white_silhouette(&zombie_image));
         let mut skeletons = Vec::new();
-        for path in SKELETON_PATHS {
-            let bytes = load_file(path).await.expect("스켈레톤 그림을 불러오지 못했어요");
+        for file in skeleton_files {
+            let bytes = file.expect("스켈레톤 그림을 불러오지 못했어요");
             let image = cut_to_ink(&bytes);
             skeletons.push((pixel_texture(&image), pixel_texture(&white_silhouette(&image))));
         }
-        Assets { font, title, characters, zombie, zombie_flash, skeletons, sky: SkyArt::new(), m6: M6Art::load().await, english: EnglishArt::load().await }
+        Assets {
+            font,
+            title,
+            characters,
+            zombie,
+            zombie_flash,
+            skeletons,
+            sky: SkyArt::new(),
+            m6: M6Art::from_files(m6_files),
+            english: EnglishArt::from_files(&english_names, english_files),
+        }
     }
 
     pub fn character(&self, kind: CharacterKind) -> &Texture2D {
@@ -372,6 +430,46 @@ pub fn remove_paper_background(image: &mut Image) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn join_in_order_starts_all_together_and_keeps_order() {
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        // 처음 몇 번은 Pending, 그 뒤에 값을 주는 미래. 첫 poll 때 시작 표시를 남긴다.
+        struct Slow { waits: u32, value: u32, started: std::rc::Rc<std::cell::Cell<u32>>, first: bool }
+        impl Future for Slow {
+            type Output = u32;
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u32> {
+                if self.first {
+                    self.first = false;
+                    self.started.set(self.started.get() + 1);
+                }
+                if self.waits == 0 { return Poll::Ready(self.value) }
+                self.waits -= 1;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+        fn noop_raw() -> RawWaker {
+            fn clone(_: *const ()) -> RawWaker { noop_raw() }
+            fn noop(_: *const ()) {}
+            static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        let started = std::rc::Rc::new(std::cell::Cell::new(0));
+        let make = |waits, value| Slow { waits, value, started: started.clone(), first: true };
+        let mut future = Box::pin(super::join_in_order(vec![make(3, 10), make(0, 20), make(1, 30)]));
+        let waker = unsafe { Waker::from_raw(noop_raw()) };
+        let mut cx = Context::from_waker(&waker);
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(started.get(), 3, "첫 번째 확인에서 세 요청이 모두 시작돼야 한다");
+        let mut result = None;
+        for _ in 0..10 {
+            if let Poll::Ready(v) = future.as_mut().poll(&mut cx) { result = Some(v); break }
+        }
+        assert_eq!(result, Some(vec![10, 20, 30]), "결과는 넣은 차례 그대로");
+    }
+
     use super::*;
 
     fn sheet() -> Image {
