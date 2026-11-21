@@ -16,6 +16,7 @@ use crate::config::{SHOP_BOUGHT_TEXT, SHOP_HINT_TEXT, SHOP_SOLD_TEXT};
 use crate::logic::game::Game;
 use crate::logic::gathering::Material;
 use crate::logic::shop::{Armor, Potion, ShopItem, SELLABLE};
+use crate::logic::sound::{sfx_for_buy, sfx_for_sell, Sfx};
 use macroquad::prelude::*;
 
 // ---- 자리 (가상 960×540 안) ----
@@ -100,6 +101,8 @@ pub fn shop_tap_at(point: Vec2) -> Option<ShopTap> {
 #[derive(Debug, Default)]
 pub struct ShopView {
     feedback: Option<(ShopTap, f32)>,
+    /// 누른 결과로 날 효과음 (사면 짤랑 …). `take_sfx`로 한 번 꺼낸다.
+    sfx: Option<Sfx>,
 }
 
 impl ShopView {
@@ -111,11 +114,24 @@ impl ShopView {
         self.feedback = self.feedback.map(|(tap, age)| (tap, age + dt)).filter(|(_, age)| *age < FEEDBACK_SECONDS);
     }
 
+    /// 누른 결과로 날 효과음을 한 번 꺼낸다 (없으면 None).
+    pub fn take_sfx(&mut self) -> Option<Sfx> {
+        self.sfx.take()
+    }
+
     /// 누른 것을 logic에 넘긴다. 사거나 팔았으면 true.
     pub fn apply(&mut self, game: &mut Game, tap: ShopTap) -> bool {
         let done = match tap {
-            ShopTap::Buy(item) => game.buy(item).is_ok(),
-            ShopTap::Sell(material) => game.sell(material).is_ok(),
+            ShopTap::Buy(item) => {
+                let result = game.buy(item);
+                self.sfx = sfx_for_buy(&result);
+                result.is_ok()
+            }
+            ShopTap::Sell(material) => {
+                let result = game.sell(material);
+                self.sfx = sfx_for_sell(&result);
+                result.is_ok()
+            }
             ShopTap::Close => {
                 game.close_shop();
                 self.feedback = None;

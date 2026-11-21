@@ -349,10 +349,12 @@ fn draw_tap_to_start(text: &TextPainter, t: f32) {
 /// Now Loading → 눌러서 시작 → 로고를 보여 주고, 끝나면(또는 넘기면) `poll`이 돌려준 것(불러온 그림)을 돌려준다.
 /// `touch`는 main과 같은 것을 써서, 누를 때 대고 있던 손가락이 다음 칸이나 타이틀에서 새 누름이 되지 않게 한다.
 /// 목소리는 아직 없다 (부모님이 art/voice/에 넣으면 로고가 시작될 때 붙인다).
-pub async fn play_logo<T>(font: &Font, touch: &mut TouchControls, skip: bool, mut poll: impl FnMut() -> Option<T>) -> T {
+/// `on_start`는 "눌러서 시작"을 누른 바로 그 프레임에 한 번 불린다 (?qa는 첫 프레임). 소리 파일 받기를 여기서 시작한다.
+pub async fn play_logo<T>(font: &Font, touch: &mut TouchControls, skip: bool, mut poll: impl FnMut() -> Option<T>, mut on_start: impl FnMut()) -> T {
     let mut intro = Intro::new(skip);
     let mut ready: Option<T> = None;
     let mut first_frame = true;
+    let mut started = false;
     // 횟수 제한 없는 장면 루프지만, 끝나는 길(다 받음 → 누름/qa → 로고 시간)이 Intro 시험으로 확인돼 있다.
     loop {
         if ready.is_none() {
@@ -367,6 +369,10 @@ pub async fn play_logo<T>(font: &Font, touch: &mut TouchControls, skip: bool, mu
         let tap = touch.idle(&fingers(&letterbox));
         let pressed = tap.is_some() || is_mouse_button_pressed(MouseButton::Left) || any_key_pressed();
         intro.update(get_frame_time().clamp(0.0, crate::config::MAX_FRAME_SECONDS), pressed, ready.is_some());
+        if !started && !matches!(intro.stage(), IntroStage::Loading | IntroStage::TapToStart) {
+            started = true;
+            on_start();
+        }
 
         // 띠까지 빨강 (남는 곳도 빨간색)
         clear_background(LOGO_RED);

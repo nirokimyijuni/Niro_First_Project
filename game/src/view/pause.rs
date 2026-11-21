@@ -5,12 +5,23 @@
 use super::hud::draw_pill;
 use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::text::TextPainter;
+use crate::config::{PAUSE_EFFECTS_LABEL, PAUSE_MUSIC_LABEL, PAUSE_SOUND_OFF_TEXT, PAUSE_SOUND_ON_TEXT, SOUND_STEP_LABELS, SOUND_VOLUME_STEPS};
 use crate::logic::character::CharacterKind;
 use macroquad::prelude::*;
 
-const PANEL: Rect = Rect::new(250.0, 90.0, 460.0, 380.0);
-pub const RESUME_BUTTON: Rect = Rect::new(290.0, 190.0, 380.0, 110.0);
-pub const QUIT_BUTTON: Rect = Rect::new(290.0, 320.0, 380.0, 110.0);
+// 소리 줄(켜짐/꺼짐, 음악 4칸, 효과음 4칸)이 들어가도록 창을 위아래로 늘리고 두 큰 버튼은 조금 낮췄다 (US-112).
+const PANEL: Rect = Rect::new(250.0, 4.0, 460.0, 520.0);
+pub const RESUME_BUTTON: Rect = Rect::new(290.0, 66.0, 380.0, 86.0);
+pub const QUIT_BUTTON: Rect = Rect::new(290.0, 170.0, 380.0, 86.0);
+/// 소리 켜기/끄기 버튼
+pub const SOUND_TOGGLE: Rect = Rect::new(290.0, 274.0, 380.0, 68.0);
+/// 음악 줄·효과음 줄: 왼쪽에 이름, 오른쪽에 4칸 (끔·작게·보통·크게)
+const MUSIC_ROW_Y: f32 = 352.0;
+const EFFECTS_ROW_Y: f32 = 430.0;
+const SOUND_ROW_H: f32 = 68.0;
+const CELL_X: f32 = 380.0;
+const CELL_W: f32 = 68.0;
+const CELL_GAP: f32 = 4.0;
 
 // 글은 config.rs에 모은다 (REVIEW-020 3번). 여기서는 가리키기만 한다.
 pub const PAUSE_TITLE_TEXT: &str = crate::config::PAUSE_TITLE_TEXT;
@@ -119,6 +130,45 @@ pub fn pause_choose(picked: &mut PauseTap, keys: PauseKeys, tap: Option<Vec2>) -
     tap.and_then(pause_tap_at)
 }
 
+/// 멈춤 창의 소리 버튼에서 누른 것.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseSoundTap {
+    /// 소리 켜기/끄기
+    Toggle,
+    /// 음악 크기 칸 (`SOUND_VOLUME_STEPS` 번호)
+    Music(usize),
+    /// 효과음 크기 칸
+    Effects(usize),
+}
+
+impl PauseSoundTap {
+    /// 크기 칸을 누르면 소리도 같이 켠다 (꺼진 채로 눌러도 칸이 바뀌고 소리가 난다). 켜기/끄기 버튼은 그대로 뒤집기만 한다.
+    pub fn turns_sound_on(self) -> bool {
+        !matches!(self, PauseSoundTap::Toggle)
+    }
+}
+
+/// 소리 크기 칸 하나의 네모. `row_y`는 줄의 위쪽, `i`는 0~3.
+fn cell_rect(row_y: f32, i: usize) -> Rect {
+    Rect::new(CELL_X + i as f32 * (CELL_W + CELL_GAP), row_y, CELL_W, SOUND_ROW_H)
+}
+
+/// 누른 곳(가상 좌표)이 소리 버튼 중 어디인지. 빈 곳은 None.
+pub fn pause_sound_tap_at(point: Vec2) -> Option<PauseSoundTap> {
+    if SOUND_TOGGLE.contains(point) {
+        return Some(PauseSoundTap::Toggle);
+    }
+    for i in 0..SOUND_VOLUME_STEPS.len() {
+        if cell_rect(MUSIC_ROW_Y, i).contains(point) {
+            return Some(PauseSoundTap::Music(i));
+        }
+        if cell_rect(EFFECTS_ROW_Y, i).contains(point) {
+            return Some(PauseSoundTap::Effects(i));
+        }
+    }
+    None
+}
+
 /// 고른 칸은 주황 바탕 + 흰 테두리, 다른 칸은 파랑 바탕.
 fn draw_choice(r: Rect, picked: bool) {
     if picked {
@@ -130,28 +180,48 @@ fn draw_choice(r: Rect, picked: bool) {
 /// 멈춤 창 그리기 (화면 좌표). `touch_mode`가 아니면 "이어서 하기" 아래에 "Esc"를 작게 쓴다.
 /// `picked` 칸이 주황색이다 (처음은 이어서 하기라 예전 모습 그대로).
 /// `buddy`: 창 옆에서 기다려 주는 친구 그림과 통통 뛰는 시간(초).
-pub fn draw_pause(text: &TextPainter, touch_mode: bool, picked: PauseTap, buddy: (&Texture2D, f32)) {
+/// `sound`: (소리 켜짐, 음악 %, 효과음 %). 아래 소리 줄에 보인다.
+pub fn draw_pause(text: &TextPainter, touch_mode: bool, picked: PauseTap, buddy: (&Texture2D, f32), sound: (bool, u8, u8)) {
     draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
     draw_buddy(buddy.0, buddy.1);
     draw_rectangle(PANEL.x, PANEL.y, PANEL.w, PANEL.h, PANEL_FILL);
     draw_rectangle_lines(PANEL.x, PANEL.y, PANEL.w, PANEL.h, 5.0, PANEL_LINE);
-    text.centered(PAUSE_TITLE_TEXT, PANEL.center().x, PANEL.y + 66.0, 44.0, TITLE);
+    text.centered(PAUSE_TITLE_TEXT, PANEL.center().x, PANEL.y + 50.0, 40.0, TITLE);
 
     let r = RESUME_BUTTON;
     draw_choice(r, picked == PauseTap::Resume);
     // 이어서 하기: 오른쪽을 가리키는 세모 (놀이 버튼)
     let tri = vec2(r.x + 62.0, r.center().y);
-    draw_triangle(tri + vec2(-16.0, -22.0), tri + vec2(-16.0, 22.0), tri + vec2(22.0, 0.0), WHITE);
-    let (y, small) = if touch_mode { (r.center().y + 16.0, None) } else { (r.center().y + 6.0, Some("Esc")) };
-    text.centered(RESUME_TEXT, r.center().x + 24.0, y, 46.0, WHITE);
+    draw_triangle(tri + vec2(-16.0, -20.0), tri + vec2(-16.0, 20.0), tri + vec2(22.0, 0.0), WHITE);
+    let (y, small) = if touch_mode { (r.center().y + 14.0, None) } else { (r.center().y + 4.0, Some("Esc")) };
+    text.centered(RESUME_TEXT, r.center().x + 24.0, y, 42.0, WHITE);
     if let Some(key) = small {
-        text.centered(key, r.center().x + 24.0, r.bottom() - 10.0, 24.0, WHITE);
+        text.centered(key, r.center().x + 24.0, r.bottom() - 8.0, 20.0, WHITE);
     }
 
     let q = QUIT_BUTTON;
     draw_choice(q, picked == PauseTap::Quit);
-    text.centered(QUIT_TEXT, q.center().x, q.center().y + 2.0, 42.0, WHITE);
-    text.centered(QUIT_SUB_TEXT, q.center().x, q.bottom() - 14.0, 26.0, WHITE);
+    text.centered(QUIT_TEXT, q.center().x, q.center().y + 2.0, 38.0, WHITE);
+    text.centered(QUIT_SUB_TEXT, q.center().x, q.bottom() - 10.0, 22.0, WHITE);
+
+    // 소리 줄 (US-112): 켜짐/꺼짐 버튼, 음악 4칸, 효과음 4칸
+    let (on, music, effects) = sound;
+    let t = SOUND_TOGGLE;
+    draw_pill(t.x, t.y, t.w, t.h, if on { Color::new(0.20, 0.62, 0.35, 1.0) } else { Color::new(0.45, 0.45, 0.50, 1.0) });
+    let label = if on { PAUSE_SOUND_ON_TEXT } else { PAUSE_SOUND_OFF_TEXT };
+    text.centered(label, t.center().x, t.center().y + 14.0, 40.0, WHITE);
+    if !touch_mode {
+        text.left("M", t.right() - 52.0, t.center().y + 9.0, 26.0, WHITE);
+    }
+    for (row_y, name, percent) in [(MUSIC_ROW_Y, PAUSE_MUSIC_LABEL, music), (EFFECTS_ROW_Y, PAUSE_EFFECTS_LABEL, effects)] {
+        text.left(name, 292.0, row_y + SOUND_ROW_H / 2.0 + 9.0, 24.0, WHITE);
+        let chosen = super::audio::volume_cell_for(percent);
+        for i in 0..SOUND_VOLUME_STEPS.len() {
+            let c = cell_rect(row_y, i);
+            draw_rectangle(c.x, c.y, c.w, c.h, if i == chosen && on { PICKED_FILL } else { OTHER_FILL });
+            text.centered(SOUND_STEP_LABELS[i], c.center().x, c.center().y + 9.0, 26.0, WHITE);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -162,8 +232,8 @@ mod tests {
     fn buttons_are_big_apart_and_inside_the_window() {
         for b in [RESUME_BUTTON, QUIT_BUTTON] {
             assert!(PANEL.contains(b.point()) && PANEL.contains(vec2(b.right(), b.bottom())), "{b:?} 창 밖");
-            // 740×360 폰(0.667배)에서도 70 화면 픽셀 넘게
-            assert!(b.h * 360.0 / 540.0 >= 70.0 && b.w >= 300.0);
+            // 740×360 폰(0.667배)에서도 55 화면 픽셀 넘게 (소리 줄이 들어가며 110 → 86으로 낮췄다)
+            assert!(b.h * 360.0 / 540.0 >= 55.0 && b.w >= 300.0);
         }
         assert!(RESUME_BUTTON.intersect(QUIT_BUTTON).is_none(), "두 버튼이 안 겹친다");
         assert!(PANEL.right() <= VIRTUAL_WIDTH && PANEL.bottom() <= VIRTUAL_HEIGHT);
@@ -254,6 +324,52 @@ mod tests {
         }
         assert!(buddy_lift(0.0) < 0.01, "땅에서 시작");
         const { assert!(BUDDY_HOP <= 12.0) };
+    }
+
+    #[test]
+    fn sound_buttons_fit_in_the_window_do_not_overlap_and_are_touchable() {
+        let mut all: Vec<Rect> = vec![SOUND_TOGGLE];
+        for i in 0..SOUND_VOLUME_STEPS.len() {
+            all.push(cell_rect(MUSIC_ROW_Y, i));
+            all.push(cell_rect(EFFECTS_ROW_Y, i));
+        }
+        all.push(RESUME_BUTTON);
+        all.push(QUIT_BUTTON);
+        for (i, a) in all.iter().enumerate() {
+            assert!(PANEL.contains(a.point()) && PANEL.contains(vec2(a.right(), a.bottom())), "{a:?} 창 밖");
+            // 740×360 폰에서 44 화면 픽셀 넘게 (손가락 크기)
+            assert!(a.h * 360.0 / 540.0 >= 44.0 && a.w * 740.0 / 960.0 >= 44.0, "{a:?} 너무 작다");
+            for b in all.iter().skip(i + 1) {
+                assert!(a.intersect(*b).is_none(), "{a:?}와 {b:?}가 겹친다");
+            }
+        }
+        // 이름 글자 자리(왼쪽)와 첫 칸도 안 겹친다
+        assert!(cell_rect(MUSIC_ROW_Y, 0).x > 292.0 + 3.0 * 24.0 + 8.0, "효과음 세 글자가 첫 칸 앞에 든다");
+        // 고르기 테두리(7)가 소리 줄에 닿지 않는다
+        assert!(QUIT_BUTTON.bottom() + PICK_RING < SOUND_TOGGLE.y);
+        assert!(PANEL.right() <= VIRTUAL_WIDTH && PANEL.bottom() <= VIRTUAL_HEIGHT);
+        // 친구 자리와 안 겹친다
+        assert!(BUDDY_BOX.x > PANEL.right());
+    }
+
+    #[test]
+    fn volume_cells_turn_the_sound_on_but_the_toggle_does_not() {
+        assert!(PauseSoundTap::Music(2).turns_sound_on());
+        assert!(PauseSoundTap::Effects(0).turns_sound_on());
+        assert!(!PauseSoundTap::Toggle.turns_sound_on());
+    }
+
+    #[test]
+    fn sound_taps_are_found_and_do_not_steal_the_big_buttons() {
+        assert_eq!(pause_sound_tap_at(SOUND_TOGGLE.center()), Some(PauseSoundTap::Toggle));
+        for i in 0..4 {
+            assert_eq!(pause_sound_tap_at(cell_rect(MUSIC_ROW_Y, i).center()), Some(PauseSoundTap::Music(i)));
+            assert_eq!(pause_sound_tap_at(cell_rect(EFFECTS_ROW_Y, i).center()), Some(PauseSoundTap::Effects(i)));
+        }
+        assert_eq!(pause_sound_tap_at(RESUME_BUTTON.center()), None);
+        assert_eq!(pause_sound_tap_at(QUIT_BUTTON.center()), None);
+        assert_eq!(pause_tap_at(SOUND_TOGGLE.center()), None, "소리 버튼은 이어서/처음으로가 아니다");
+        assert_eq!(pause_sound_tap_at(vec2(5.0, 5.0)), None);
     }
 
     #[test]

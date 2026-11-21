@@ -177,9 +177,9 @@ pub fn pickaxe_how_text(diamond: bool, touch_mode: bool) -> &'static str {
     }
 }
 
-/// PC 아래 키 안내 한 줄 (처음 8초): "I: 가방  Esc: 멈춤".
+/// PC 아래 키 안내 한 줄 (처음 8초): "I: 가방  M: 소리  Esc: 멈춤". 폰에는 이 줄이 안 나온다 (키가 없다).
 pub fn short_key_hint() -> String {
-    format!("{}: {BAG_NAME_TEXT}  Esc: 멈춤", BAG_KEY.1)
+    format!("{}: {BAG_NAME_TEXT}  M: 소리  Esc: 멈춤", BAG_KEY.1)
 }
 
 /// 가방 아래 전체 키 안내 (PC): 세 줄 × [왼쪽 칸, 오른쪽 칸]. 화살표 글자와 가운뎃점은 Jua 글꼴에 없어서
@@ -189,7 +189,7 @@ pub fn full_key_guide() -> [[String; 2]; 3] {
     [
         ["화살표: 걷기  Q: 공격".to_string(), "Space, 위 화살표: 점프".to_string()],
         [format!("{}: 무기 바꾸기  {}: {BAG_NAME_TEXT}", SWITCH_KEY.1, BAG_KEY.1), "E, 위 화살표: 캐기, 들어가기".to_string()],
-        [format!("{}: 쓰기  Esc: 멈춤", pockets.join(", ")), String::new()],
+        [format!("{}: 쓰기  Esc: 멈춤", pockets.join(", ")), "M: 소리 켜기, 끄기".to_string()],
     ]
 }
 
@@ -687,15 +687,16 @@ mod tests {
 
     #[test]
     fn key_texts_follow_the_new_keys() {
-        assert_eq!(short_key_hint(), "I: 가방  Esc: 멈춤");
+        assert_eq!(short_key_hint(), "I: 가방  M: 소리  Esc: 멈춤");
         let lines: Vec<String> = full_key_guide().into_iter().flatten().collect();
         let all = lines.join("  ");
-        for keys in ["Q: 공격", "Tab: 무기 바꾸기", "캐기, 들어가기", "Space, 위 화살표: 점프", "1, 2, R, 3: 쓰기", "I: 가방", "Esc: 멈춤"] {
+        for keys in ["Q: 공격", "Tab: 무기 바꾸기", "캐기, 들어가기", "Space, 위 화살표: 점프", "1, 2, R, 3: 쓰기", "I: 가방", "Esc: 멈춤", "M: 소리"] {
             assert!(all.contains(keys), "{keys} 없음: {all}");
         }
         // 빨리감기(F)는 숨은 기능이라 안내에 없다 (부모님 결정 2026-11-15)
         assert!(!all.contains("빨리감기") && !all.contains("F:"), "{all}");
         assert!(!short_key_hint().contains("빨리감기"));
+        assert!(short_key_hint().contains("M: 소리"), "BUG-041: 소리 키 안내");
         for line in lines.into_iter().chain([short_key_hint()]) {
             assert!(!line.chars().any(|c| "←↑→↓×÷…①②③④□○「」—·".contains(c)), "Jua에 없는 글자: {line}");
         }

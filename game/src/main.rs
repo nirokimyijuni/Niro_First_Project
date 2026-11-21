@@ -16,9 +16,15 @@ use logic::settings::Settings;
 use logic::tutorial::{Tutorial, TutorialEvent, TutorialState};
 use logic::window_tips::{TipWindow, WindowTips};
 use macroquad::prelude::*;
+use logic::gathering::Material;
+use logic::sound::{
+    bonus_sfx_for_gather_event, choose_track, sfx_for_box_event, sfx_for_game_event, sfx_for_gather_event, sfx_for_item_event, sfx_for_math_result, sfx_for_mission_event, sfx_for_practice_event,
+    sfx_for_shop_event, sfx_for_swing, sfx_for_tutorial_event, MiningSound, MusicChange, MusicPlan, MusicScene, MusicSituation, Sfx, SfxMixer, SoundSettings,
+};
 use view::assets::Assets;
+use view::audio::{draw_speaker_button, draw_toast, sound_key_pressed, Audio, SoundToast, WindowFlags, WindowSounds, SPEAKER_BUTTON};
 use view::craft::{apply_craft_tap, craft_tap_at, draw_craft};
-use view::pause::{draw_pause, pause_choose, PauseBuddy, PauseKeys, PauseTap};
+use view::pause::{draw_pause, pause_choose, pause_sound_tap_at, PauseBuddy, PauseKeys, PauseSoundTap, PauseTap};
 use view::shop::Pocket;
 use view::effects::Effects;
 use view::gameover::{EndScreen, RETRY_BUTTON};
@@ -262,7 +268,10 @@ async fn main() {
     // 게임을 열 때 한 번만 (장면 루프 밖). ?qa에서는 눌러서 시작과 로고를 건너뛴다.
     let (font, font_bytes) = Assets::load_font().await;
     let loading = macroquad::experimental::coroutines::start_coroutine(Assets::load_with_font(font.clone(), font_bytes));
-    let assets = view::logo::play_logo(&font, &mut touch, view::web::qa_mode(), || loading.retrieve()).await;
+    // 소리 (US-112): 파일은 "눌러서 시작"을 누른 뒤에 뒤에서 하나씩 받는다. 첫 화면(Now Loading) 동안은 소리 파일을 받지 않는다.
+    let mut audio = Audio::new();
+    let assets = view::logo::play_logo(&font, &mut touch, view::web::qa_mode(), || loading.retrieve(), || audio.start_loading()).await;
+    audio.start_loading(); // ?qa처럼 누름 없이 넘어온 경우 (두 번째 부름은 아무 일 없다)
     let mut scene = Scene::Title;
     let mut first_frame = true;
     let mut touch_mode = false;
@@ -274,6 +283,14 @@ async fn main() {
     // 설정 (US-125): 시작할 때 한 번 읽는다. 값을 바꾸는 쪽(튜토리얼·소리 스토리)이 바뀔 때만 view::web::save_settings(&settings)를 부른다.
     // 게임 규칙 상태(Game)가 아니라 여기(화면 쪽)에 둔다. 지금은 튜토리얼이 끝나거나 건너뛸 때만 바뀐다 (US-120).
     let mut settings = view::web::load_settings();
+    // 소리 (US-112~117): 켜짐/크기는 저장된 설정에서, 나머지는 소리 규칙(logic::sound)이 정한다
+    let mut sound = SoundSettings::from_settings(&settings);
+    let mut mixer = SfxMixer::new();
+    let mut music_plan = MusicPlan::new();
+    let mut mining_sound = MiningSound::default();
+    let mut window_sounds = WindowSounds::default();
+    let mut toast = SoundToast::default();
+    let mut prev_quiz_open = false;
     // ?qa에서는 튜토리얼 말풍선이 나오지 않는다. ?qa=tutorial이면 나온다 (US-123). 저장은 둘 다 읽지도 쓰지도 않는다.
     let no_guide = view::web::no_guide();
     // 창 한 줄 안내 (US-121): 판이 바뀌어도 이어 쓴다 (본 창은 다시하기를 해도 또 나오지 않는다). 본 창은 설정에 저장된다.
@@ -329,6 +346,20 @@ async fn main() {
             }
         }
 
+        // 소리 켜기/끄기: M 키(어디서나)와 타이틀·고르기 구석 스피커 버튼 (US-112). 스피커를 누른 손가락은 장면 넘기기가 되지 않는다.
+        let speaker_tap = matches!(scene, Scene::Title | Scene::Select { .. }) && menu.tap.is_some_and(|p| SPEAKER_BUTTON.contains(p));
+        if speaker_tap {
+            menu.tap = None;
+        }
+        if !rotate_hint && (sound_key_pressed() || speaker_tap) {
+            let on = sound.toggle();
+            toast.show(on);
+            if speaker_tap {
+                audio.play_sfx(Sfx::ButtonClick, sound.effects_volume());
+            }
+        }
+        toast.update(dt);
+
         // 1) 입력 → 장면 바꾸기 / logic 업데이트. 장면이 바뀐 프레임에는 새 장면을 업데이트하지 않는다
         //    (같은 Space 한 번이 "결정"과 "점프"로 두 번 쓰이지 않게).
         //    세로 안내 중에는 아무것도 업데이트하지 않는다: 시계·코인·캐릭터가 그대로 멈춘다
@@ -339,6 +370,7 @@ async fn main() {
             match &mut scene {
                 Scene::Title => {
                     if menu.confirm || menu.tap.is_some() {
+                        mixer.request(Sfx::ButtonClick);
                         Some(Scene::Select { picked: 0 })
                     } else {
                         None
@@ -352,8 +384,10 @@ async fn main() {
                         *picked += 1;
                     }
                     if let Some(i) = menu.tap.and_then(screens::select_card_at) {
+                        mixer.request(Sfx::ButtonClick);
                         Some(start_play(CharacterKind::ALL[i], &settings, no_guide, carried_tutorial.take()))
                     } else if menu.confirm {
+                        mixer.request(Sfx::ButtonClick);
                         Some(start_play(CharacterKind::ALL[*picked], &settings, no_guide, carried_tutorial.take()))
                     } else {
                         None
@@ -391,6 +425,7 @@ async fn main() {
                     }
                     if skip_on && view::tutorial::skip_pressed(view::input::tutorial_skip_key_pressed(), menu.tap, claimed.map(|f| f.pos), skip_rect) {
                         game.skip_tutorial();
+                        mixer.request(Sfx::ButtonClick);
                     }
                     // 물음표(?) 버튼 (US-122): 보이는 동안만 받는다. 누른 손가락도 건너뛰기처럼 뗄 때까지 조이스틱·버튼에 넘기지 않는다.
                     let help_on = ended.is_none() && !window_open && !*paused && !qa.open && !bag.open && !help.pauses_game() && help.button_visible();
@@ -427,14 +462,33 @@ async fn main() {
                         None
                     } else if *paused && ended.is_none() {
                         // 멈춤 창: logic을 부르지 않는다 (시계·몬스터·효과가 그대로 멈춘다)
+                        // 소리 버튼 (US-112): 켜짐/꺼짐과 음악·효과음 크기 4칸. 멈춤 중에는 효과음이 막혀 있어서 눌림 소리는 바로 낸다.
+                        if let Some(tap) = menu.tap.and_then(pause_sound_tap_at) {
+                            match tap {
+                                PauseSoundTap::Toggle => {
+                                    let on = sound.toggle();
+                                    toast.show(on);
+                                }
+                                PauseSoundTap::Music(i) => sound.set_music_percent(config::SOUND_VOLUME_STEPS[i] as i32),
+                                PauseSoundTap::Effects(i) => sound.set_effects_percent(config::SOUND_VOLUME_STEPS[i] as i32),
+                            }
+                            // 꺼진 채로 크기 칸을 눌러도 소리가 켜지고 칸 색이 바뀐다
+                            if tap.turns_sound_on() && !sound.is_on() {
+                                sound.set_on(true);
+                                toast.show(true);
+                            }
+                            audio.play_sfx(Sfx::ButtonClick, sound.effects_volume());
+                        }
                         match pause_choice(&menu, pause_pick) {
                             Some(PauseTap::Resume) => {
+                                mixer.request(Sfx::WindowClose);
                                 *paused = false;
                                 // 멈춘 동안 누르던 ←/→는 뗄 때까지 걷기가 되지 않는다
                                 *walk_lock = true;
                                 None
                             }
                             Some(PauseTap::Quit) => {
+                                audio.play_sfx(Sfx::ButtonClick, sound.effects_volume());
                                 keep_record(game.clock.nights_survived(), &mut best_days);
                                 keep_score(game.score(), &mut best_score);
                                 carried_tutorial = Some(game.tutorial.for_next_game());
@@ -478,11 +532,13 @@ async fn main() {
                         // 게임 중·문제 창의 Esc나 폰 "멈춤"·"◀ 고르기": 바로 나가지 않고 멈춤 창을 띄운다 (부모님 요청 2026-11-14)
                         // 문제 창은 그대로 열려 있고, 이어서 하면 그 창으로 돌아온다
                         *paused = true;
+                        audio.play_sfx(Sfx::WindowOpen, sound.effects_volume());
                         *pause_pick = PauseTap::Resume;
                         *pause_buddy = PauseBuddy::pick((macroquad::miniquad::date::now() * 1000.0) as u64 as u32);
                         game.mine_held = false;
                         None
                     } else if back == Some(BackAction::Leave) || retry {
+                        mixer.request(Sfx::ButtonClick);
                         keep_record(game.clock.nights_survived(), &mut best_days);
                         keep_score(game.score(), &mut best_score);
                         carried_tutorial = Some(game.tutorial.for_next_game());
@@ -501,7 +557,9 @@ async fn main() {
                         // 문제 창이 열린 동안: 숫자 키·숫자판(수학) 또는 1~4 키·보기 칸(영어)만 받고,
                         // 걷기·점프·공격·바꾸기·빨리감기는 게임에 넣지 않는다.
                         if quiz_open {
-                            apply_quiz_input(&mut game.math, &quiz_keys, menu.tap);
+                            if let Some(result) = apply_quiz_input(&mut game.math, &quiz_keys, menu.tap) {
+                                mixer.request(sfx_for_math_result(result));
+                            }
                         } else if craft_open {
                             // "…을 만들었어요!"는 제작대 화면이 바로 보여 준다 (craft::draw_craft)
                             if let Some(tap) = menu.tap.and_then(craft_tap_at) {
@@ -511,6 +569,7 @@ async fn main() {
                             // 사기·팔기·닫기: 마우스 클릭과 손가락 탭이 같은 길 (view::shop)
                             if let Some(tap) = menu.tap.and_then(shop_tap_at) {
                                 shop_view.apply(game, tap);
+                                mixer.request_opt(shop_view.take_sfx());
                             }
                         } else {
                             // 시험용 단축: Shift+숫자 키 1~9·0, 또는 "QA" 표를 누르면 QA 창 (?qa일 때만)
@@ -551,6 +610,7 @@ async fn main() {
                         game.mine_held = mine_key_down(up_enter) || touch.is_held(ButtonKind::Mine) || touched.mine_pressed;
                         if shows_swing(input.attack_pressed, ended.is_none()) {
                             effects.start_swing(game.weapons.held());
+                            mixer.request(sfx_for_swing(game.weapons.held()));
                         }
                         let visible_before: Vec<bool> = game.coins.list.iter().map(|c| c.is_visible()).collect();
                         let events = if fast_forward_now(*fast_forward, *ff_by_hand, game.tutorial.state()) {
@@ -564,6 +624,7 @@ async fn main() {
                         let box_events = game.take_box_events();
                         let box_spots = view::boxes::box_monster_spots(&box_events);
                         for event in events {
+                            mixer.request_opt(sfx_for_game_event(&event));
                             match event {
                                 GameEvent::CoinsPicked { count } => {
                                     effects.pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
@@ -581,6 +642,8 @@ async fn main() {
                             }
                         }
                         for event in game.take_gather_events() {
+                            mixer.request_opt(sfx_for_gather_event(&event));
+                            mixer.request_opt(bonus_sfx_for_gather_event(&event));
                             match event {
                                 GatherEvent::Mined { what, .. } => gathered.on_mined(what, !game.gathering.bag.has_pickaxe && game.world.workbench().is_some()),
                                 GatherEvent::PushedOutOfCave => effects.show_message(config::CAVE_NIGHT_OUT_TEXT),
@@ -590,24 +653,31 @@ async fn main() {
                             }
                         }
                         for event in game.take_shop_events() {
+                            mixer.request_opt(sfx_for_shop_event(&event));
                             show_shop_event(effects, event);
                         }
                         // 자동차·주사기총·엔더열매·쿵 (US-080~083)
                         for event in game.take_item_events() {
+                            mixer.request_opt(sfx_for_item_event(&event));
                             effects.on_item_event(event);
                         }
                         // 연습용 몬스터 (US-124): 나타남·맞음·쓰러짐·사라짐 효과. 소리는 소리 스토리(US-112~)가 오면 여기서 낸다
                         for event in game.take_practice_events() {
+                            mixer.request_opt(sfx_for_practice_event(&event));
                             effects.on_practice_event(event);
                         }
                         // 튜토리얼 (US-119·120): 끝까지 봤거나 건너뛰면 "봤다"를 저장한다 (바뀔 때만, ?qa에서는 save_settings가 안 쓴다)
                         let tutorial_events = game.take_tutorial_events();
+                        for event in &tutorial_events {
+                            mixer.request_opt(sfx_for_tutorial_event(event));
+                        }
                         if let Some(after) = settings_to_save(&tutorial_events, &game.tutorial, &settings) {
                             settings = after;
                             view::web::save_settings(&settings);
                         }
                         // 깜짝 미션 (US-086): 미스 말풍선, 성공·실패 글. 클리어한 아침의 실패 글은 띄우지 않는다
                         for event in game.take_mission_events() {
+                            mixer.request_opt(sfx_for_mission_event(&event));
                             // 깜짝 미션이 처음 나올 때 한 줄 안내 (US-121). 말풍선이 떠 있거나 ?qa면 규칙이 막는다
                             if matches!(event, MissionEvent::Appeared { .. }) && tips.window_opened(TipWindow::SurpriseMission, no_guide, game.tutorial.current_step().is_some()).is_some() {
                                 keep_tips_seen(&tips, &mut settings);
@@ -615,6 +685,9 @@ async fn main() {
                             effects.mission.on_event(event, game.is_cleared());
                         }
                         // 상자 부수기 (US-089): 금·나뭇조각·도끼 안내·"와우!"는 효과가, "○○을 얻었어요!"는 큰 문구로
+                        for event in &box_events {
+                            mixer.request_opt(sfx_for_box_event(event));
+                        }
                         for event in box_events {
                             if let Some(message) = effects.boxes.on_event(event) {
                                 effects.show_message(message);
@@ -622,6 +695,14 @@ async fn main() {
                         }
                         effects.watch_car(screens::car_is_moving(game.gathering.bag.riding_car, game.player.vel.x) && ended.is_none(), game.player.rect().center());
                         effects.watch_citizens(game.citizens.walkers.iter().map(|w| w.is_walking()));
+                        // 소리: 퀴즈 창이 열릴 때 "띵동", 캐는 동안 "톡톡" (US-112~117)
+                        let quiz_now = game.math.is_open();
+                        if quiz_now && !prev_quiz_open {
+                            mixer.request(Sfx::QuizStart);
+                        }
+                        prev_quiz_open = quiz_now;
+                        let mining = game.mining_progress().map(|_| if game.in_cave { Material::Iron } else { Material::Wood });
+                        mixer.request_opt(mining_sound.update(dt, mining));
                         // 이번 프레임에 상점이 열렸으면 그때부터 멈춘다
                         update_screen_effects(effects, gathered, dt, window_open || game.shop.is_open());
                         None
@@ -647,6 +728,38 @@ async fn main() {
             }
         }
 
+        // 소리 (US-112~117): 창이 열리고 닫힐 때, 설정 저장, 음악, 효과음. 멈춤 창이 떠 있으면 효과음은 막히고 음악은 작아진다.
+        let window_flags = match &scene {
+            Scene::Play { game, bag, help, ended: None, .. } => {
+                WindowFlags { bag: bag.open, help: help.is_open(), craft: game.crafting.is_open(), shop: game.shop.is_open() }
+            }
+            _ => WindowFlags::default(),
+        };
+        for sfx in window_sounds.update(window_flags) {
+            mixer.request(sfx);
+        }
+        let esc_paused = matches!(&scene, Scene::Play { paused: true, ended: None, .. });
+        // 바뀔 때만 저장한다 (?qa에서는 save_settings가 안 쓴다)
+        let with_sound = sound.settings_after(&settings);
+        if with_sound != settings {
+            settings = with_sound;
+            view::web::save_settings(&settings);
+        }
+        let situation = match &scene {
+            Scene::Title => MusicSituation::menu(MusicScene::Title),
+            Scene::Select { .. } => MusicSituation::menu(MusicScene::CharacterSelect),
+            Scene::Play { game, .. } => MusicSituation::from_game(game),
+        };
+        match music_plan.update(choose_track(&situation)) {
+            Some(MusicChange::Play(track)) => audio.set_music(Some(track)),
+            Some(MusicChange::Stop) => audio.set_music(None),
+            None => {}
+        }
+        audio.update_music(dt, sound.music_volume(esc_paused));
+        for sfx in mixer.take_playable(dt, &sound, esc_paused) {
+            audio.play_sfx(sfx, sound.effects_volume());
+        }
+
         // 3) 그리기 (960×540 가상 화면)
         letterbox.begin();
         let text = TextPainter::new(&assets.font, letterbox.scale);
@@ -659,7 +772,7 @@ async fn main() {
                     draw_math(&text, &game.math, &assets.m6.miss, &assets.english);
                     if *paused {
                         // 멈춤 창이 문제 창 위에 뜬다. 이어서 하면 문제 창이 그대로 보인다
-                        draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32));
+                        draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32), (sound.is_on(), sound.music_percent(), sound.effects_percent()));
                     } else if touch_mode {
                         draw_back_button(&text);
                     }
@@ -668,7 +781,7 @@ async fn main() {
                 } else if ended.is_none() && game.shop.is_open() {
                     draw_shop(&text, game, shop_view, touch_mode);
                 } else if ended.is_none() && *paused {
-                    draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32));
+                    draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32), (sound.is_on(), sound.music_percent(), sound.effects_percent()));
                 } else if ended.is_none() && bag.open {
                     let show_recipe = game.world.workbench().is_some();
                     draw_bag_window(&text, game, &assets.m6, bag, touch_mode, show_recipe);
@@ -699,6 +812,13 @@ async fn main() {
                     view::qa::draw_menu(&text, &qa);
                 }
             }
+        }
+        if matches!(scene, Scene::Title | Scene::Select { .. }) {
+            draw_speaker_button(sound.is_on());
+        }
+        // 멈춤 창이 열려 있으면 글은 안 띄운다 (창 안의 켜짐/꺼짐 버튼이 바뀐다)
+        if !matches!(&scene, Scene::Play { paused: true, ended: None, .. }) {
+            draw_toast(&text, &toast);
         }
         letterbox.end();
         if rotate_hint {

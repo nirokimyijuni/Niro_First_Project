@@ -21,6 +21,7 @@ pub mod practice;
 pub mod settings;
 pub mod shop;
 pub mod skeleton;
+pub mod sound;
 pub mod tutorial;
 pub mod weapon;
 pub mod window_tips;

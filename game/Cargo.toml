@@ -14,3 +14,8 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# 소리 (US-112~): 브라우저(wasm)에서만 소리 기능을 켠다. PC 시험(cargo test)은 소리 부품(quad-snd)을 받지도 빌드하지도 않아서
+# 리눅스 CI에 알사(libasound) 설치가 필요 없다. 소리 부품이 없는 PC에서는 macroquad의 빈 소리가 대신 있어 코드는 그대로 컴파일된다.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+macroquad = { version = "0.4", features = ["audio"] }

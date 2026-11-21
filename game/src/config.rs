@@ -1153,3 +1153,63 @@ pub const SETTINGS_VOLUME_MAX_PERCENT: u8 = 100;
 pub const SETTINGS_DEFAULT_SOUND_ON: bool = true;
 pub const SETTINGS_DEFAULT_MUSIC_PERCENT: u8 = 70;
 pub const SETTINGS_DEFAULT_EFFECTS_PERCENT: u8 = 80;
+
+// ---- 소리 규칙 (US-112~117, 수산나: 이름과 수치. 소리 내기는 로건) ----
+/// 소리 파일 폴더 (`game/assets/` 아래)
+pub const SOUNDS_SFX_DIR: &str = "sounds/sfx";
+pub const SOUNDS_MUSIC_DIR: &str = "sounds/music";
+/// 소리 파일을 모두 합친 크기 한도 (바이트, 5MB). 시험이 폴더 크기를 잰다.
+pub const SOUNDS_TOTAL_MAX_BYTES: u64 = 5 * 1024 * 1024;
+/// 같은 효과음은 이 시간(초) 안에 또 나지 않는다 (임시-117)
+pub const SFX_MIN_GAP_SECONDS: f32 = 0.05;
+/// 효과음이 한꺼번에 나는 수 한도: `SFX_BURST_WINDOW_SECONDS` 안에 시작한 소리가 이 수를 넘지 않는다
+pub const SFX_MAX_AT_ONCE: usize = 4;
+pub const SFX_BURST_WINDOW_SECONDS: f32 = 0.25;
+/// 한 프레임에 모아 두는 효과음 요청 수 한도 (넘으면 버린다)
+pub const SFX_PENDING_LIMIT: usize = 16;
+/// 캐는 동안 "톡톡" 소리 사이 시간 (초)
+pub const MINING_TICK_SECONDS: f32 = 0.35;
+/// 소리 크기 4칸: 끔·작게·보통·크게 (퍼센트)
+pub const SOUND_VOLUME_STEPS: [u8; 4] = [0, 25, 50, 80];
+/// 멈춤 창이 열려 있을 때 음악 크기에 곱하는 수 ("작게 계속", 임시-115)
+pub const SOUND_PAUSED_MUSIC_FACTOR: f32 = 0.4;
+/// 음악이 바뀔 때 앞 곡이 작아지고 새 곡이 커지는 시간 (초, 임시-116). 실제 섞기는 로건.
+pub const MUSIC_FADE_SECONDS: f32 = 2.0;
+
+/// 음악 파일 이름 (`SOUNDS_MUSIC_DIR` 아래). 밤과 동굴은 같은 곡이다.
+pub const MUSIC_TITLE_FILE: &str = "title_classical_pop.ogg";
+pub const MUSIC_DAY_FILE: &str = "day_overworld.ogg";
+pub const MUSIC_NIGHT_FILE: &str = "night_musicbox.ogg";
+pub const MUSIC_CAVE_FILE: &str = MUSIC_NIGHT_FILE;
+pub const MUSIC_SHOP_FILE: &str = "shop_urban.ogg";
+
+/// 아이가 고르는 소리 (파일 이름들 중 `*_CHOICE` 번째를 쓴다. 바꾸려면 번호만 고친다)
+/// 몬스터 쓰러짐: 0 뿅, 1 퐁, 2 띠용
+pub const MONSTER_DEFEATED_FILES: [&str; 3] = ["monster_down_pop.wav", "monster_down_bloop.wav", "monster_down_boing.wav"];
+pub const MONSTER_DEFEATED_CHOICE: usize = 0;
+/// 레벨업: 0 빰빠밤 나팔, 1 반짝 별, 2 뿅뿅 게임기
+pub const LEVEL_UP_FILES: [&str; 3] = ["level_up_fanfare.wav", "level_up_star.wav", "level_up_chip.wav"];
+pub const LEVEL_UP_CHOICE: usize = 0;
+/// 내가 쓰러짐: 0 웃긴 "띠로리", 1 조용한 소리
+pub const PLAYER_DOWN_FILES: [&str; 2] = ["fall_down_funny.wav", "wrong.wav"];
+pub const PLAYER_DOWN_CHOICE: usize = 0;
+
+// ---- 소리 화면 (US-112, 로건: 글과 크기. 소리 규칙 수치는 위 "소리 규칙") ----
+/// M 키·스피커 버튼을 누르면 잠깐 보이는 글과 시간 (초)
+pub const SOUND_TOAST_ON_TEXT: &str = "소리를 켰어요";
+pub const SOUND_TOAST_OFF_TEXT: &str = "소리를 껐어요";
+pub const SOUND_TOAST_SECONDS: f32 = 1.0;
+/// 글이 뜨는 자리: 화면 아래 오른쪽 (손에 든 칸 오른쪽의 빈 모래밭). 위쪽 정보판·제목·로고·캐릭터와 안 겹친다.
+/// 멈춤 창이 열려 있으면 글은 안 띄운다 (창 안의 켜짐/꺼짐 버튼이 바뀌어 보인다).
+pub const SOUND_TOAST_CENTER_X: f32 = 750.0;
+pub const SOUND_TOAST_Y: f32 = 468.0;
+pub const SOUND_TOAST_H: f32 = 56.0;
+/// 멈춤 창 소리 줄 글
+pub const PAUSE_SOUND_ON_TEXT: &str = "소리 켜짐";
+pub const PAUSE_SOUND_OFF_TEXT: &str = "소리 꺼짐";
+pub const PAUSE_MUSIC_LABEL: &str = "음악";
+pub const PAUSE_EFFECTS_LABEL: &str = "효과음";
+/// 크기 4칸 이름 (`SOUND_VOLUME_STEPS` 순서)
+pub const SOUND_STEP_LABELS: [&str; 4] = ["끔", "작게", "보통", "크게"];
+/// 소리 파일 하나를 받는 데, 그리고 푸는 데 각각 기다리는 최대 시간 (초). 넘으면 그 소리는 건너뛴다.
+pub const SOUND_LOAD_TIMEOUT_SECONDS: f64 = 15.0;

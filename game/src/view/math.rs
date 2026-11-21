@@ -29,15 +29,14 @@ impl MathKey {
         }
     }
 
-    /// 누른 버튼을 문제에 넘긴다.
-    pub fn apply(self, quiz: &mut MathQuiz) {
+    /// 누른 버튼을 문제에 넘긴다. "확인"이면 답 결과(소리용)를 돌려준다.
+    pub fn apply(self, quiz: &mut MathQuiz) -> Option<MathResult> {
         match self {
             MathKey::Digit(d) => quiz.press_digit(d),
             MathKey::Erase => quiz.erase(),
-            MathKey::Submit => {
-                quiz.submit();
-            }
+            MathKey::Submit => return quiz.submit(),
         }
+        None
     }
 }
 
@@ -148,11 +147,13 @@ pub fn bubble_line_count(says: &str, width: impl Fn(&str) -> f32) -> usize {
 /// 문제 창이 열린 동안 받은 숫자 키와 탭을 문제에 넘긴다.
 /// 수학: 숫자 키·Backspace·Enter와 숫자판. 영어: 숫자 키 1~4와 보기 칸 (숫자판은 없고, 다른 키는 버린다).
 /// 영어는 한 프레임에 하나만 고른다 (두 키를 같이 눌러 기회 두 번이 한꺼번에 사라지지 않게).
-pub fn apply_quiz_input(quiz: &mut MathQuiz, keys: &[MathKey], tap: Option<Vec2>) {
+/// 돌려주는 값: 이번 프레임에 답을 낸 결과 (맞힘·다시·틀림). 소리를 내는 데 쓴다.
+pub fn apply_quiz_input(quiz: &mut MathQuiz, keys: &[MathKey], tap: Option<Vec2>) -> Option<MathResult> {
+    let mut answered = None;
     match quiz.subject() {
         Some(QuizSubject::Math) => {
             for key in keys.iter().copied().chain(tap.and_then(pad_key_at)) {
-                key.apply(quiz);
+                answered = key.apply(quiz).or(answered);
             }
         }
         Some(QuizSubject::English) => {
@@ -161,13 +162,15 @@ pub fn apply_quiz_input(quiz: &mut MathQuiz, keys: &[MathKey], tap: Option<Vec2>
                 _ => None,
             });
             for slot in from_keys.chain(tap.and_then(choice_slot_at)) {
-                if quiz.pick_choice(slot).is_some() {
+                if let Some(result) = quiz.pick_choice(slot) {
+                    answered = Some(result);
                     break;
                 }
             }
         }
         None => {}
     }
+    answered
 }
 
 /// 문제 창 전체. 판은 왼쪽 터치 "◀ 고르기" 자리를 가리지 않는다 (main이 그 버튼을 그린다).
