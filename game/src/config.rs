@@ -208,6 +208,11 @@ pub const SKELETON_WIDTH: f32 = 48.0;
 pub const SKELETON_HEIGHT: f32 = 64.0;
 /// D35 스켈레톤 체력. 세 단계 모두 같다.
 pub const SKELETON_HP: u32 = 3;
+/// US-135 (임시-166): 2일째부터 하루마다 새로 나오는 몬스터(좀비·스켈레톤) 체력이 이만큼 는다.
+/// 1일째는 `ZOMBIE_HP`·`SKELETON_HP` 그대로다. 연습용 몬스터와 플레이어 체력은 상관없다.
+pub const MONSTER_HP_MORE_PER_DAY: u32 = 1;
+/// US-135: 몬스터 체력은 이보다 커지지 않는다 (7일째 9, 그 뒤로도 9).
+pub const MONSTER_HP_MOST: u32 = 9;
 /// D35 단계가 나오는 몬스터 레벨. 레벨마다 그 단계만 나온다.
 pub const SKELETON_HALF_MIN_LEVEL: u32 = 2;
 pub const SKELETON_FULL_MIN_LEVEL: u32 = 3;

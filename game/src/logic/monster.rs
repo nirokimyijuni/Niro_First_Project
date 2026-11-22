@@ -6,7 +6,7 @@
 use super::combat::CombatEvent;
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
-    MONSTER_SPAWN_MIN_DISTANCE, POISON_TICK_SECONDS, SCREEN_WIDTH, SKELETON_HEIGHT, ZOMBIE_FLOAT_RISE_SPEED, ZOMBIE_FLOAT_SECONDS, ZOMBIE_FLOAT_START_SECONDS,
+    MONSTER_HP_MORE_PER_DAY, MONSTER_HP_MOST, MONSTER_SPAWN_MIN_DISTANCE, POISON_TICK_SECONDS, SCREEN_WIDTH, SKELETON_HEIGHT, ZOMBIE_FLOAT_RISE_SPEED, ZOMBIE_FLOAT_SECONDS, ZOMBIE_FLOAT_START_SECONDS,
     ZOMBIE_HEIGHT, ZOMBIE_HIT_FLASH_SECONDS, ZOMBIE_HP, ZOMBIE_SPAWN_LEFT_CHANCE, ZOMBIE_WALK_SPEED, ZOMBIE_WIDTH,
 };
 use macroquad::math::{Rect, Vec2};
@@ -37,9 +37,9 @@ pub struct Zombie {
 }
 
 impl Zombie {
-    /// 상자에서 막 나온 좀비: `wait_seconds`초 가만히 있다가 움직인다.
-    pub fn waiting(x: f32, ground_y: f32, will_float: bool, wait_seconds: f32) -> Zombie {
-        Zombie { wait_seconds_left: wait_seconds, ..Zombie::new(x, ground_y, will_float) }
+    /// 상자에서 막 나온 `day`일째 좀비: `wait_seconds`초 가만히 있다가 움직인다.
+    pub fn waiting(day: u32, x: f32, ground_y: f32, will_float: bool, wait_seconds: f32) -> Zombie {
+        Zombie { wait_seconds_left: wait_seconds, ..Zombie::new_on_day(day, x, ground_y, will_float) }
     }
 
     /// 상자에서 나와 가만히 있는 중이면 true. 화면은 이동안 머리 위에 "공격!"을 보여 줄 수 있다.
@@ -47,11 +47,17 @@ impl Zombie {
         self.wait_seconds_left > 0.0
     }
 
-    /// 땅 위 `x`에 서 있는 좀비.
+    /// 땅 위 `x`에 서 있는 1일째 좀비 (체력 `ZOMBIE_HP`).
+    #[allow(dead_code)] // 게임은 날을 알려 주는 `new_on_day`를 쓰고, 이것은 시험이 쓴다.
     pub fn new(x: f32, ground_y: f32, will_float: bool) -> Zombie {
+        Zombie::new_on_day(1, x, ground_y, will_float)
+    }
+
+    /// 땅 위 `x`에 서 있는 `day`일째(1부터) 좀비. 체력은 나올 때 정해지고 그 뒤로 날이 바뀌어도 그대로다 (US-135).
+    pub fn new_on_day(day: u32, x: f32, ground_y: f32, will_float: bool) -> Zombie {
         Zombie {
             pos: Vec2::new(x, ground_y - ZOMBIE_HEIGHT),
-            hp: ZOMBIE_HP,
+            hp: monster_hp_on_day(ZOMBIE_HP, day),
             state: ZombieState::Walking,
             will_float,
             seconds_in_state: 0.0,
@@ -101,6 +107,13 @@ impl Zombie {
     fn arms_came_down(&self) -> bool {
         self.state == ZombieState::Floating && self.seconds_in_state >= ZOMBIE_FLOAT_SECONDS
     }
+}
+
+/// `day`일째(1부터) 새로 나오는 몬스터의 체력 (US-135). 1일째는 `base_hp`이고 하루마다 `MONSTER_HP_MORE_PER_DAY`씩 늘다가
+/// `MONSTER_HP_MOST`에서 멈춘다. 아주 큰 날 번호에도 넘치지 않는다.
+pub fn monster_hp_on_day(base_hp: u32, day: u32) -> u32 {
+    let days_after_first = day.max(1) - 1;
+    base_hp.saturating_add(MONSTER_HP_MORE_PER_DAY.saturating_mul(days_after_first)).min(MONSTER_HP_MOST)
 }
 
 /// 땅 위의 몬스터 `body`가 `target_x` 쪽으로 걸은 뒤의 x. 고리의 가까운 쪽으로 걷는다 (임시-21).

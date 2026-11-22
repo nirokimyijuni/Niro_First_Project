@@ -6,7 +6,7 @@
 //! - 플레이어 체력과 경험치는 `combat.rs`가 맡는다.
 
 use super::combat::CombatEvent;
-use super::monster::{walk_x, Poison};
+use super::monster::{monster_hp_on_day, walk_x, Poison};
 use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     ARROW_INTERVAL_SECONDS, ARROW_SPEED, ARROW_WIDTH, BULLET_INTERVAL_SECONDS, BULLET_SPEED, BULLET_WIDTH,
@@ -85,9 +85,9 @@ pub struct Skeleton {
 }
 
 impl Skeleton {
-    /// 상자에서 막 나온 스켈레톤: `wait_seconds`초 가만히 있다가 움직인다.
-    pub fn waiting(x: f32, ground_y: f32, stage: SkeletonStage, wait_seconds: f32) -> Skeleton {
-        Skeleton { wait_seconds_left: wait_seconds, ..Skeleton::new(x, ground_y, stage) }
+    /// 상자에서 막 나온 `day`일째 스켈레톤: `wait_seconds`초 가만히 있다가 움직인다.
+    pub fn waiting(day: u32, x: f32, ground_y: f32, stage: SkeletonStage, wait_seconds: f32) -> Skeleton {
+        Skeleton { wait_seconds_left: wait_seconds, ..Skeleton::new_on_day(day, x, ground_y, stage) }
     }
 
     /// 상자에서 나와 가만히 있는 중이면 true. 화면은 이동안 머리 위에 "공격!"을 보여 줄 수 있다.
@@ -95,11 +95,17 @@ impl Skeleton {
         self.wait_seconds_left > 0.0
     }
 
-    /// 땅 위 `x`에 서 있는 스켈레톤. 첫 공격은 쏘는 간격만큼 지나서 나온다.
+    /// 땅 위 `x`에 서 있는 1일째 스켈레톤 (체력 `SKELETON_HP`). 첫 공격은 쏘는 간격만큼 지나서 나온다.
+    #[allow(dead_code)] // 게임은 날을 알려 주는 `new_on_day`를 쓰고, 이것은 시험이 쓴다.
     pub fn new(x: f32, ground_y: f32, stage: SkeletonStage) -> Skeleton {
+        Skeleton::new_on_day(1, x, ground_y, stage)
+    }
+
+    /// 땅 위 `x`에 서 있는 `day`일째(1부터) 스켈레톤. 체력은 나올 때 정해지고 그 뒤로 그대로다 (US-135).
+    pub fn new_on_day(day: u32, x: f32, ground_y: f32, stage: SkeletonStage) -> Skeleton {
         Skeleton {
             pos: Vec2::new(x, ground_y - SKELETON_HEIGHT),
-            hp: SKELETON_HP,
+            hp: monster_hp_on_day(SKELETON_HP, day),
             stage,
             state: SkeletonState::Walking,
             fall_speed: 0.0,

@@ -514,13 +514,13 @@ impl Combat {
         let zombies_full = self.are_zombies_full();
         if wanted == BoxMonster::Skeleton || zombies_full {
             let stage = SkeletonStage::for_level(self.level);
-            let skeleton = Skeleton::waiting(center_x - SKELETON_WIDTH / 2.0, ground_y, stage, BOX_MONSTER_WAIT_SECONDS);
+            let skeleton = Skeleton::waiting(self.day_number, center_x - SKELETON_WIDTH / 2.0, ground_y, stage, BOX_MONSTER_WAIT_SECONDS);
             let at = skeleton.rect().center();
             self.skeletons.list.push(skeleton);
             Some(CombatEvent::SkeletonAppeared { at, stage })
         } else {
             let will_float = self.random.next_unit() < ZOMBIE_FLOAT_CHANCE;
-            let zombie = Zombie::waiting(center_x - ZOMBIE_WIDTH / 2.0, ground_y, will_float, BOX_MONSTER_WAIT_SECONDS);
+            let zombie = Zombie::waiting(self.day_number, center_x - ZOMBIE_WIDTH / 2.0, ground_y, will_float, BOX_MONSTER_WAIT_SECONDS);
             let at = zombie.rect().center();
             self.zombies.list.push(zombie);
             Some(CombatEvent::ZombieAppeared { at })
@@ -552,14 +552,14 @@ impl Combat {
         if self.are_zombies_full() || self.random.next_unit() < self.skeleton_chance {
             let stage = SkeletonStage::for_level(self.level);
             let x = spawn_x_on_side(from_left, player_rect, SKELETON_WIDTH, world, taken)?;
-            let skeleton = Skeleton::new(x, world.ground_y, stage);
+            let skeleton = Skeleton::new_on_day(self.day_number, x, world.ground_y, stage);
             events.push(CombatEvent::SkeletonAppeared { at: skeleton.rect().center(), stage });
             self.skeletons.list.push(skeleton);
             Some(x)
         } else {
             let x = spawn_x_on_side(from_left, player_rect, ZOMBIE_WIDTH, world, taken)?;
             let will_float = self.random.next_unit() < ZOMBIE_FLOAT_CHANCE;
-            let zombie = Zombie::new(x, world.ground_y, will_float);
+            let zombie = Zombie::new_on_day(self.day_number, x, world.ground_y, will_float);
             events.push(CombatEvent::ZombieAppeared { at: zombie.rect().center() });
             self.zombies.list.push(zombie);
             Some(x)
