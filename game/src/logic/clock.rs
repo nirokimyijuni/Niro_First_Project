@@ -4,7 +4,7 @@
 
 
 use crate::config::{
-    DAWN_SECONDS, DAY_GAME_MINUTES, DAY_SECONDS, DAY_START_HOUR, DUSK_SECONDS, MINUTES_PER_GAME_DAY,
+    CLOCK_PHASE_STEP_LIMIT, DAWN_SECONDS, DAY_GAME_MINUTES, DAY_SECONDS, DAY_START_HOUR, DUSK_SECONDS, MINUTES_PER_GAME_DAY,
     NIGHTFALL_SECONDS, NIGHT_GAME_MINUTES, NIGHT_SECONDS, SUNSET_DARKNESS,
 };
 
@@ -43,7 +43,14 @@ impl Clock {
     pub fn update(&mut self, dt: f32) -> Vec<ClockEvent> {
         let mut events = Vec::new();
         self.seconds_in_phase += dt.max(0.0);
+        // 횟수 제한: 한도(CLOCK_PHASE_STEP_LIMIT)에 걸리면 남은 시간은 버린다 (inf·f32::MAX에서도 끝난다).
+        let mut steps = 0;
         while self.seconds_in_phase >= self.phase_length() {
+            if steps >= CLOCK_PHASE_STEP_LIMIT {
+                self.seconds_in_phase = 0.0;
+                break;
+            }
+            steps += 1;
             self.seconds_in_phase -= self.phase_length();
             match self.phase {
                 Phase::Day => {
@@ -388,5 +395,18 @@ mod tests {
         let mut c = Clock::new();
         c.update(-5.0);
         assert_eq!(c.hour_minute(), (6, 0));
+    }
+
+    /// 무한대·아주 큰 dt에도 끝나고, 시계가 꼬이지 않는다 (시험이 멈추지 않게).
+    #[test]
+    fn strange_dt_still_ends_and_clock_stays_sane() {
+        for dt in [f32::INFINITY, f32::NAN, f32::MAX, -1.0] {
+            let mut c = Clock::new();
+            let events = c.update(dt);
+            assert!(events.len() <= CLOCK_PHASE_STEP_LIMIT as usize, "dt = {dt}");
+            assert!(c.seconds_left_in_phase() > 0.0 && c.seconds_left_in_phase() <= NIGHT_SECONDS, "dt = {dt}");
+            assert!(c.update(1.0).len() <= 1, "그 뒤 보통 프레임은 잘 간다: dt = {dt}");
+            assert!(c.hour_minute().0 < 24);
+        }
     }
 }

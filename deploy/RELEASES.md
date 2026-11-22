@@ -2,6 +2,17 @@
 
 > 관리: 케빈(에이전트). 마일스톤마다 한 줄씩, 아이가 읽을 수 있게.
 
+## 되돌리기 (문제가 생겼을 때)
+
+- **직전 좋은 버전 커밋: `316e290`** (다음 배포 때마다 이 번호를 새로 고쳐 쓴다)
+- 순서:
+  1. `git revert <나쁜 커밋>` (새 커밋이 하나 생긴다. 강제 push는 하지 않는다)
+  2. `git push` (main에 올라가면 자동으로 다시 배포된다)
+  3. GitHub Actions에서 4개 잡이 모두 성공했는지 보고, 두 주소(Pages와 AWS)에서 `GAME_VERSION`이 돌아온 버전인지 확인한다.
+- 되돌려도 CloudFront가 **최대 10분** 옛 파일을 줄 수 있다. 바로 안 바뀌어도 10분은 기다려 본다.
+- 같은 이름의 소리 파일을 내용만 바꿔 올리면 브라우저와 CloudFront 캐시 때문에 옛 소리가 남을 수 있다. 되돌릴 때도 마찬가지다. 소리를 바꾸면 파일 이름이나 버전 표시를 함께 바꾸는 것이 안전하다.
+- AWS 스택(창고와 주소) 자체를 되돌리거나 끄는 방법은 `deploy/aws/README.md`를 본다.
+
 | 버전 | 날짜 | 바뀐 것 | 플레이 링크 |
 |---|---|---|---|
 | M0 | 2026-11-01 | 하늘색 화면에 "Hello!" 글자와 Niro·Ellie·Logan 자리 네모가 나와요. 제목은 아직 비어 있어요! | 로컬만 (GitHub 미설정) |
@@ -42,6 +53,7 @@
 | 2026-11-21 | 로고·새 몬스터 수·시민 끼임·스케이트·검색 준비 출시 기준 예외 승인: 열린 버그 BUG-036(S4)과 기존 작은 것들(S3·S4), S1·S2는 0개. cargo test는 통과. 엘리가 못 본 것(아래 "배포 뒤 직접 확인")을 남기고 배포한다. 대표 주소(canonical, sitemap)는 `https://findmis.niro-studio.com/`로 바꾼다 | "예외 승인, 배포해" |
 | 2026-11-21 | 튜토리얼 마무리(창 한 줄 안내 US-121, 물음표 도움말 US-122, BUG-040 고침, 소리 파일 준비) 출시 기준 예외 승인: 열린 S1·S2 0개, BUG-040(S4) 열림 유지. 엘리가 못 본 것(아래 "배포 뒤 직접 확인 (2026-11-21 튜토리얼 마무리)")을 남기고 배포한다 | "엘리 끝나면 바로 배포해" |
 | 2026-11-21 | 소리 시스템(음악 4곡·효과음 39개, M 켜기/끄기, 아이폰 소리 풀기) 배포 승인. 밥 REVIEW-032 "커밋해도 좋아요", 엘리 고침 재확인 "출시해도 좋아요". 열린 S1·S2 0개. 새 의존성(wasm 전용 quad-snd, Cargo.lock 11개 크레이트)과 game/build.rs(--allow-undefined)가 들어가는 첫 배포. 못 본 것은 아래 "배포 뒤 직접 확인 (2026-11-21 소리 시스템)" | "엘리 끝나면 3개 고치고 배포해" |
+| 2026-11-22 | AWS 역할 값(`AWS_DEPLOY_ROLE_ARN`)은 Variables에 그대로 둔다. 공개 로그에 계정 번호가 보이는 것을 알고 둔 결정이다. 계정 번호는 열쇠가 아니고, OIDC 신뢰 정책이 이 저장소로만 제한한다는 것을 REVIEW-027에서 확인했다. 나중에 Secrets로 옮길 수 있는데, 그때는 `deploy.yml`의 `vars`를 `secrets`로 바꾸고 deploy-aws 잡의 `if:` 조건도 함께 바꿔야 한다(`secrets`는 잡 `if:`에서 못 쓴다). 지난 Actions 실행 기록 30개는 지우지 않는다. `deploy.yml`은 이번에 바꾸지 않는다. | 부모 결정 2026-11-22 (케빈이 전달받아 기록) |
 
 ## 배포 뒤 직접 확인 (2026-11-21 로고와 새 주소, 엘리가 못 본 것)
 
@@ -114,3 +126,4 @@
 | 2026-11-21 | 첫 판 안내(튜토리얼) US-119·120·123·124와 BUG-039 고침 (66df75a) | 계획 | 성공 (run 44888790511: build, deploy, deploy-aws, record 모두 success. 라이브 GAME_VERSION 66df75a-20261121091804가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음, miss-game.wasm 200 application/wasm 955,061바이트(두 곳 같음), index.html에 qa_tutorial_on 들어 있음(두 곳)) | **부모 승인 예외** ("A로 하고 배포까지 진행해" 2026-11-21). 포함: 튜토리얼 말풍선(캐릭터 Niro 안내), 건너뛰기(N 키·버튼), ?qa=tutorial, 연습용 몬스터(상 없음), BUG-039 고침·닫음, BUG-040 열림(S4), 대시보드 "오늘 한 일"(로컬 전용). 큰 변경이지만 밥 리뷰 없이 엘리 시험만(간소화 규칙 2026-11-08). 열린 S1·S2 0개, cargo test 통과, wasm 빌드 통과(로컬 wasm 952,723바이트). **예외: 진짜 폰·진짜 키보드를 못 봄**, 667×375·세로 안내·밤 전환·저장소 막기도 못 봄, 시작 바위 옆에서 E가 안 먹힌 일(③ 문구가 헷갈릴 수 있음) → 배포 뒤 부모님과 아이가 진짜 폰에서 확인. 케빈은 공개 주소에서 파일·버전·wasm·qa_tutorial_on까지만 확인 | 대기 | 진짜 폰·진짜 키보드 확인을 못 한 것 |
 | 2026-11-21 | 튜토리얼 마무리: 창 처음 열 때 한 줄 안내 US-121, 물음표 도움말 US-122, BUG-040 고침, 소리 파일 준비 (d72687f) | 계획 | 성공 (run 44895270542: build, deploy, deploy-aws, record 모두 success. 라이브 GAME_VERSION d72687f-20261121103955가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음, miss-game.wasm 200 application/wasm 962,515바이트(두 곳 같음). 소리 파일도 올라감: assets/sounds/music/day_overworld.ogg 200 audio/ogg 837,583바이트, assets/sounds/sfx/correct.wav 200 audio/wav 43,872바이트(두 곳). deploy/build.sh가 game/assets를 통째로 복사해서 소리 약 3.66MB가 같이 올라갔고 dist 전체 8.2MB, wasm 크기 검사(5MB)는 소리와 상관없어 막히지 않음. 게임이 아직 소리를 부르지 않아 로딩에는 영향 없음) | **부모 승인 예외** (사전 승인 "엘리 끝나면 바로 배포해" 2026-11-21). 엘리는 "새 버그 0, 열린 S1·S2 0, 규칙·변이 시험 통과, 화면은 일부만 봄"이라고 했고 "출시해도 좋아요"까지는 주지 않음. 포함: US-121·122, BUG-040 고침(눈으로 못 봐 S4 열림 유지), 소리 파일(CC0). 큰 변경 아님이라 밥 리뷰 없이 엘리 시험만(간소화 규칙 2026-11-08). cargo test 통과, wasm 빌드 통과(로컬 wasm 960,185바이트). **예외: 못 본 것**은 위 "배포 뒤 직접 확인 (2026-11-21 튜토리얼 마무리)"에 적음 → 부모님 폰에서 확인. 케빈은 공개 주소에서 파일·버전·wasm·소리 파일까지만 확인 | 대기 | 엘리가 화면을 일부만 본 것 |
 | 2026-11-21 | 소리 시스템 US-112~117 (f880c4d) | 계획 | 성공 (run 44902928825: build, deploy, deploy-aws, record 모두 success. 새 의존성 quad-snd와 build.rs --allow-undefined가 들어간 첫 CI(ubuntu) wasm 빌드도 통과. 라이브 GAME_VERSION f880c4d-20261121121631가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음, miss-game.wasm 200 application/wasm 994,753바이트(두 곳 같음), index.html에 standaloneFillHeight·__soundContexts 들어 있음(두 곳). 소리 파일: day_overworld.ogg 200 audio/ogg 837,583바이트(두 곳), correct.wav 200 43,872바이트인데 Content-Type이 GitHub Pages는 audio/wav, AWS(findmis)는 audio/x-wav. deploy.yml S3 업로드 규칙이 wav 종류를 못 박지 않아 S3가 추측한 값이다. 소리 풀기는 확장자 아닌 내용으로 하는 방식이라 영향은 없을 것으로 보이나 진짜 폰에서 확인 필요) | **부모 승인** ("엘리 끝나면 3개 고치고 배포해" 2026-11-21). 밥 REVIEW-032 커밋해도 좋아요, 엘리 재확인 "출시해도 좋아요", 열린 S1·S2 0개, cargo test 통과, wasm 빌드 통과(992,825바이트, CI 994,753), 소리 파일 합계 약 3.67MB. 못 본 것은 위 "배포 뒤 직접 확인 (2026-11-21 소리 시스템)" 참고 | 대기 | — |
+| 2026-11-21 | 스피커 버튼 삭제, 타이틀 곡 Children's March, 코인 소리 새로 만들기 (316e290) | 계획 | 성공 (run 44906339919: build 2m12s, deploy 10s, deploy-aws 48s, record 4s 모두 success, 1차 실행, 총 3m27s. 라이브 GAME_VERSION 316e290-20261121125819가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음(2026-11-22 케빈 점검), miss-game.wasm 200 application/wasm 993,994바이트(두 곳 같음, 전송은 gzip), title_children_march.ogg 200 audio/ogg 704,434바이트(두 곳), coin_pickup.wav 200 17,718바이트(두 곳, 새 코인 소리), 옛 title_classical_pop.ogg는 Pages 404·AWS 403(없음). wav Content-Type은 Pages audio/wav, AWS audio/x-wav(앞 소리 시스템 행의 메모와 같음)) | 승인 (부모 "엘리 끝나면 바로 배포해" 2026-11-21, qa/gates.md 2026-11-21-9). 큰 변경 아님이라 밥 리뷰 없이 엘리 시험만(간소화 규칙 2026-11-08). 열린 S1·S2 0개, cargo test 통과, wasm 빌드 통과(로컬 992KB). **예외: 귀로 듣기를 못 함**(타이틀 곡이 어울리는지, 코인이 마리오 느낌인지, 곡 이음새), 진짜 아이폰·안드로이드, PC 큰 화면 → 부모님이 직접 듣고 확인. 이 행은 세션이 멈춰 2026-11-22에 케빈이 run 결과와 공개 주소를 다시 확인해 채움 | 대기 | 귀로 듣기를 못 한 것 |

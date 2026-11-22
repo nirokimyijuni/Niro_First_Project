@@ -56,6 +56,13 @@ pub const GRAVITY: f32 = 1400.0;
 pub const MAX_FALL_SPEED: f32 = 900.0;
 /// M1 한 번에 계산하는 가장 긴 시간 (초). 프레임이 길면 이만큼씩 잘게 나눠 계산한다.
 pub const PHYSICS_STEP_SECONDS: f32 = 1.0 / 120.0;
+/// 전투가 한 프레임에 나누어 움직이는 최대 횟수. 한 프레임은 0.25초라 정상일 때 30번이면 끝난다.
+/// 10000번이면 83초치라, 시험이 몇 초를 한 번에 넣어도(5초 = 600번) 잘리지 않는다.
+/// 한도에 걸리면 남은 시간은 버린다 (다음 프레임으로 넘기지 않는다).
+pub const COMBAT_STEP_LIMIT: u32 = 10_000;
+/// 시계가 한 번에 넘기는 낮/밤 구간의 최대 수. 정상 프레임은 많아야 1번이고, 시험의 가장 큰 값도 20번대라 1000이면 충분하다.
+/// 한도에 걸리면 남은 시간은 버리고 지금 구간의 처음(0초)으로 정리한다.
+pub const CLOCK_PHASE_STEP_LIMIT: u32 = 1000;
 
 // ---- M2 낮과 밤 ----
 
@@ -1165,6 +1172,8 @@ pub const SFX_MIN_GAP_SECONDS: f32 = 0.05;
 /// 효과음이 한꺼번에 나는 수 한도: `SFX_BURST_WINDOW_SECONDS` 안에 시작한 소리가 이 수를 넘지 않는다
 pub const SFX_MAX_AT_ONCE: usize = 4;
 pub const SFX_BURST_WINDOW_SECONDS: f32 = 0.25;
+/// 중요한 소리(캐는 "톡톡" 포함)는 한도가 꽉 차도 이 수만큼 더 낼 수 있다 (밤에 몬스터 소리가 몰려도 안 묻히게)
+pub const SFX_IMPORTANT_EXTRA_SLOTS: usize = 2;
 /// 한 프레임에 모아 두는 효과음 요청 수 한도 (넘으면 버린다)
 pub const SFX_PENDING_LIMIT: usize = 16;
 /// 캐는 동안 "톡톡" 소리 사이 시간 (초)

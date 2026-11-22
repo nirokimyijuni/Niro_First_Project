@@ -262,7 +262,8 @@ impl Sfx {
             Sfx::LevelUp => pick_file(&LEVEL_UP_FILES, LEVEL_UP_CHOICE),
             Sfx::MissFound | Sfx::TutorialCheer => "miss_found.wav",
             Sfx::QuizStart => "quiz_start.wav",
-            Sfx::QuizCorrect | Sfx::MissionSuccess => "correct.wav",
+            Sfx::QuizCorrect => "quiz_correct.wav",
+            Sfx::MissionSuccess => "correct.wav",
             Sfx::QuizWrong | Sfx::MissionFail => "wrong.wav",
             Sfx::NightBell => "night_bell.wav",
             Sfx::MorningDing => "morning_ding.wav",
@@ -280,11 +281,13 @@ impl Sfx {
         self.file_name().map(|f| format!("{SOUNDS_SFX_DIR}/{f}"))
     }
 
-    /// 중요한 소리는 한꺼번에 몰릴 때 먼저 난다 (기쁜 순간, 쓰러짐).
+    /// 중요한 소리는 한꺼번에 몰릴 때 먼저 나고 자리도 더 있다 (기쁜 순간, 쓰러짐, 캐는 "톡톡").
     pub fn is_important(self) -> bool {
         matches!(
             self,
-            Sfx::LevelUp
+            Sfx::MineWood
+                | Sfx::MineStone
+                | Sfx::LevelUp
                 | Sfx::QuizCorrect
                 | Sfx::QuizWrong
                 | Sfx::MissionSuccess
@@ -530,7 +533,8 @@ impl SfxMixer {
             if self.played.iter().any(|&(s, at)| s == sfx && now - at < SFX_MIN_GAP_SECONDS) {
                 continue;
             }
-            if self.played.iter().filter(|&&(_, at)| now - at < SFX_BURST_WINDOW_SECONDS).count() >= SFX_MAX_AT_ONCE {
+            let limit = if sfx.is_important() { SFX_MAX_AT_ONCE + SFX_IMPORTANT_EXTRA_SLOTS } else { SFX_MAX_AT_ONCE };
+            if self.played.iter().filter(|&&(_, at)| now - at < SFX_BURST_WINDOW_SECONDS).count() >= limit {
                 continue;
             }
             self.played.push((sfx, now));
@@ -1013,6 +1017,43 @@ mod tests {
         assert!(!out.contains(&Sfx::ItemPickup)); // 중요하지 않은 맨 뒤 것이 밀린다
     }
 
+    /// 중요한 소리 6개와 중요하지 않은 소리 1개: 6개(기본 4칸 + 덤 2칸)가 나고 7번째는 막힌다.
+    #[test]
+    fn important_sounds_get_extra_slots_but_not_more() {
+        let important = [Sfx::MineWood, Sfx::MineStone, Sfx::LevelUp, Sfx::QuizCorrect, Sfx::QuizWrong, Sfx::MissionSuccess];
+        assert!(important.iter().all(|s| s.is_important()) && !Sfx::Hit.is_important());
+        let mut m = SfxMixer::new();
+        m.request(Sfx::Hit);
+        for s in important {
+            m.request(s);
+        }
+        let out = mixer_out(&mut m, 0.016);
+        assert_eq!(SFX_MAX_AT_ONCE + SFX_IMPORTANT_EXTRA_SLOTS, 6, "기본 4칸 + 덤 2칸");
+        assert_eq!(out.len(), 6);
+        assert!(!out.contains(&Sfx::Hit), "7번째(중요하지 않은 소리)는 막힌다");
+    }
+
+    /// 밤처럼 몬스터 소리가 계속 몰리는 때에도 캐는 "톡톡"이 난다 (부모님 버그 2026-11-22).
+    #[test]
+    fn mining_ticks_are_heard_while_night_sounds_pile_up() {
+        let night_noise = [Sfx::SwingBlade, Sfx::Hit, Sfx::MonsterDefeated, Sfx::PlayerHit, Sfx::ArrowShot];
+        for wood in [true, false] {
+            let mut mixer = SfxMixer::new();
+            let mut mining = MiningSound::default();
+            let material = if wood { Material::Wood } else { Material::Iron };
+            let mut heard = 0;
+            for _ in 0..188 {
+                // 약 3초, 한 프레임에 밤 소리 5개가 매번 요청된다
+                for sfx in night_noise {
+                    mixer.request(sfx);
+                }
+                mixer.request_opt(mining.update(0.016, Some(material)));
+                heard += mixer_out(&mut mixer, 0.016).into_iter().filter(|s| matches!(s, Sfx::MineWood | Sfx::MineStone)).count();
+            }
+            assert!(heard >= 6, "3초 동안 톡톡이 {heard}번만 났다 (나무: {wood})");
+        }
+    }
+
     #[test]
     fn muted_or_paused_drops_everything() {
         let mut off = SoundSettings::default();
@@ -1087,6 +1128,12 @@ mod tests {
         for (name, _) in files_in(SOUNDS_MUSIC_DIR) {
             assert!(tracks.contains(name.as_str()), "쓰지 않는 음악 파일: {name}");
         }
+    }
+
+    #[test]
+    fn quiz_correct_has_its_own_file_and_mission_success_keeps_correct() {
+        assert_eq!(Sfx::QuizCorrect.file_name(), Some("quiz_correct.wav"));
+        assert_eq!(Sfx::MissionSuccess.file_name(), Some("correct.wav"));
     }
 
     #[test]

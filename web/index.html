@@ -94,6 +94,47 @@
         @keyframes loading-spin {
             to { transform: rotate(360deg); }
         }
+        /* 불러오다 막혔을 때(failed)나 너무 오래 걸릴 때(slow) 보이는 안내와 "다시 하기" 버튼.
+           덮개는 pointer-events:none이지만 이 상자만은 눌러진다. 글은 줄이 바뀌어도 잘리지 않게 가운데 맞춤. */
+        #loading .help {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 2.5vmin;
+            max-width: 90vw;
+            text-align: center;
+            word-break: keep-all;
+            pointer-events: auto;
+            touch-action: manipulation;
+        }
+        #loading.slow .help, #loading.failed .help { display: flex; }
+        #loading .help .msg {
+            font-size: clamp(16px, 4.5vmin, 40px);
+            line-height: 1.3;
+            white-space: pre-line;
+        }
+        #loading .help button {
+            font: inherit;
+            font-size: clamp(20px, 5.5vmin, 44px);
+            color: #d40000;
+            background: #ffffff;
+            border: 0;
+            border-radius: 999px;
+            min-width: 160px;
+            min-height: 52px;
+            padding: 0.4em 1.4em;
+            text-shadow: none;
+            box-shadow: 0 0.12em 0 rgba(115, 0, 0, 0.45);
+            cursor: pointer;
+        }
+        /* 오래 걸릴 때는 버튼을 작게 (로딩은 계속) */
+        #loading.slow:not(.failed) .help button {
+            font-size: clamp(16px, 4vmin, 28px);
+            min-height: 46px;
+            min-width: 120px;
+        }
+        #loading.failed .spinner, #loading.failed .title { display: none; }
+        #loading.failed .help .msg { font-size: clamp(24px, 7vmin, 64px); }
         /* 카카오톡 안 브라우저 안내: 아래 가운데 작은 카드. 게임·Now Loading·눌러서 시작은 가리지 않는 자리와 크기. */
         #kakao-tip {
             position: fixed;
@@ -144,7 +185,11 @@
             <i style="--k:4;opacity:.625"></i><i style="--k:5;opacity:.75"></i>
             <i style="--k:6;opacity:.875"></i><i style="--k:7;opacity:1"></i>
         </div>
-        <div>Now Loading...</div>
+        <div class="title">Now Loading...</div>
+        <div class="help">
+            <div class="msg" role="status" aria-live="polite"></div>
+            <button type="button" class="retry">다시 하기</button>
+        </div>
     </div>
     <div id="kakao-tip" hidden>
         <span class="msg"></span>
@@ -193,10 +238,70 @@
             window.addEventListener("pageshow", function () { setHidden(document.visibilityState === "hidden"); });
         })();
     </script>
+    <script>
+        // 불러오다 막히면 빨강 덮개에서 영영 멈추지 않게 (밥 REVIEW-033, 2026-11-22).
+        // 덮개(#loading)가 남아 있는 동안에만 일한다. 게임이 시작돼 덮개가 치워진 뒤의 오류(소리·저장 등)는 아무것도 안 한다.
+        // 번들(mq_js_bundle.js)의 load()는 wasm을 못 받거나 시작 중 죽으면 console.error만 부르고 끝이라(window 오류 이벤트가 안 온다),
+        // 번들보다 먼저 console.error도 한 겹 감싸서 같은 기준으로 살핀다. 원래 console.error는 그대로 부른다.
+        // 오래 걸림 기준 시간 (30초). 게임은 멈추지 않고 로딩은 계속, 작은 "다시 하기" 버튼만 나온다.
+        var LOADING_SLOW_MS = 30000;
+        // 게임을 못 시작하는 오류 (아래 중 하나면 처리): wasm 오류(RuntimeError·CompileError·LinkError, 예: unreachable = Rust panic),
+        // 또는 글에 wasm·fetch 실패·panic 낱말이 있는 것. 그 밖(브라우저 확장, 소리, GL 경고)은 처리하지 않는다.
+        var LOAD_FAIL_NAMES = /^(RuntimeError|CompileError|LinkError)$/;
+        var LOAD_FAIL_TEXT = /WebAssembly|wasm|unreachable|panicked|Failed to fetch|Load failed|NetworkError|HTTP status|MIME type|out of memory|memory access|out of bounds/i;
+        // 이미 있던 번들 오류·무해한 경고는 무조건 무시
+        var LOAD_IGNORE_TEXT = /register_plugin|ResizeObserver|Script error/i;
+        function isLoadFailure(name, message, filename) {
+            var text = String(name || "") + " " + String(message || "");
+            if (LOAD_IGNORE_TEXT.test(text)) return false;
+            // 브라우저 확장 등 이 페이지 밖 파일에서 난 오류는 게임과 상관없다
+            var base = location.href.split("/").slice(0, 3).join("/");
+            if (filename && String(filename).indexOf(base) !== 0) return false;
+            return LOAD_FAIL_NAMES.test(String(name || "")) || LOAD_FAIL_TEXT.test(text);
+        }
+        window.isLoadFailure = isLoadFailure;
+        var loadingSlowTimer = null;
+        function loadingHelp(state) { // state: "slow" | "failed"
+            var el = document.getElementById("loading");
+            if (!el) return; // 덮개가 이미 치워졌다 = 게임이 시작됨: 끼어들지 않는다
+            if (state === "slow" && el.classList.contains("failed")) return;
+            var msg = el.querySelector(".msg");
+            if (state === "failed") {
+                if (loadingSlowTimer) { clearTimeout(loadingSlowTimer); loadingSlowTimer = null; }
+                msg.textContent = "불러오지 못했어요.\n다시 해 볼까요?";
+                el.classList.add("failed");
+                el.style.pointerEvents = "auto";
+            } else {
+                msg.textContent = "오래 걸리고 있어요.\n다시 해 볼까요?";
+            }
+            el.classList.add(state);
+        }
+        window.addEventListener("error", function (e) {
+            var err = e && e.error;
+            if (isLoadFailure(err && err.name, (err && err.message) || (e && e.message), e && e.filename)) loadingHelp("failed");
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+            var r = e && e.reason;
+            if (isLoadFailure(r && r.name, r && r.message !== undefined ? r.message : r, "")) loadingHelp("failed");
+        });
+        (function () {
+            var original = console.error;
+            console.error = function () {
+                try {
+                    var a = arguments[0];
+                    if (isLoadFailure(a && a.name, a && a.message !== undefined ? a.message : a, "")) loadingHelp("failed");
+                } catch (x) {}
+                return original.apply(this, arguments);
+            };
+        })();
+        loadingSlowTimer = setTimeout(function () { loadingSlowTimer = null; loadingHelp("slow"); }, LOADING_SLOW_MS);
+        document.querySelector("#loading .retry").addEventListener("click", function () { location.reload(); });
+    </script>
     <script src="mq_js_bundle.js"></script>
     <script>
-        // 게임(Rust)이 첫 화면을 그린 뒤 부른다 (game/src/view/web.rs).
+        // 게임(Rust)이 첫 화면을 그린 뒤 부른다 (game/src/view/web.rs). 안내·버튼은 덮개와 함께 사라진다.
         importObject.env.loading_done = function () {
+            if (loadingSlowTimer) { clearTimeout(loadingSlowTimer); loadingSlowTimer = null; }
             var el = document.getElementById("loading");
             if (el) el.remove();
         };

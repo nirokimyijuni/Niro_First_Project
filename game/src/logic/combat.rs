@@ -11,7 +11,7 @@ use super::world::{nearest_copy, really_overlaps, shortest_dx, World};
 use crate::config::{
     BOX_MONSTER_WAIT_SECONDS, CITIZEN_BLAST_DAMAGE, CITIZEN_BLAST_RANGE, EXPERIENCE_PER_DEFEAT, EXPERIENCE_PER_LEVEL, FORGET_DISTANCE,
     HOUSE_DOOR_REACH, MONSTERS_PER_SPAWN, MONSTERS_PER_SPAWN_MORE_EVERY_DAYS, MONSTERS_PER_SPAWN_MOST, MONSTER_MAX_MORE_PER_DAY,
-    MONSTER_MAX_MOST, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
+    COMBAT_STEP_LIMIT, MONSTER_MAX_MOST, MONSTER_MAX_ON_SCREEN, PHYSICS_STEP_SECONDS,
     PLAYER_ATTACK_RANGE, PLAYER_HP_PER_LEVEL, POISON_DAMAGE, POISON_RANGE, PLAYER_HURT_INVINCIBLE_SECONDS, PLAYER_START_HP, SCREEN_WIDTH,
     SKELETON_SPAWN_CHANCE, SKELETON_WIDTH, SPAWN_SECONDS_SHORTER_PER_DAY, SPAWN_SECONDS_SHORTEST, ZOMBIE_ATTACK, ZOMBIE_FLOAT_CHANCE, ZOMBIE_MAX_ON_SCREEN,
     ZOMBIE_SPAWN_SECONDS, ZOMBIE_WIDTH,
@@ -265,7 +265,11 @@ impl Combat {
 
         // 시간을 잘게 나눠서 움직인다 → 프레임이 길어도 몬스터나 화살이 상자를 뚫지 않는다.
         let mut time_left = dt.max(0.0);
-        while time_left > 0.0 && !self.health.is_down() {
+        // 횟수 제한: 한도(COMBAT_STEP_LIMIT)에 걸리면 남은 시간은 버린다 (inf·아주 큰 dt에서도 끝난다).
+        for _ in 0..COMBAT_STEP_LIMIT {
+            if !(time_left > 0.0) || self.health.is_down() {
+                break;
+            }
             let step = time_left.min(PHYSICS_STEP_SECONDS);
             self.health.invincible_seconds_left = (self.health.invincible_seconds_left - step).max(0.0);
             self.hurt_poisoned_monsters(step, &mut events);
@@ -605,6 +609,26 @@ impl Combat {
             let attack = skeleton.stage.attack();
             events.push(CombatEvent::SkeletonHandHit { at: skeleton.rect().center() });
             self.hurt_player(attack, events);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{GROUND_Y, PLAYER_HEIGHT, PLAYER_WIDTH, WORLD_WIDTH};
+
+    /// 이상한 `dt`(무한대, 숫자 아님, 아주 큼, 음수)가 들어와도 끝나고 게임이 멀쩡하다 (시험이 멈추지 않게).
+    #[test]
+    fn strange_dt_still_ends() {
+        let world = World { width: WORLD_WIDTH, ground_y: GROUND_Y, obstacles: vec![] };
+        let player = Rect::new(500.0, GROUND_Y - PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+        for dt in [f32::INFINITY, f32::NAN, f32::MAX, -1.0] {
+            let mut c = Combat::new(7);
+            c.update(dt, true, player, &world);
+            assert!(c.health.hp <= c.health.max_hp, "dt = {dt}");
+            // 그 뒤에도 보통 프레임이 잘 돈다
+            c.update(0.016, true, player, &world);
         }
     }
 }
