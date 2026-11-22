@@ -1166,6 +1166,25 @@ pub const SETTINGS_DEFAULT_SOUND_ON: bool = true;
 pub const SETTINGS_DEFAULT_MUSIC_PERCENT: u8 = 70;
 pub const SETTINGS_DEFAULT_EFFECTS_PERCENT: u8 = 80;
 
+// ---- 최근 판 기록 (US-133, 수산나: 규칙과 글자 모양. 표 그리기는 로건) ----
+/// 남기는 판 수 (임시-155). 넘으면 가장 오래된 판이 빠진다
+pub const RECENT_RUNS_MAX: usize = 5;
+/// 저장 글자의 항목 이름. 모양: `runs=3.120.0,7.2400.1` (판 사이는 `,`, 한 판 안은 `.`: 버틴 날.점수.클리어(0/1)), 오래된 판이 앞
+pub const SETTINGS_KEY_RECENT_RUNS: &str = "runs";
+pub const RECENT_RUN_SEPARATOR: char = ',';
+pub const RECENT_RUN_FIELD_SEPARATOR: char = '.';
+/// 판 하나의 버틴 날·점수 상한. 넘는 점수는 상한으로 저장하고, 읽을 때 상한을 넘은 판은 버린다 (글자 상한 계산은 시험)
+pub const RECENT_RUN_DAYS_MAX: u32 = 9_999;
+pub const RECENT_RUN_SCORE_MAX: u32 = 9_999_999;
+/// 목록이 비었을 때 보여 줄 글
+pub const RECENT_RUNS_EMPTY_TEXT: &str = "아직 없어요";
+/// 클리어한 판 줄 끝에 붙는 글
+pub const RECENT_RUN_CLEARED_TEXT: &str = "클리어";
+
+// ---- 새 기록 축하 소리 (US-132) ----
+/// 새 기록 소리 파일 (`sounds/sfx/` 아래, 폭죽 느낌)
+pub const NEW_RECORD_FILE: &str = "new_record.wav";
+
 // ---- 소리 규칙 (US-112~117, 수산나: 이름과 수치. 소리 내기는 로건) ----
 /// 소리 파일 폴더 (`game/assets/` 아래)
 pub const SOUNDS_SFX_DIR: &str = "sounds/sfx";
@@ -1227,3 +1246,41 @@ pub const PAUSE_EFFECTS_LABEL: &str = "효과음";
 pub const SOUND_STEP_LABELS: [&str; 4] = ["끔", "작게", "보통", "크게"];
 /// 소리 파일 하나를 받는 데, 그리고 푸는 데 각각 기다리는 최대 시간 (초). 넘으면 그 소리는 건너뛴다.
 pub const SOUND_LOAD_TIMEOUT_SECONDS: f64 = 15.0;
+
+// ---- 끝 화면: 새 기록 폭죽 그림과 "최근 5판" 표 (US-132·133, 로건). 화면 크기는 가상 화면 960×540 기준 ----
+/// 폭죽 그림 폴더와 파일 (모양 3 × 색 3, 번호 = 모양 * 3 + 색). 모양: 작은 별 터짐, 꽃 터짐, 떨어지는 반짝. 색: 노랑, 분홍, 하늘색
+pub const FIREWORK_DIR: &str = "assets/sprites/fireworks";
+pub const FIREWORK_FILES: [&str; 9] = [
+    "burst_star_yellow.png",
+    "burst_star_pink.png",
+    "burst_star_blue.png",
+    "burst_flower_yellow.png",
+    "burst_flower_pink.png",
+    "burst_flower_blue.png",
+    "sparkle_fall_yellow.png",
+    "sparkle_fall_pink.png",
+    "sparkle_fall_blue.png",
+];
+/// 새 기록일 때만 뿌리는 폭죽 개수와, 처음 터지고 마지막이 사라질 때까지 걸리는 시간 (초)
+pub const FIREWORKS_COUNT: usize = 8;
+pub const FIREWORKS_TOTAL_SECONDS: f32 = 2.5;
+/// 한 개가 커졌다 사라지는 시간 범위 (초)
+pub const FIREWORK_LIFE_MIN_SECONDS: f32 = 0.6;
+pub const FIREWORK_LIFE_MAX_SECONDS: f32 = 1.2;
+/// 한 개의 그림 한 변 (가상 화면 픽셀, 가장 클 때)
+pub const FIREWORK_SIZE: f32 = 110.0;
+/// 커지는 데 쓰는 비율 (0~1, 이 뒤로는 줄어들며 사라진다), 사라질 때 크기 비율, 가장 진할 때 투명도
+pub const FIREWORK_GROW_SHARE: f32 = 0.4;
+pub const FIREWORK_END_SCALE: f32 = 0.8;
+pub const FIREWORK_MAX_ALPHA: f32 = 0.95;
+/// 뿌리는 자리 (가상 화면, 왼쪽 위 x, y, 가로, 세로): 화면 위쪽. 글자와 캐릭터는 이 위에 그려진다
+pub const FIREWORK_AREA: (f32, f32, f32, f32) = (30.0, 14.0, 900.0, 250.0);
+
+/// 최근 판 표 제목 (아이가 이름을 정하는 중: 내 기록 / 최근 판 / 기록판. 기본 "최근 5판")
+pub const RECENT_TABLE_TITLE: &str = "최근 5판";
+/// 표 자리 (가상 화면, 왼쪽 위 x, y, 가로, 세로): 다시 하기 버튼 오른쪽 아래
+pub const RECENT_TABLE_RECT: (f32, f32, f32, f32) = (684.0, 352.0, 266.0, 188.0);
+/// 줄 높이, 글자 크기 (폰 가로에서 화면 픽셀 18 이상이 되도록 가상 27 이상), 안쪽 가로 여백
+pub const RECENT_TABLE_LINE_HEIGHT: f32 = 29.0;
+pub const RECENT_TABLE_FONT: f32 = 27.0;
+pub const RECENT_TABLE_PADDING: f32 = 10.0;

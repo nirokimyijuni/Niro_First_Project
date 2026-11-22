@@ -48,5 +48,6 @@
 | sfx/button_click.wav | kenney.nl (Interface Sounds, 원본 click_001.ogg) | https://kenney.nl/assets/interface-sounds | CC0 | Kenney | 2026-11-21 | S33 버튼 누르기 |
 | sfx/window_open.wav | kenney.nl (Interface Sounds, 원본 open_002.ogg) | https://kenney.nl/assets/interface-sounds | CC0 | Kenney | 2026-11-21 | S34 창 열기 |
 | sfx/window_close.wav | kenney.nl (Interface Sounds, 원본 close_002.ogg) | https://kenney.nl/assets/interface-sounds | CC0 | Kenney | 2026-11-21 | S34 창 닫기 |
+| sfx/new_record.wav | 직접 만든 소리 (프로젝트 팀, ffmpeg 합성) | - | CC0로 공개 | 프로젝트 팀 | 2026-11-22 | 새 기록 축하 폭죽 NewRecord. 만든 방법: ffmpeg aevalsrc 사인파 휘파람 0.35초(600→1800Hz) 다음 고음 노이즈 0.08초(2kHz 이상 통과)와 C6+E6+G6 화음 0.25초 "퐁", 그 뒤 2200~3900Hz 반짝 점 8개(0.045초씩, 간격 점점 넓어지고 작아짐), 모노 22.05kHz 1.5초, 앞뒤 짧은 페이드, 최대 -7.7dB. 만드는 명령은 art/sounds-synth/make_new_record.sh |
 
 Kenney 효과음은 2026-11-21 부모님이 받은 zip 5개의 License.txt에서 "Creative Commons Zero, CC0"를 다시 확인했다 (소리는 wav 모노 22.05kHz로 바꿈, 길이 자른 것은 위 표에 적음). 자동차 "부릉"(S21)과 닭·새소리(S29)는 Kenney에 없어 아직 없다.

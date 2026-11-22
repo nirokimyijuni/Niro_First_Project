@@ -247,6 +247,22 @@ fn keep_score(score: u32, best_score: &mut u32) {
     }
 }
 
+/// 판이 끝나는 순간(쓰러짐·클리어) **한 번만** 부른다 (US-133). 이미 끝 화면이면 아무것도 안 한다.
+/// 순서: "새 기록!" 판정(`EndScreen::new`)을 먼저 하고, 그 뒤에 최근 판 기록에 더한다 (서로 영향 없음). 최고 기록·점수 저장은 그대로.
+/// 기본값(부모님이 나중에 바꿀 수 있다): Esc로 도중에 나가는 판은 최근 판 기록에 더하지 않는다. 끝 화면에 들어간 판만 더한다.
+fn enter_end_screen(ended: &mut Option<EndScreen>, game: &Game, best_days: &mut u32, best_score: &mut u32, settings: &mut Settings) {
+    if ended.is_some() {
+        return;
+    }
+    let mut screen = EndScreen::new(game, *best_days, *best_score);
+    settings.recent_runs.add(screen.days, screen.score, screen.cleared);
+    screen.set_recent(settings.recent_runs.latest_first());
+    view::web::save_settings(settings); // 값이 바뀐 이때 한 번만 (?qa에서는 save_settings가 안 쓴다)
+    keep_record(game.clock.nights_survived(), best_days);
+    keep_score(game.score(), best_score);
+    *ended = Some(screen);
+}
+
 fn window_conf() -> Conf {
     Conf {
         window_title: "미스 찾기".to_owned(),
@@ -438,7 +454,9 @@ async fn main() {
                     };
                     let retry = ended.as_mut().is_some_and(|screen| {
                         screen.seconds += dt;
-                        screen.ready() && (menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
+                        // 새 기록 소리 (US-132): 글이 나타나는 순간 한 번만. 다시 그려져도 또 나지 않는다.
+                        mixer.request_opt(screen.take_celebration());
+                        screen.ready() &&(menu.confirm || menu.tap.is_some_and(|p| RETRY_BUTTON.contains(p)))
                     });
                     // 문제 창에서는 터치 "◀ 고르기"가 위 idle의 탭으로 온다. 누르면 멈춤 창 (REVIEW-020 1번)
                     let quiz_back = quiz_open && touch_mode && menu.tap.is_some_and(|p| BACK_BUTTON.contains(p));
@@ -623,9 +641,7 @@ async fn main() {
                                     effects.pops.spawn_for_picks(&visible_before, &game.coins, count, game.player.rect().center());
                                 }
                                 GameEvent::Combat(CombatEvent::PlayerDown) | GameEvent::GameCleared => {
-                                    *ended = Some(EndScreen::new(game, best_days, best_score));
-                                    keep_record(game.clock.nights_survived(), &mut best_days);
-                                    keep_score(game.score(), &mut best_score);
+                                    enter_end_screen(ended, game, &mut best_days, &mut best_score, &mut settings);
                                 }
                                 GameEvent::Combat(combat) => effects.on_combat_near_boxes(combat, &box_spots),
                                 GameEvent::NightStarted | GameEvent::DayStarted { .. } => {}
@@ -1153,6 +1169,56 @@ mod tests {
         assert_eq!(best, 3);
         keep_record(4, &mut best);
         assert_eq!(best, 4);
+    }
+
+    fn run_with(coins: u32) -> Game {
+        let mut game = m1_game(CharacterKind::Niro);
+        game.coins.picked_total = coins;
+        game
+    }
+
+    #[test]
+    fn a_finished_run_is_added_to_recent_runs_once_even_if_the_event_repeats() {
+        let (mut ended, mut best_days, mut best_score, mut settings) = (None, 0, 0, Settings::default());
+        let game = run_with(5);
+        enter_end_screen(&mut ended, &game, &mut best_days, &mut best_score, &mut settings);
+        enter_end_screen(&mut ended, &game, &mut best_days, &mut best_score, &mut settings); // 같은 끝 화면에서 또 와도
+        assert_eq!(settings.recent_runs.len(), 1);
+        let screen = ended.expect("끝 화면");
+        assert_eq!(screen.recent.len(), 1);
+        assert_eq!((screen.recent[0].score, screen.recent[0].days), (screen.score, screen.days));
+        assert_eq!(best_score, screen.score, "최고 점수 저장은 그대로");
+    }
+
+    #[test]
+    fn leaving_with_esc_adds_nothing_because_only_end_screens_add() {
+        // Esc로 나가는 길은 enter_end_screen을 부르지 않는다 (기본값, 부모님이 바꿀 수 있다). 기록 목록은 그대로.
+        let settings = Settings::default();
+        let mut best = 0;
+        keep_record(3, &mut best);
+        assert!(settings.recent_runs.is_empty());
+    }
+
+    #[test]
+    fn same_record_goes_in_the_list_but_is_not_a_new_record_and_sixth_run_drops_the_first() {
+        let (mut best_days, mut best_score, mut settings) = (0, 0, Settings::default());
+        let mut ended = None;
+        enter_end_screen(&mut ended, &run_with(5), &mut best_days, &mut best_score, &mut settings);
+        assert!(ended.as_ref().unwrap().new_best_score, "처음 한 판은 새 기록");
+        ended = None;
+        enter_end_screen(&mut ended, &run_with(5), &mut best_days, &mut best_score, &mut settings);
+        let same = ended.take().unwrap();
+        assert!(!same.new_record && !same.new_best_score, "같은 기록은 새 기록이 아니다");
+        assert!(same.fireworks.is_empty());
+        assert_eq!(same.recent.len(), 2, "그래도 목록에는 들어간다");
+        for coins in 6..=9 {
+            enter_end_screen(&mut ended, &run_with(coins), &mut best_days, &mut best_score, &mut settings);
+            ended = None;
+        }
+        assert_eq!(settings.recent_runs.len(), 5);
+        let scores: Vec<u32> = settings.recent_runs.oldest_first().iter().map(|r| r.score).collect();
+        let first = run_with(5).score();
+        assert_eq!(scores.iter().filter(|s| **s == first).count(), 1, "첫 판이 빠지고 두 번째 같은 점수만 남는다: {scores:?}");
     }
 
     #[test]

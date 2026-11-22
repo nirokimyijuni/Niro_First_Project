@@ -653,7 +653,7 @@ pub fn draw_play(
         bag::draw_short_hint(text, bag_view);
     }
     if let Some(ended) = ended {
-        draw_end_panel(text, ended, texture);
+        draw_end_panel(text, ended, texture, &assets.fireworks);
     }
 }
 

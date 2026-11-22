@@ -18,6 +18,7 @@ pub mod mission;
 pub mod monster;
 pub mod player;
 pub mod practice;
+pub mod records;
 pub mod settings;
 pub mod shop;
 pub mod skeleton;

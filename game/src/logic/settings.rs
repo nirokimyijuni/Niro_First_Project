@@ -5,8 +5,10 @@
 //! - `tips`는 창 한 줄 안내를 본 창들 (여섯 칸 숫자 0~63, `WindowTipsSeen`). 옛 글자의 `tip=`는 모르는 항목처럼 무시한다.
 //! - 맨 앞이 버전 번호. 모르는 버전이면 통째로 새 게임 값.
 //! - 한 항목만 이상하면 그 항목만 기본값. 모르는 항목은 무시, 빠진 항목은 기본값.
+//! - `runs=3.120.0,7.2400.1`은 최근 판 기록 (US-133, `records.rs`). 비어 있으면 안 쓰고, 없으면 빈 목록.
 //! - 이름·주소·나이 같은 개인 정보는 없다 ("봤다" 표시와 소리 값뿐).
 
+use super::records::RecentRuns;
 use super::window_tips::WindowTipsSeen;
 use crate::config::*;
 
@@ -23,6 +25,8 @@ pub struct Settings {
     pub music_percent: u8,
     /// 효과음 크기 0~100
     pub effects_percent: u8,
+    /// 최근 판 기록 (US-133). 글자에서는 `runs=3.120.0,7.2400.1` (버틴 날.점수.클리어, 오래된 판이 앞)
+    pub recent_runs: RecentRuns,
 }
 
 impl Default for Settings {
@@ -34,6 +38,7 @@ impl Default for Settings {
             sound_on: SETTINGS_DEFAULT_SOUND_ON,
             music_percent: SETTINGS_DEFAULT_MUSIC_PERCENT,
             effects_percent: SETTINGS_DEFAULT_EFFECTS_PERCENT,
+            recent_runs: RecentRuns::default(),
         }
     }
 }
@@ -54,6 +59,13 @@ pub fn settings_to_text(s: &Settings) -> String {
         text.push_str(key);
         text.push(SETTINGS_VALUE_SEPARATOR);
         text.push_str(&value.to_string());
+    }
+    // 최근 판 기록은 맨 끝에 (비어 있으면 아예 안 쓴다 → 옛 글자와 같은 모양)
+    if !s.recent_runs.is_empty() {
+        text.push(SETTINGS_ITEM_SEPARATOR);
+        text.push_str(SETTINGS_KEY_RECENT_RUNS);
+        text.push(SETTINGS_VALUE_SEPARATOR);
+        text.push_str(&s.recent_runs.to_text());
     }
     text
 }
@@ -109,6 +121,7 @@ pub fn settings_from_text(text: &str) -> Settings {
                     s.effects_percent = p;
                 }
             }
+            SETTINGS_KEY_RECENT_RUNS => s.recent_runs = RecentRuns::from_text(value),
             _ => {} // 모르는 항목(나중 버전이 만든 것)은 무시
         }
     }
@@ -151,6 +164,7 @@ mod tests {
             sound_on: false,
             music_percent: 30,
             effects_percent: 100,
+            recent_runs: RecentRuns::default(),
         }
     }
 
@@ -236,6 +250,7 @@ mod tests {
             SETTINGS_KEY_SOUND_ON,
             SETTINGS_KEY_MUSIC_PERCENT,
             SETTINGS_KEY_EFFECTS_PERCENT,
+            SETTINGS_KEY_RECENT_RUNS,
         ];
         for part in t.split(SETTINGS_ITEM_SEPARATOR).skip(1) {
             let key = part.split(SETTINGS_VALUE_SEPARATOR).next().unwrap();

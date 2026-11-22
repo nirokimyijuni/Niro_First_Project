@@ -8,8 +8,11 @@ use super::screen::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 use super::sky::hash;
 use super::text::TextPainter;
 use super::touch::draw_star;
-use crate::config::GAME_CLEAR_TEXT;
+use super::assets::FireworkArt;
+use crate::config::*;
 use crate::logic::game::Game;
+use crate::logic::records::RunRecord;
+use crate::logic::sound::{sfx_for_end_screen, Sfx};
 use crate::logic::player::{Facing, Player};
 use crate::logic::world::{nearest_copy, World};
 use macroquad::prelude::*;
@@ -87,6 +90,73 @@ pub struct EndScreen {
     /// 이번 판까지 넣은 최고 점수
     pub best_score: u32,
     pub new_best_score: bool,
+    /// 새 기록일 때만 있는 폭죽 계획 (끝 화면에 들어갈 때 한 번 정한다). 아니면 비어 있다.
+    pub fireworks: Vec<Firework>,
+    /// "최근 5판" 표에 보일 판들, 최신이 위 (`set_recent`). 방금 판이 첫 줄.
+    pub recent: Vec<RunRecord>,
+    /// 새 기록 소리를 이미 냈는지 (한 판에 한 번만)
+    celebrated: bool,
+}
+
+/// 폭죽 하나: 끝 화면이 "준비된" 뒤 `start`초에 터져 `life`초 동안 커졌다 사라진다. `picture`는 모양 * 3 + 색.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Firework {
+    pub start: f32,
+    pub life: f32,
+    pub center: Vec2,
+    pub picture: usize,
+}
+
+/// 끝 화면에 들어갈 때 폭죽을 정한다. 같은 판(같은 `seed`)이면 늘 같다. 모양과 색은 연달아 겹치지 않게 번갈아 나온다.
+pub fn fireworks_plan(seed: u32) -> Vec<Firework> {
+    let (ax, ay, aw, ah) = FIREWORK_AREA;
+    let n = FIREWORKS_COUNT;
+    (0..n)
+        .map(|i| {
+            let h = |k: u32| hash(seed.wrapping_mul(64).wrapping_add(i as u32 * 4 + k));
+            let life = FIREWORK_LIFE_MIN_SECONDS + h(0) * (FIREWORK_LIFE_MAX_SECONDS - FIREWORK_LIFE_MIN_SECONDS);
+            // 가로는 칸을 3칸씩 건너뛰며 써서 가까운 것끼리 연달아 터지지 않게 (개수가 3의 배수가 아닐 때 칸이 겹치지 않는다)
+            let column = (i * 3 + 1) % n;
+            let x = ax + (column as f32 + 0.15 + h(1) * 0.7) / n as f32 * aw;
+            let y = ay + h(2) * ah;
+            let shape = i % 3;
+            let color = (i + i / 3) % 3;
+            let start = if n > 1 { (FIREWORKS_TOTAL_SECONDS - life) * i as f32 / (n - 1) as f32 } else { 0.0 };
+            Firework { start, life, center: vec2(x, y), picture: shape * 3 + color }
+        })
+        .collect()
+}
+
+/// `t`초(폭죽이 시작된 뒤)의 폭죽 하나: (크기 비율, 투명도). 아직 안 터졌거나 사라졌으면 None.
+/// 크기는 0 → 1.0 → `FIREWORK_END_SCALE`, 투명도는 커지는 동안 진해졌다가 줄며 사라진다.
+pub fn firework_look(f: &Firework, t: f32) -> Option<(f32, f32)> {
+    let p = (t - f.start) / f.life;
+    if !(0.0..1.0).contains(&p) {
+        return None;
+    }
+    let grow = FIREWORK_GROW_SHARE;
+    if p < grow {
+        let g = p / grow;
+        Some((g, FIREWORK_MAX_ALPHA * g.sqrt()))
+    } else {
+        let s = (p - grow) / (1.0 - grow);
+        Some((1.0 - (1.0 - FIREWORK_END_SCALE) * s, FIREWORK_MAX_ALPHA * (1.0 - s)))
+    }
+}
+
+/// 표에 쓸 줄들: (글, 방금 판이면 true). 비었으면 "아직 없어요" 한 줄.
+pub fn recent_lines(runs: &[RunRecord]) -> Vec<(String, bool)> {
+    if runs.is_empty() {
+        return vec![(RECENT_RUNS_EMPTY_TEXT.to_string(), false)];
+    }
+    runs.iter().take(RECENT_RUNS_MAX).enumerate().map(|(i, r)| (r.line_text(), i == 0)).collect()
+}
+
+/// 표 안의 자리: (제목 글자 아래선 y, 줄마다 글자 아래선 y). 줄 수만큼.
+pub fn recent_table_rows(lines: usize) -> (f32, Vec<f32>) {
+    let (_, y, _, _) = RECENT_TABLE_RECT;
+    let title = y + RECENT_TABLE_LINE_HEIGHT;
+    (title, (1..=lines).map(|k| title + RECENT_TABLE_LINE_HEIGHT * k as f32).collect())
 }
 
 /// 이번 값까지 넣은 최고 값과, 넘었는지. 같으면 새 기록이 아니다.
@@ -112,12 +182,34 @@ impl EndScreen {
             monsters: game.combat.monsters_defeated,
             best_score,
             new_best_score,
+            fireworks: if new_record || new_best_score { fireworks_plan(days.wrapping_mul(7919).wrapping_add(score)) } else { Vec::new() },
+            recent: Vec::new(),
+            celebrated: false,
         }
     }
 
     /// 움직임이 끝나서 글자와 버튼이 보이는지.
     pub fn ready(&self) -> bool {
-        self.seconds >= if self.cleared { CLEAR_ENTER_SECONDS } else { ANIMATION_SECONDS }
+        self.seconds >= self.ready_at()
+    }
+
+    fn ready_at(&self) -> f32 {
+        if self.cleared { CLEAR_ENTER_SECONDS } else { ANIMATION_SECONDS }
+    }
+
+    /// 표에 보일 판들 (최신이 위). 방금 판을 기록에 더한 뒤 한 번 넣는다.
+    pub fn set_recent(&mut self, latest_first: Vec<RunRecord>) {
+        self.recent = latest_first;
+    }
+
+    /// 새 기록 소리: "새 기록!" 글이 나타나는 순간(`ready`가 처음 참일 때) 한 번만 소리를 돌려준다. 그 뒤에는 늘 None.
+    /// 새 기록이 아니면 처음에도 None (규칙은 `sfx_for_end_screen`).
+    pub fn take_celebration(&mut self) -> Option<Sfx> {
+        if self.celebrated || !self.ready() {
+            return None;
+        }
+        self.celebrated = true;
+        sfx_for_end_screen(self.new_record, self.new_best_score)
     }
 }
 
@@ -258,10 +350,11 @@ pub(super) fn draw_confetti(seconds: f32) {
 
 /// 움직임이 끝나면: 큰 글, 버틴 날과 최고 기록, 점수와 내역과 최고 점수, "다시 하기".
 /// `hero`: 플레이어가 고른 캐릭터 그림.
-pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, hero: &Texture2D) {
+pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, hero: &Texture2D, art: &FireworkArt) {
     let mid = VIRTUAL_WIDTH / 2.0;
     if ended.cleared {
         draw_confetti(ended.seconds);
+        draw_fireworks(art, ended);
         draw_dancing_hero(hero, ended.seconds);
         text.centered(GAME_CLEAR_TEXT, mid, 92.0, 60.0, NEW_RECORD);
     }
@@ -270,6 +363,7 @@ pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, hero: &Texture2D) {
     }
     if !ended.cleared {
         draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
+        draw_fireworks(art, ended);
         text.centered("쓰러졌어요", mid, 100.0, 76.0, WHITE);
         draw_dizzy_hero(hero, ended.seconds - ANIMATION_SECONDS);
     }
@@ -288,6 +382,35 @@ pub fn draw_end_panel(text: &TextPainter, ended: &EndScreen, hero: &Texture2D) {
     let r = RETRY_BUTTON;
     draw_pill(r.x, r.y, r.w, r.h, RETRY_FILL);
     text.centered("다시 하기", mid, r.y + r.h / 2.0 + 21.0, 62.0, WHITE);
+    draw_recent_table(text, &ended.recent);
+}
+
+/// 새 기록일 때만 폭죽 그림을 뿌린다. 글자보다 먼저 그려서 글자를 가리지 않는다. 시작은 끝 화면이 준비된 순간 (새 기록 소리와 같은 때).
+fn draw_fireworks(art: &FireworkArt, ended: &EndScreen) {
+    let t = ended.seconds - ended.ready_at();
+    for f in &ended.fireworks {
+        let Some((scale, alpha)) = firework_look(f, t) else { continue };
+        if let Some(texture) = art.picture(f.picture) {
+            let size = FIREWORK_SIZE * scale;
+            let params = DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() };
+            draw_texture_ex(texture, f.center.x - size / 2.0, f.center.y - size / 2.0, Color::new(1.0, 1.0, 1.0, alpha), params);
+        }
+    }
+}
+
+/// 작은 표 "최근 5판": 최신이 위, 방금 판은 노란색, 비었으면 "아직 없어요". 줄이 칸보다 길면 글자를 줄인다.
+fn draw_recent_table(text: &TextPainter, runs: &[RunRecord]) {
+    let (x, y, w, h) = RECENT_TABLE_RECT;
+    draw_rectangle(x, y, w, h, DIM);
+    let mid = x + w / 2.0;
+    let lines = recent_lines(runs);
+    let (title_y, rows) = recent_table_rows(lines.len());
+    text.centered(RECENT_TABLE_TITLE, mid, title_y, RECENT_TABLE_FONT, WHITE);
+    let room = w - RECENT_TABLE_PADDING * 2.0;
+    for ((line, newest), row_y) in lines.iter().zip(rows) {
+        let size = RECENT_TABLE_FONT.min(RECENT_TABLE_FONT * room / text.width(line, RECENT_TABLE_FONT).max(1.0));
+        text.centered(line, mid, row_y, size, if *newest { NEW_RECORD } else { WHITE });
+    }
 }
 
 #[cfg(test)]
@@ -425,6 +548,103 @@ mod tests {
         let branch = long.tree_branches()[1];
         assert_eq!(landing_y(&long, branch.center().x, 24.0, long.ground_y), long.ground_y, "가지 밑에서 쓰러져도 땅에 있다");
         assert_eq!(landing_y(&long, branch.center().x, 24.0, branch.y - 40.0), branch.y, "가지 위로 떨어지면 가지 위");
+    }
+
+    fn run(days: u32, score: u32, cleared: bool) -> RunRecord {
+        RunRecord { days, score, cleared }
+    }
+
+    #[test]
+    fn fireworks_are_within_count_time_area_and_alternate_shape_and_color() {
+        for seed in 0..200 {
+            let plan = fireworks_plan(seed);
+            assert_eq!(plan.len(), FIREWORKS_COUNT);
+            assert!((6..=10).contains(&plan.len()));
+            let (ax, ay, aw, ah) = FIREWORK_AREA;
+            for f in &plan {
+                assert!((FIREWORK_LIFE_MIN_SECONDS..=FIREWORK_LIFE_MAX_SECONDS).contains(&f.life), "{f:?}");
+                assert!(f.start >= 0.0 && f.start + f.life <= FIREWORKS_TOTAL_SECONDS + 1e-3, "시간 상한: {f:?}");
+                assert!(f.center.x >= ax && f.center.x <= ax + aw && f.center.y >= ay && f.center.y <= ay + ah);
+                assert!(f.picture < FIREWORK_FILES.len());
+            }
+            for pair in plan.windows(2) {
+                assert_ne!(pair[0].picture / 3, pair[1].picture / 3, "모양이 연달아 같다");
+                assert_ne!(pair[0].picture % 3, pair[1].picture % 3, "색이 연달아 같다");
+            }
+        }
+        assert_eq!(fireworks_plan(7), fireworks_plan(7), "같은 판이면 같은 폭죽");
+        const { assert!(FIREWORK_AREA.1 + FIREWORK_AREA.3 + FIREWORK_SIZE / 2.0 <= VIRTUAL_HEIGHT) };
+    }
+
+    #[test]
+    fn firework_grows_then_shrinks_and_fades_and_ends_before_total_time() {
+        let f = Firework { start: 1.0, life: 1.0, center: Vec2::ZERO, picture: 0 };
+        assert_eq!(firework_look(&f, 0.9), None, "아직");
+        assert_eq!(firework_look(&f, 2.0), None, "사라짐");
+        let (s0, _) = firework_look(&f, 1.0).unwrap();
+        assert!(s0.abs() < 1e-3, "크기 0에서 시작");
+        let (peak, a_peak) = firework_look(&f, 1.0 + FIREWORK_GROW_SHARE).unwrap();
+        assert!((peak - 1.0).abs() < 1e-3 && a_peak <= FIREWORK_MAX_ALPHA + 1e-3);
+        let (late, a_late) = firework_look(&f, 1.99).unwrap();
+        assert!((late - FIREWORK_END_SCALE).abs() < 0.02 && a_late < 0.05, "0.8 크기로 흐려진다");
+        for i in 0..100 {
+            let (s, a) = firework_look(&f, 1.0 + i as f32 * 0.0099).unwrap();
+            assert!((0.0..=1.0 + 1e-3).contains(&s) && (0.0..=1.0).contains(&a));
+        }
+    }
+
+    #[test]
+    fn fireworks_only_on_a_new_record_and_celebration_sound_comes_once() {
+        let game = game_with_score_9();
+        let mut none = EndScreen::new(&game, 5, 50);
+        assert!(none.fireworks.is_empty(), "새 기록이 아니면 폭죽이 없다");
+        none.seconds = 10.0;
+        assert_eq!(none.take_celebration(), None);
+        let mut best = EndScreen::new(&game, 5, 3);
+        assert_eq!(best.fireworks.len(), FIREWORKS_COUNT);
+        assert_eq!(best.take_celebration(), None, "글이 나타나기 전에는 안 난다");
+        best.seconds = ANIMATION_SECONDS;
+        assert_eq!(best.take_celebration(), Some(Sfx::NewRecord));
+        for _ in 0..100 {
+            best.seconds += 0.016;
+            assert_eq!(best.take_celebration(), None, "다시 그려져도 또 나지 않는다");
+        }
+        let mut both = EndScreen::new(&game, 0, 3);
+        both.new_record = true; // 둘 다 넘은 판 (새 게임은 날이 0이라 직접 맞춘다)
+        both.new_best_score = true;
+        both.cleared = true;
+        both.seconds = CLEAR_ENTER_SECONDS;
+        assert_eq!(both.take_celebration(), Some(Sfx::NewRecord), "클리어 화면도 같다, 둘 다 넘어도 하나");
+        assert_eq!(both.take_celebration(), None);
+    }
+
+    #[test]
+    fn recent_lines_are_newest_first_yellow_first_and_empty_says_none_yet() {
+        assert_eq!(recent_lines(&[]), vec![("아직 없어요".to_string(), false)]);
+        let lines = recent_lines(&[run(7, 2400, true), run(3, 120, false)]);
+        assert_eq!(lines, vec![("7일 2400점 클리어".to_string(), true), ("3일 120점".to_string(), false)]);
+        let many: Vec<RunRecord> = (1..=9).map(|i| run(i, i * 10, false)).collect();
+        assert_eq!(recent_lines(&many).len(), RECENT_RUNS_MAX);
+    }
+
+    #[test]
+    fn recent_table_with_five_rows_fits_and_stays_clear_of_button_text_and_edges() {
+        let (x, y, w, h) = RECENT_TABLE_RECT;
+        assert!(x >= 0.0 && y >= 0.0 && x + w <= VIRTUAL_WIDTH && y + h <= VIRTUAL_HEIGHT, "화면 안");
+        assert!(x >= RETRY_BUTTON.x + RETRY_BUTTON.w, "다시 하기 버튼 오른쪽");
+        assert!(y >= TALLY_Y + 8.0, "코인 내역 글 아래 (글 아래선 + 내려가는 부분)");
+        assert!(x > RIGHT_X + 150.0 || y > BEST_Y + 10.0, "점수 글과 겹치지 않는다");
+        let (title, rows) = recent_table_rows(RECENT_RUNS_MAX);
+        assert_eq!(rows.len(), RECENT_RUNS_MAX);
+        let descent = RECENT_TABLE_FONT * 0.3;
+        assert!(title - RECENT_TABLE_FONT * 0.9 >= y - 2.0, "제목이 표 위로 안 나간다");
+        assert!(rows[RECENT_RUNS_MAX - 1] + descent <= y + h, "다섯 줄이 모두 표 안");
+        for pair in rows.windows(2) {
+            assert!(pair[1] - pair[0] >= RECENT_TABLE_FONT, "줄끼리 겹치지 않는다");
+        }
+        assert!(title + RECENT_TABLE_FONT * 0.3 < rows[0] - RECENT_TABLE_FONT * 0.6, "제목과 첫 줄이 겹치지 않는다");
+        assert!(RECENT_TABLE_FONT >= 27.0, "폰 가로(배율 0.667)에서 18 화면 픽셀");
+        assert!(w > RECENT_TABLE_PADDING * 2.0 + 150.0);
     }
 
     #[test]

@@ -159,6 +159,8 @@ pub struct Assets {
     pub m6: M6Art,
     /// 영어 퀴즈 그림 (US-088, config 낱말 표의 그림). 없는 그림은 빠져 있다.
     pub english: EnglishArt,
+    /// 새 기록 폭죽 그림 (US-132)
+    pub fireworks: FireworkArt,
 }
 
 /// 미스·시민·무기 그림. 둘레 여백을 잘라서 그림 아래 끝 = 발이다.
@@ -218,6 +220,34 @@ impl M6Art {
     }
 }
 
+/// 새 기록 폭죽 그림 9장 (`config::FIREWORK_FILES` 차례). 못 받은 그림은 비어 있고, 그 폭죽만 안 그린다.
+pub struct FireworkArt {
+    pictures: Vec<Option<Texture2D>>,
+}
+
+impl FireworkArt {
+    fn paths() -> Vec<String> {
+        crate::config::FIREWORK_FILES.iter().map(|name| format!("{}/{}", crate::config::FIREWORK_DIR, name)).collect()
+    }
+
+    fn from_files(files: Vec<FileResult>) -> FireworkArt {
+        let pictures = files
+            .into_iter()
+            .map(|file| {
+                let image = Image::from_file_with_format(&file.ok()?, Some(ImageFormat::Png)).ok()?;
+                let texture = Texture2D::from_image(&image);
+                texture.set_filter(FilterMode::Linear); // 부드럽게 줄인 그림이라 부드럽게 키운다
+                Some(texture)
+            })
+            .collect();
+        FireworkArt { pictures }
+    }
+
+    pub fn picture(&self, index: usize) -> Option<&Texture2D> {
+        self.pictures.get(index)?.as_ref()
+    }
+}
+
 /// 파일 하나를 받은 결과.
 pub type FileResult = Result<Vec<u8>, macroquad::Error>;
 
@@ -270,8 +300,10 @@ impl Assets {
             .map(String::from)
             .chain(m6_paths.iter().cloned())
             .chain(english_names.iter().map(|name| picture_path(name)))
+            .chain(FireworkArt::paths())
             .collect();
         let mut files = fetch_all(&paths).await;
+        let firework_files = files.split_off(2 + SKELETON_PATHS.len() + m6_paths.len() + english_names.len());
         let english_files = files.split_off(2 + SKELETON_PATHS.len() + m6_paths.len());
         let m6_files = files.split_off(2 + SKELETON_PATHS.len());
         let skeleton_files = files.split_off(2);
@@ -309,6 +341,7 @@ impl Assets {
             sky: SkyArt::new(),
             m6: M6Art::from_files(m6_files),
             english: EnglishArt::from_files(&english_names, english_files),
+            fireworks: FireworkArt::from_files(firework_files),
         }
     }
 

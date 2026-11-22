@@ -186,11 +186,13 @@ pub enum Sfx {
     WindowClose,
     PracticeHit,
     TutorialCheer,
+    /// 새 기록 폭죽 (US-132). 끝 화면에 "새 기록!"이나 "새 최고 점수!"가 나올 때만
+    NewRecord,
 }
 
 impl Sfx {
     /// 이름표 전부 (받는 순서에도 쓴다).
-    pub const ALL: [Sfx; 40] = [
+    pub const ALL: [Sfx; 41] = [
         Sfx::ButtonClick,
         Sfx::WindowOpen,
         Sfx::WindowClose,
@@ -231,6 +233,7 @@ impl Sfx {
         Sfx::PlayerDown,
         Sfx::PracticeHit,
         Sfx::TutorialCheer,
+        Sfx::NewRecord,
     ];
 
     /// `sounds/sfx/` 아래 파일 이름 (확장자 포함). 파일이 아직 없는 소리(자동차 부릉)는 None → 그냥 안 낸다.
@@ -273,6 +276,7 @@ impl Sfx {
             Sfx::ButtonClick => "button_click.wav",
             Sfx::WindowOpen => "window_open.wav",
             Sfx::WindowClose => "window_close.wav",
+            Sfx::NewRecord => NEW_RECORD_FILE,
         })
     }
 
@@ -297,6 +301,7 @@ impl Sfx {
                 | Sfx::MorningDing
                 | Sfx::NightBell
                 | Sfx::RareItemWow
+                | Sfx::NewRecord
         )
     }
 }
@@ -442,6 +447,16 @@ pub fn sfx_for_math_result(result: MathResult) -> Sfx {
         MathResult::Right => Sfx::QuizCorrect,
         MathResult::TryAgain | MathResult::Wrong => Sfx::QuizWrong,
     }
+}
+
+/// 끝 화면(쓰러졌어요, 클리어 둘 다 같은 함수)의 새 기록 폭죽 (US-132).
+/// `new_record`(버틴 날이 최고를 넘음)나 `new_best_score`(점수가 최고를 넘음) 중 하나라도 true면 `Some(NewRecord)`,
+/// 둘 다 true여도 소리는 하나. 같거나 낮으면 None. 소리가 꺼져 있으면 `SfxMixer::take_playable`이 버린다.
+/// 로건 몫: 한 판에서 두 번 부르지 않는다. 끝 화면에 들어간 그 한 번만 `request_opt`에 넣고, 다시 그려질 때는 부르지 않는다.
+// 끝 화면 소리는 로건이 이어 붙이기 전까지 시험에서만 쓴다.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn sfx_for_end_screen(new_record: bool, new_best_score: bool) -> Option<Sfx> {
+    (new_record || new_best_score).then_some(Sfx::NewRecord)
 }
 
 /// 캐는 중 "톡톡". 나무는 톡, 나머지 광석은 캉.
@@ -939,6 +954,45 @@ mod tests {
         assert_eq!(sfx_for_math_result(MathResult::Right), Sfx::QuizCorrect);
         assert_eq!(sfx_for_math_result(MathResult::Wrong), Sfx::QuizWrong);
         assert_eq!(sfx_for_math_result(MathResult::TryAgain), Sfx::QuizWrong);
+    }
+
+    #[test]
+    fn new_record_sound_only_when_record_is_beaten() {
+        assert_eq!(sfx_for_end_screen(true, false), Some(Sfx::NewRecord)); // 날만 넘음
+        assert_eq!(sfx_for_end_screen(false, true), Some(Sfx::NewRecord)); // 점수만 넘음
+        assert_eq!(sfx_for_end_screen(true, true), Some(Sfx::NewRecord)); // 둘 다: 하나
+        assert_eq!(sfx_for_end_screen(false, false), None); // 같거나 낮음
+        assert!(Sfx::NewRecord.is_important());
+        assert_eq!(Sfx::NewRecord.file_name(), Some("new_record.wav"));
+    }
+
+    #[test]
+    fn new_record_both_beaten_plays_once_and_is_heard_when_busy() {
+        let mut m = SfxMixer::new();
+        m.request_opt(sfx_for_end_screen(true, true));
+        m.request_opt(sfx_for_end_screen(true, true));
+        for s in [Sfx::Hit, Sfx::BoxTap, Sfx::CoinPickup, Sfx::ItemPickup] {
+            m.request(s);
+        }
+        let out = mixer_out(&mut m, 0.016);
+        assert_eq!(out.iter().filter(|&&s| s == Sfx::NewRecord).count(), 1);
+        assert_eq!(out[0], Sfx::NewRecord); // 중요해서 먼저
+        let mut none = SfxMixer::new();
+        none.request_opt(sfx_for_end_screen(false, false));
+        assert!(mixer_out(&mut none, 0.016).is_empty());
+    }
+
+    #[test]
+    fn new_record_is_dropped_when_sound_is_off_for_both_end_screens() {
+        let mut off = SoundSettings::default();
+        off.toggle();
+        for _screen in ["쓰러졌어요", "클리어"] {
+            let mut m = SfxMixer::new();
+            m.request_opt(sfx_for_end_screen(true, true));
+            assert!(m.take_playable(0.016, &off, false).is_empty());
+            m.request_opt(sfx_for_end_screen(true, false));
+            assert!(m.take_playable(0.016, &SoundSettings::default(), false).contains(&Sfx::NewRecord));
+        }
     }
 
     #[test]
