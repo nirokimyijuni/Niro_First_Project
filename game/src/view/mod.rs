@@ -28,6 +28,7 @@ pub mod sky;
 pub mod sprites;
 pub mod text;
 pub mod touch;
+pub mod upgrade;
 pub mod tutorial;
 pub mod title;
 pub mod web;

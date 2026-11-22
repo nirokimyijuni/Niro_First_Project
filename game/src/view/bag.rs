@@ -15,6 +15,7 @@ use super::shop::{draw_pocket, Pocket};
 use super::sprites::fit_size;
 use super::text::TextPainter;
 use super::touch::draw_star;
+use super::upgrade::{self, UpgradeView};
 use crate::config::{
     BAG_FLASH_SECONDS, BAG_NAME_TEXT, DIAMOND_PICKAXE_HOW_TEXT, DIAMOND_PICKAXE_HOW_TOUCH_TEXT, KEY_HINT_SECONDS, PICKAXE_HOW_TEXT, PICKAXE_HOW_TOUCH_TEXT,
 };
@@ -352,8 +353,30 @@ fn draw_slot_icon(art: &M6Art, slot: BagSlot, c: Vec2) {
     }
 }
 
+/// 무기 줄 오른쪽 빈 곳 (칸 5개 끝 ~ 판 안쪽 끝). 숫자 안내와 총 범위 글이 들어간다 (US-130).
+pub const NOTES: Rect = Rect::new(CELLS_LEFT + 5.0 * (CELL + CELL_GAP) + 8.0, ROW_TOPS[0], PANEL.x + PANEL.w - 20.0 - (CELLS_LEFT + 5.0 * (CELL + CELL_GAP) + 8.0), CELL);
+/// 안내 글과 총 범위 글의 바닥선
+const NOTE_BASELINE: f32 = ROW_TOPS[0] + 30.0;
+const RANGE_BASELINE: f32 = ROW_TOPS[0] + 68.0;
+
+/// 무기 줄 오른쪽 글: 숫자 안내(무기를 가졌을 때), 총을 가졌으면 총 범위 (끝에 닿으면 "최대"). 칸 밖으로 안 나가게 줄인다.
+fn draw_weapon_notes(text: &TextPainter, game: &Game) {
+    let owned = game.weapons.owned();
+    if owned.is_empty() {
+        return;
+    }
+    let note = crate::config::WEAPON_NUMBERS_HELP_TEXT;
+    let size = upgrade::fit_text_size(text, note, upgrade::NOTE_SIZE, NOTES.w);
+    text.left(note, NOTES.x, NOTE_BASELINE, size, WHITE);
+    if owned.contains(&Weapon::Gun) {
+        let line = upgrade::gun_range_line(game.weapons.levels().range(Weapon::Gun));
+        let size = upgrade::fit_text_size(text, &line, upgrade::RANGE_SIZE, NOTES.w);
+        text.left(&line, NOTES.x, RANGE_BASELINE, size, MESSAGE_COLOR);
+    }
+}
+
 /// 가방 창 전체. 화면 좌표. `show_recipe`: 제작대가 있는 맵이면 곡괭이 만드는 법 한 줄.
-pub fn draw_bag_window(text: &TextPainter, game: &Game, art: &M6Art, view: &BagView, touch_mode: bool, show_recipe: bool) {
+pub fn draw_bag_window(text: &TextPainter, game: &Game, art: &M6Art, view: &BagView, upgrade: &UpgradeView, touch_mode: bool, show_recipe: bool) {
     let t = get_time() as f32;
     draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, DIM);
     draw_rectangle(PANEL.x, PANEL.y, PANEL.w, PANEL.h, PANEL_FILL);
@@ -373,6 +396,8 @@ pub fn draw_bag_window(text: &TextPainter, game: &Game, art: &M6Art, view: &BagV
     }
 
     let held = game.weapons.held();
+    let levels = game.weapons.levels();
+    draw_weapon_notes(text, game);
     for (r, slots) in rows().iter().enumerate() {
         text.left(ROW_NAMES[r], ROW_LABEL_X, ROW_TOPS[r] + CELL / 2.0 + 10.0, ROW_LABEL_SIZE, WHITE);
         for (c, slot) in slots.iter().enumerate() {
@@ -386,6 +411,11 @@ pub fn draw_bag_window(text: &TextPainter, game: &Game, art: &M6Art, view: &BagV
             } else if matches!(slot, BagSlot::Pocket(_) | BagSlot::Material(_)) {
                 let label = n.to_string();
                 text.left(&label, cell.right() - 6.0 - text.width(&label, COUNT_SIZE), cell.bottom() - 6.0, COUNT_SIZE, WHITE);
+            }
+            if let (BagSlot::Weapon(w), true) = (slot, n > 0) {
+                // 강화 (US-130): 공격력 숫자, 강화했으면 "+n", 방금 강화했으면 반짝
+                upgrade::draw_cell_flash(cell, upgrade.flash(*w), t);
+                upgrade::draw_cell_numbers(text, cell, *w, levels.attack(*w), levels.level(*w));
             }
             if *slot == BagSlot::Weapon(held) {
                 draw_rectangle_lines(cell.x - 3.0, cell.y - 3.0, cell.w + 6.0, cell.h + 6.0, 5.0, HELD_RING);
@@ -472,6 +502,21 @@ mod tests {
         assert!(ROW_TOPS[0] > CLOSE.bottom(), "닫기와 첫 줄이 안 겹친다");
         // 줄 이름이 첫 칸 왼쪽에 들어간다 ("쓰는 것" 30 크기 ≈ 3글자)
         const { assert!(CELLS_LEFT - ROW_LABEL_X >= ROW_LABEL_SIZE * 3.6) };
+    }
+
+    #[test]
+    fn weapon_notes_fit_beside_the_weapon_cells() {
+        let last = slot_rect(0, 4);
+        assert!(NOTES.x >= last.right() && NOTES.right() <= PANEL.right() - 8.0, "칸 오른쪽 빈 곳, 판 안");
+        assert!(NOTES.y > CLOSE.bottom() && NOTES.bottom() <= slot_rect(1, 0).y, "닫기와 다음 줄 사이");
+        // 가장 긴 글을 글꼴 없이 넉넉히 센 폭 (한글 글자 크기만큼): 안 맞으면 실제로는 줄여 그린다
+        let est = |s: &str, size: f32| s.chars().map(|c| if c.is_ascii() { size * 0.62 } else { size }).sum::<f32>();
+        assert!(NOTE_BASELINE - upgrade::NOTE_SIZE >= NOTES.y && RANGE_BASELINE <= NOTES.bottom() && NOTE_BASELINE < RANGE_BASELINE - upgrade::RANGE_SIZE + 6.0);
+        let range = upgrade::gun_range_line(crate::config::GUN_RANGE_MAX);
+        assert!(est(&range, upgrade::RANGE_SIZE) <= NOTES.w + 40.0, "총 범위 글 폭 {}", est(&range, upgrade::RANGE_SIZE));
+        for size in [upgrade::NOTE_SIZE, upgrade::RANGE_SIZE, upgrade::ATTACK_SIZE, upgrade::LEVEL_SIZE] {
+            assert!(size * scale(740.0, 360.0) >= 16.0, "{size}");
+        }
     }
 
     #[test]

@@ -377,7 +377,9 @@ pub fn draw_coins_and_clock(text: &TextPainter, clock: &Clock, coins: u32) {
 }
 
 /// 아래 가운데: 지금 든 무기 칸 하나. 맨손이면 주먹.
-pub fn draw_held_weapon(art: &M6Art, held: Weapon) {
+/// `level`: 그 무기의 강화 횟수 (화면에는 횟수+1을 "Lv n"으로, 맨손은 없음), `flash`: 강화 반짝임 (1~0).
+pub fn draw_held_weapon(text: &TextPainter, art: &M6Art, held: Weapon, level: u32, flash: f32) {
+    super::upgrade::draw_held_flash(flash, get_time() as f32);
     let r = HELD_SLOT;
     let c = r.center();
     draw_circle(c.x, c.y, r.w / 2.0, PANEL);
@@ -392,6 +394,7 @@ pub fn draw_held_weapon(art: &M6Art, held: Weapon) {
             draw_circle(c.x, c.y, 11.5, FIST);
         }
     }
+    super::upgrade::draw_held_level(text, held, level);
 }
 
 /// 위 정보판의 아래 끝. 큰 알림 글은 그 아래에 놓인다 (BUG-031, 임시-78).

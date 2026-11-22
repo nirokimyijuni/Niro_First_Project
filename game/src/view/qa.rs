@@ -12,7 +12,7 @@ use crate::logic::game::Game;
 use crate::logic::gathering::Material;
 use crate::logic::player::Facing;
 use crate::logic::shop::{Armor, Potion};
-use crate::logic::weapon::Weapon;
+use crate::logic::weapon::{DroppedWeapon, Weapon};
 use macroquad::prelude::*;
 
 /// 코인 채우기는 이만큼까지
@@ -67,7 +67,7 @@ impl QaAction {
         match self {
             QaAction::Coins => "1 코인 3000",
             QaAction::Materials => "2 재료 채우기",
-            QaAction::Items => "3 아이템, 무기 다",
+            QaAction::Items => "3 아이템, 무기 (또 누르면 강화)",
             QaAction::DaySevenEvening => "4 7일째 저녁",
             QaAction::BeforeClear => "5 클리어 직전",
             QaAction::NightNow => "6 밤으로",
@@ -162,9 +162,17 @@ pub fn apply(game: &mut Game, action: QaAction) {
             }
             game.shop.put_on_skates();
             game.shop.put_on_armor(Armor::Diamond);
+            let had_all = [Weapon::Sword, Weapon::Axe, Weapon::Gun].iter().all(|w| game.weapons.has(*w));
             for w in [Weapon::Sword, Weapon::Axe, Weapon::Gun] {
                 if !game.weapons.has(w) {
                     game.weapons.add_bought(w);
+                }
+            }
+            // 무기를 이미 다 가졌으면 또 누를 때마다 하늘 무기 셋이 주인공 위로 떨어진다: 줍기만 해도 강화 (US-127~130 확인용)
+            if had_all {
+                let x = game.player.rect().center().x;
+                for w in [Weapon::Sword, Weapon::Axe, Weapon::Gun] {
+                    game.weapons.dropped.push(DroppedWeapon::above(w, x, &game.world));
                 }
             }
         }
@@ -331,6 +339,27 @@ mod tests {
         assert_eq!(g.shop.potions(Potion::Health), QA_POTIONS);
         assert!(g.shop.has_skates() && g.shop.armor() == Some(Armor::Diamond));
         assert!(g.can_switch() && g.weapons.has(Weapon::Gun));
+    }
+
+    #[test]
+    fn pressing_items_again_drops_sky_weapons_that_upgrade() {
+        use crate::logic::player::PlayerInput;
+        let mut g = game();
+        apply(&mut g, QaAction::Items);
+        assert!(g.weapons.dropped.is_empty(), "처음에는 그냥 얻는다");
+        assert_eq!(g.weapons.levels().level(Weapon::Gun), 0);
+        apply(&mut g, QaAction::Items);
+        assert_eq!(g.weapons.dropped.len(), 3);
+        for _ in 0..300 {
+            g.update(&PlayerInput::default(), 1.0 / 60.0);
+            if g.weapons.dropped.is_empty() {
+                break;
+            }
+        }
+        for w in [Weapon::Sword, Weapon::Axe, Weapon::Gun] {
+            assert_eq!(g.weapons.levels().level(w), 1, "{w:?}");
+        }
+        assert_eq!(g.take_weapon_events().len(), 3);
     }
 
     #[test]

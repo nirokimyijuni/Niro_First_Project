@@ -644,7 +644,9 @@ pub fn draw_play(
         hud::draw_bars(text, game.combat.health.hp(), game.combat.health.max_hp(), effects.heart_sparkle(), game.combat.level, game.combat.experience, effects.lost_hp());
         hud::draw_effects_and_pockets(text, game, &assets.m6, time_scale, touch_mode);
         hud::draw_coins_and_clock(text, &game.clock, game.wallet.coins());
-        hud::draw_held_weapon(&assets.m6, game.weapons.held());
+        let held = game.weapons.held();
+        hud::draw_held_weapon(text, &assets.m6, held, game.weapons.levels().level(held), effects.upgrade.flash(held));
+        effects.upgrade.draw(text, &assets.m6);
         if ended.is_none() {
             bag::draw_bag_button(text, bag_view, touch_mode);
         }

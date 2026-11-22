@@ -4,8 +4,9 @@
 use super::monster::SeededRandom;
 use super::world::{really_overlaps, World};
 use crate::config::{
-    AXE_ATTACK, AXE_PICKED_TEXT, AXE_RANGE, GUN_ATTACK, GUN_DROP_CHANCE, GUN_PICKED_TEXT, GUN_RANGE, HANDS_ATTACK, PLAYER_ATTACK_RANGE,
-    SWORD_ATTACK, SWORD_PICKED_TEXT, SWORD_RANGE, WEAPON_FALL_SPEED, WEAPON_GROUND_SECONDS, WEAPON_SIZE,
+    AXE_ATTACK, AXE_PICKED_TEXT, AXE_RANGE, GUN_ATTACK, GUN_DROP_CHANCE, GUN_PICKED_TEXT, GUN_RANGE, GUN_RANGE_MAX, GUN_RANGE_PER_UPGRADE,
+    GUN_UPGRADE_DROP_CHANCE, HANDS_ATTACK, PLAYER_ATTACK_RANGE, SWORD_ATTACK, SWORD_PICKED_TEXT, SWORD_RANGE, WEAPON_ATTACK_PER_UPGRADE,
+    WEAPON_FALL_SPEED, WEAPON_GROUND_SECONDS, WEAPON_LEVEL_DISPLAY_CAP, WEAPON_SIZE,
 };
 use macroquad::math::Rect;
 
@@ -22,6 +23,7 @@ impl Weapon {
     /// 바꾸기 순서 (임시-8).
     pub const ORDER: [Weapon; 4] = [Weapon::Hands, Weapon::Sword, Weapon::Axe, Weapon::Gun];
 
+    /// 강화하지 않은 처음 공격력. 강화한 값은 `WeaponLevels::attack`.
     pub fn attack(self) -> u32 {
         match self {
             Weapon::Hands => HANDS_ATTACK,
@@ -31,7 +33,7 @@ impl Weapon {
         }
     }
 
-    /// 앞쪽으로 닿는 거리 (픽셀).
+    /// 강화하지 않은 처음 닿는 거리 (픽셀). 강화한 값은 `WeaponLevels::range`.
     pub fn range(self) -> f32 {
         match self {
             Weapon::Hands => PLAYER_ATTACK_RANGE,
@@ -50,6 +52,78 @@ impl Weapon {
             Weapon::Gun => GUN_PICKED_TEXT,
         }
     }
+}
+
+/// 무기마다 "강화 횟수" (D115, US-127~129). 처음 주운 무기는 0이고 이미 가진 무기를 또 주울 때마다 1씩 는다.
+/// 칼·도끼·총만 강화되고 맨손은 늘 0이다. 한 판 안에서만 기억한다 (새 판은 `default`로 0).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WeaponLevels {
+    sword: u32,
+    axe: u32,
+    gun: u32,
+}
+
+impl WeaponLevels {
+    /// 칼·도끼·총의 횟수를 정해서 만든다 (시험에서 아주 큰 횟수를 볼 때 쓴다).
+    #[allow(dead_code)] // 로건이 화면에 연결하기 전까지 시험에서만 쓴다
+    pub fn with_counts(sword: u32, axe: u32, gun: u32) -> WeaponLevels {
+        WeaponLevels { sword, axe, gun }
+    }
+
+    /// 강화 횟수. 맨손은 0.
+    pub fn level(&self, kind: Weapon) -> u32 {
+        match kind {
+            Weapon::Hands => 0,
+            Weapon::Sword => self.sword,
+            Weapon::Axe => self.axe,
+            Weapon::Gun => self.gun,
+        }
+    }
+
+    /// 강화 횟수를 1 올리고 새 횟수를 돌려준다. 맨손이면 아무 일 없이 None. 아주 커도 넘치지 않는다.
+    pub fn upgrade(&mut self, kind: Weapon) -> Option<u32> {
+        let slot = match kind {
+            Weapon::Hands => return None,
+            Weapon::Sword => &mut self.sword,
+            Weapon::Axe => &mut self.axe,
+            Weapon::Gun => &mut self.gun,
+        };
+        *slot = slot.saturating_add(1);
+        Some(*slot)
+    }
+
+    /// 강화한 공격력: 처음 값 + 횟수 x `WEAPON_ATTACK_PER_UPGRADE`. 맨손은 그대로다. 총도 범위가 멈춘 뒤에 계속 오른다.
+    pub fn attack(&self, kind: Weapon) -> u32 {
+        match kind {
+            Weapon::Hands => kind.attack(),
+            _ => kind.attack().saturating_add(self.level(kind).saturating_mul(WEAPON_ATTACK_PER_UPGRADE)),
+        }
+    }
+
+    /// 강화한 닿는 거리 (픽셀). 총만 늘고 `GUN_RANGE_MAX`에서 멈춘다. 나머지는 그대로다.
+    pub fn range(&self, kind: Weapon) -> f32 {
+        match kind {
+            Weapon::Gun => (GUN_RANGE + GUN_RANGE_PER_UPGRADE * self.gun as f32).min(GUN_RANGE_MAX),
+            _ => kind.range(),
+        }
+    }
+}
+
+/// 화면에 보여 줄 강화 숫자: `WEAPON_LEVEL_DISPLAY_CAP`보다 크면 그 값으로 줄인다.
+pub fn capped_for_display(level: u32) -> u32 {
+    level.min(WEAPON_LEVEL_DISPLAY_CAP)
+}
+
+/// 강화 숫자가 표시 상한을 넘어 "99+"처럼 보여야 하면 true.
+pub fn is_over_display_cap(level: u32) -> bool {
+    level > WEAPON_LEVEL_DISPLAY_CAP
+}
+
+/// 무기를 강화했다는 소식. 화면은 "+n"과 반짝이를 그린다 (`Game::take_weapon_events`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeaponEvent {
+    /// `weapon`을 또 주워서 강화 횟수가 `level`(1 이상)이 되었다. 손의 무기는 그대로다.
+    Upgraded { weapon: Weapon, level: u32 },
 }
 
 /// 떨어지는 중이거나 놓여 있는 무기 하나.
@@ -106,6 +180,9 @@ pub struct Weapons {
     random: SeededRandom,
     /// 이번 판에 땅에서 주운 무기 수. 이미 가진 무기를 또 주워도 1개로 센다 (US-075 아이템 세기).
     pub picked_up_count: u32,
+    levels: WeaponLevels,
+    /// 아직 `take_events`로 내보내지 않은 강화 소식.
+    events: Vec<WeaponEvent>,
 }
 
 impl Weapons {
@@ -113,7 +190,32 @@ impl Weapons {
     pub fn new(seed: u32) -> Weapons {
         // 맵·싸움·미스와 같은 seed를 쓰므로 섞어야 서로 따라가지 않는다.
         let random = SeededRandom::new(seed.wrapping_mul(41).wrapping_add(53));
-        Weapons { dropped: Vec::new(), owned: Vec::new(), held: Weapon::Hands, random, picked_up_count: 0 }
+        Weapons { dropped: Vec::new(), owned: Vec::new(), held: Weapon::Hands,
+            random,
+            picked_up_count: 0,
+            levels: WeaponLevels::default(),
+            events: Vec::new(),
+        }
+    }
+
+    /// 무기마다 강화 횟수.
+    pub fn levels(&self) -> WeaponLevels {
+        self.levels
+    }
+
+    /// 손에 든 무기의 강화한 공격력.
+    pub fn held_attack(&self) -> u32 {
+        self.levels.attack(self.held)
+    }
+
+    /// 손에 든 무기의 강화한 닿는 거리 (벽에 막히기 전).
+    pub fn held_range(&self) -> f32 {
+        self.levels.range(self.held)
+    }
+
+    /// 쌓인 강화 소식을 꺼내 간다.
+    pub fn take_events(&mut self) -> Vec<WeaponEvent> {
+        std::mem::take(&mut self.events)
     }
 
     /// 지금 손에 든 것.
@@ -153,13 +255,16 @@ impl Weapons {
     }
 
     /// 무기 하나가 `center_x`에 떨어진다: 칼이 없으면 칼, 도끼가 없으면 도끼다.
-    /// 둘 다 있으면 총이 없을 때 `GUN_DROP_CHANCE`로 총이고, 아니면 칼·도끼 중 아무거나다.
+    /// 둘 다 있으면 총이 땅에 없을 때 총이 나올 수 있다: 총이 없으면 `GUN_DROP_CHANCE`, 이미 가졌으면
+    /// `GUN_UPGRADE_DROP_CHANCE`(강화 재료)다. 총이 아니면 칼·도끼 중 아무거나다 (이미 가진 무기도 나온다, D115).
     pub fn drop_one(&mut self, center_x: f32, world: &World) {
+        let gun_on_ground = self.dropped.iter().any(|d| d.kind == Weapon::Gun);
+        let gun_chance = if self.owned.contains(&Weapon::Gun) { GUN_UPGRADE_DROP_CHANCE } else { GUN_DROP_CHANCE };
         let kind = if !self.is_around(Weapon::Sword) {
             Weapon::Sword
         } else if !self.is_around(Weapon::Axe) {
             Weapon::Axe
-        } else if !self.is_around(Weapon::Gun) && self.random.next_unit() < GUN_DROP_CHANCE {
+        } else if !gun_on_ground && self.random.next_unit() < gun_chance {
             Weapon::Gun
         } else if self.random.next_unit() < 0.5 {
             Weapon::Sword
@@ -170,13 +275,14 @@ impl Weapons {
     }
 
     /// 떨어뜨리고, 플레이어 몸에 닿은 무기를 줍고, 시간이 다 된 무기를 없앤다. 돌려주는 값: 새로 얻은 무기들.
-    /// 이미 가진 무기는 땅에서 사라지기만 하고 손의 무기도 그대로다 (US-052).
+    /// 이미 가진 무기는 땅에서 사라지고 그 무기가 강화된다 (`WeaponEvent::Upgraded`, `take_events`). 손의 무기는 그대로다 (D115).
     pub fn update(&mut self, dt: f32, player_rect: Rect) -> Vec<Weapon> {
         let mut picked = Vec::new();
         for weapon in &mut self.dropped {
             weapon.update(dt.max(0.0));
         }
         let (owned, held, count) = (&mut self.owned, &mut self.held, &mut self.picked_up_count);
+        let (levels, events) = (&mut self.levels, &mut self.events);
         self.dropped.retain(|weapon| {
             let touched = really_overlaps(weapon.rect, player_rect);
             if touched {
@@ -186,6 +292,10 @@ impl Weapons {
                 owned.push(weapon.kind);
                 *held = weapon.kind;
                 picked.push(weapon.kind);
+            } else if touched {
+                if let Some(level) = levels.upgrade(weapon.kind) {
+                    events.push(WeaponEvent::Upgraded { weapon: weapon.kind, level });
+                }
             }
             !touched && weapon.seconds_left > 0.0
         });

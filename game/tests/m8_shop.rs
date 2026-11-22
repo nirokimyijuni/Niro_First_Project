@@ -355,7 +355,7 @@ fn owned_weapons_are_skipped_by_miss() {
 }
 
 #[test]
-fn owned_gun_never_comes_from_miss() {
+fn owned_gun_comes_from_miss_only_one_at_a_time() {
     let w = World::long_map(SEED);
     for seed in 0..MANY_SEEDS {
         let mut weapons = Weapons::new(seed);
@@ -363,7 +363,8 @@ fn owned_gun_never_comes_from_miss() {
         for _ in 0..20 {
             weapons.drop_one(500.0, &w);
         }
-        assert!(weapons.dropped.iter().all(|d| d.kind != Weapon::Gun), "시드 {seed}");
+        // D115: 가진 총도 강화 재료로 또 나온다. 다만 땅에 총이 있으면 또 안 떨어진다 (한 번에 하나).
+        assert!(weapons.dropped.iter().filter(|d| d.kind == Weapon::Gun).count() <= 1, "시드 {seed}");
     }
 }
 

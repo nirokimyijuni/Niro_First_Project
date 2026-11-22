@@ -18,12 +18,12 @@ use super::practice::{practice_spawn_x, PracticeEvent, PracticeMonster};
 use super::settings::Settings;
 use super::tutorial::{Tutorial, TutorialEvent, TutorialFacts};
 use super::shop::{sell_price, Armor, BuyRow, CantBuy, CantSell, CantUse, Pocket, Potion, SellRow, Shop, ShopEvent, ShopItem, SELLABLE};
-use super::weapon::{Weapon, Weapons};
+use super::weapon::{Weapon, WeaponEvent, Weapons};
 use super::world::{really_overlaps, shortest_dx, World};
 use crate::config::{
     CAVE_AWAY_Y, CAVE_ENTER_BUTTON_TEXT, CAVE_ENTRANCE_X, CAVE_EXIT_BUTTON_TEXT, CAVE_NAME, CAVE_OPEN_AT_NIGHT, CRAFTING_PAUSES_GAME,
     DAYS_TO_CLEAR, MATH_ITEMS_PER_QUESTION, MINE_BUTTON_TEXT, MINE_REACH, PLAYER_HEIGHT, PLAYER_SPAWN_X,
-    PLAYER_WIDTH, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT, HEALTH_POTION_HEAL,
+    PLAYER_WIDTH, GUN_REACH_MAX_FROM_FRONT, SCORE_PER_COIN, SCORE_PER_LEVEL_UP, SCORE_PER_MONSTER, WORKBENCH_BUTTON_TEXT, HEALTH_POTION_HEAL,
     HOUSE_DOOR_BUTTON_TEXT, PLAYER_WALK_SPEED, SHOP_PAUSES_GAME, CAR_SPEED_MULTIPLIER, DIAMOND_PICKAXE_SLAM_DIAMONDS,
     DIAMOND_PICKAXE_SLAM_DIAMONDS_TEXT, DIAMOND_PICKAXE_SLAM_SCORE, ENDER_FRUIT_SLAM_DIAMONDS, ENDER_FRUIT_SLAM_DIAMONDS_TEXT,
     ENDER_FRUIT_SLAM_SCORE, SLAM_BEACH_LEFT, SLAM_BEACH_RIGHT, SYRINGE_GUN_SCORE, MISSION_FAIL_HP_LOSS, MISSION_REWARD_COINS,
@@ -475,9 +475,8 @@ impl Game {
         }
         let player_rect = self.body_on_map();
         if input.attack_pressed {
-            let held = self.weapons.held();
             let reach = self.attack_reach();
-            let hits = self.combat.attack_with(player_rect, self.player.facing, held.attack(), reach);
+            let hits = self.combat.attack_with(player_rect, self.player.facing, self.weapons.held_attack(), reach);
             let hit_practice = self.hit_practice_monster(player_rect, reach);
             // 닿는 몬스터가 있으면 몬스터만 맞고 상자는 그대로다 (임시-64).
             let hit_a_monster = hit_practice || hits.iter().any(|hit| {
@@ -549,9 +548,11 @@ impl Game {
     pub fn attack_reach(&self) -> f32 {
         let held = self.weapons.held();
         if held == Weapon::Gun {
-            self.here().clear_reach(self.player.rect(), self.player.facing, held.range())
+            // 총 범위 상한(480)은 몸 가운데에서 잰 화면 끝이라, 몸 앞 끝에서는 몸 폭의 절반만큼 짧다 (US-129).
+            let reach = self.weapons.held_range().min(GUN_REACH_MAX_FROM_FRONT);
+            self.here().clear_reach(self.player.rect(), self.player.facing, reach)
         } else {
-            held.range()
+            self.weapons.held_range()
         }
     }
 
@@ -710,6 +711,11 @@ impl Game {
         }
         let at = self.player.rect().center();
         self.item_events.push(ItemEvent::Slammed { power, at, monsters, diamonds: power.diamonds() });
+    }
+
+    /// 쌓인 무기 강화 소식을 꺼내 간다 (`WeaponEvent::Upgraded`, D115). 화면이 "+n"과 반짝이를 그린다.
+    pub fn take_weapon_events(&mut self) -> Vec<WeaponEvent> {
+        self.weapons.take_events()
     }
 
     /// 지난번 뒤로 생긴 자동차·주사기총·엔더열매·쿵 일을 모두 받는다. 화면이 `update` 뒤에 부른다.

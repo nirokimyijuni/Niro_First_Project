@@ -228,7 +228,7 @@ fn weapons_in_drop_order(seed: u32, drops: usize, w: &World) -> Vec<Weapon> {
 }
 
 #[test]
-fn drops_follow_the_seed_and_sword_axe_come_first_and_gun_only_once() {
+fn drops_follow_the_seed_and_sword_axe_come_first_then_gun_may_come() {
     let w = World::long_map(1);
     let mut any_gun = false;
     for seed in 0..100 {
@@ -236,13 +236,12 @@ fn drops_follow_the_seed_and_sword_axe_come_first_and_gun_only_once() {
         assert_eq!(order, weapons_in_drop_order(seed, 12, &w), "시드가 같으면 같다");
         assert_eq!(order[..2], [Weapon::Sword, Weapon::Axe], "seed {seed}: 칼 다음 도끼");
         any_gun |= order.contains(&Weapon::Gun);
-        let mut owned = Vec::new();
+        // 총은 칼·도끼 뒤에만 처음 나온다. 가진 뒤에 또 나오는 것은 강화 재료다 (D115, US-128).
         for kind in &order {
             assert_ne!(*kind, Weapon::Hands);
-            if *kind == Weapon::Gun {
-                assert!(!owned.contains(&Weapon::Gun), "seed {seed}: 총을 가졌는데 또 나옴 {order:?}");
-            }
-            owned.push(*kind);
+        }
+        if let Some(first_gun) = order.iter().position(|k| *k == Weapon::Gun) {
+            assert!(first_gun >= 2, "seed {seed}: 칼·도끼보다 총이 먼저 나옴 {order:?}");
         }
     }
     assert!(any_gun, "칼·도끼 뒤에는 총도 나온다");
@@ -277,7 +276,9 @@ fn gun_drops_about_10_percent_only_after_sword_and_axe() {
     for owned in [&[][..], &[Weapon::Sword], &[Weapon::Axe]] {
         assert_eq!(gun_share_with(owned, &w), 0.0, "{owned:?}: 칼·도끼가 먼저다");
     }
-    assert_eq!(gun_share_with(&[Weapon::Sword, Weapon::Axe, Weapon::Gun], &w), 0.0, "이미 있으면 안 나온다");
+    // D115: 이미 가졌어도 강화 재료로 또 나온다 (세 가지 중 하나쯤, `GUN_UPGRADE_DROP_CHANCE`).
+    let again = gun_share_with(&[Weapon::Sword, Weapon::Axe, Weapon::Gun], &w);
+    assert!((0.30..0.37).contains(&again), "총을 가진 뒤 {again}");
 }
 
 #[test]

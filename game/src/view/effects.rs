@@ -21,7 +21,7 @@ use crate::logic::game::{ItemEvent, SlamPower};
 use crate::logic::combat::{attack_box, attack_box_with_range, CombatEvent};
 use crate::logic::player::Facing;
 use crate::logic::practice::PracticeEvent;
-use crate::logic::weapon::Weapon;
+use crate::logic::weapon::{Weapon, WeaponEvent};
 use macroquad::prelude::*;
 use std::f32::consts::TAU;
 
@@ -186,6 +186,8 @@ pub struct Effects {
     pub mission: MissionView,
     /// 방금 준 체력과 지난 시간: 체력 막대 끝 옅은 칸이 줄어든다 (D103)
     hurt: Option<(u32, f32)>,
+    /// 무기 강화: "+n" 글자·별·칸 반짝임 (US-130, `view::upgrade`)
+    pub upgrade: super::upgrade::UpgradeView,
 }
 
 impl Effects {
@@ -308,6 +310,7 @@ impl Effects {
         self.pops.update(dt);
         self.boxes.update(dt);
         self.mission.update(dt);
+        self.upgrade.update(dt);
         self.hurt = self.hurt.map(|(amount, age)| (amount, age + dt)).filter(|(_, age)| *age < HURT_SHRINK_SECONDS);
         for burst in &mut self.bursts {
             burst.age += dt;
@@ -361,6 +364,16 @@ impl Effects {
         }
     }
 
+    /// 무기 강화 소식 (US-130): "+n"·별·칸 반짝임과 큰 알림 글. 소식 하나에 한 번이다.
+    pub fn on_weapon_event(&mut self, event: WeaponEvent) {
+        match event {
+            WeaponEvent::Upgraded { weapon, level } => {
+                self.upgrade.on_upgraded(weapon, level);
+                self.show_message(super::upgrade::upgrade_message(weapon, level));
+            }
+        }
+    }
+
     /// 지금 화면 흔들림 (쿵 뒤 잠깐). 맵 그림에만 쓴다.
     pub fn shake(&self) -> Vec2 {
         self.slam.as_ref().map_or(Vec2::ZERO, |(_, age)| items::shake_offset(*age))
@@ -404,7 +417,7 @@ impl Effects {
         if let Some(age) = self.swing_age {
             let t = age / SWING_SECONDS;
             match self.swing_weapon.unwrap_or(Weapon::Hands) {
-                Weapon::Gun => draw_gun_light(player, facing, t, attack_reach),
+                Weapon::Gun => draw_gun_light(player, facing, t, attack_reach, camera_left),
                 weapon => draw_swing(player, facing, t, weapon, art),
             }
         }
@@ -646,8 +659,14 @@ fn gun_light_ends(player: Rect, facing: Facing, attack_reach: f32) -> (f32, f32)
     }
 }
 
-fn draw_gun_light(player: Rect, facing: Facing, t: f32, attack_reach: f32) {
+/// 강화한 총 빛줄기가 화면 끝(카메라 왼쪽 끝 ~ +화면 폭)을 넘지 않게 자른다 (US-129·130).
+fn clip_to_screen(from: f32, to: f32, camera_left: f32) -> (f32, f32) {
+    (from.clamp(camera_left, camera_left + VIRTUAL_WIDTH), to.clamp(camera_left, camera_left + VIRTUAL_WIDTH))
+}
+
+fn draw_gun_light(player: Rect, facing: Facing, t: f32, attack_reach: f32, camera_left: f32) {
     let (from, to) = gun_light_ends(player, facing, attack_reach);
+    let (from, to) = clip_to_screen(from, to, camera_left);
     let y = player.center().y;
     let tip = lerp(from, to, (t * 2.0).min(1.0));
     let fade = 1.0 - t;
@@ -855,6 +874,29 @@ mod tests {
         assert!(e.level_up_age.is_some());
         e.update(LEVEL_UP_SECONDS);
         assert!(e.level_up_age.is_none());
+    }
+
+    #[test]
+    fn upgraded_gun_light_stays_on_screen() {
+        // 주인공이 화면 가운데(480)에 있고 몸 폭 48, 앞쪽 480까지 닿는 가장 긴 빛줄기
+        let body = Rect::new(456.0, 400.0, 48.0, 64.0);
+        let (from, to) = gun_light_ends(body, Facing::Right, crate::config::GUN_REACH_MAX_FROM_FRONT);
+        assert!(to <= VIRTUAL_WIDTH, "몸 앞 끝 기준 456이면 화면 끝에서 멈춘다");
+        assert_eq!(clip_to_screen(from, to, 0.0), (504.0, VIRTUAL_WIDTH));
+        let (from, to) = gun_light_ends(body, Facing::Left, crate::config::GUN_REACH_MAX_FROM_FRONT);
+        assert_eq!(clip_to_screen(from, to, 0.0), (456.0, 0.0));
+        // 카메라가 맵에서 움직여 왼쪽 끝이 1000일 때도 같다
+        assert_eq!(clip_to_screen(1504.0, 1984.0, 1000.0), (1504.0, 1960.0));
+    }
+
+    #[test]
+    fn weapon_upgrade_shows_big_text_once() {
+        let mut e = Effects::new();
+        e.on_weapon_event(WeaponEvent::Upgraded { weapon: Weapon::Gun, level: 1 });
+        assert_eq!(e.message(), Some("총이 더 멀리 더 세게! Lv2"));
+        assert_eq!(e.upgrade.floating(), 1, "+n은 한 번만");
+        e.update(crate::config::WEAPON_UPGRADE_SECONDS + 0.1);
+        assert_eq!(e.upgrade.floating(), 0);
     }
 
     #[test]

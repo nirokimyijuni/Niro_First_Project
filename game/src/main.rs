@@ -18,7 +18,7 @@ use logic::window_tips::{TipWindow, WindowTips};
 use macroquad::prelude::*;
 use logic::gathering::Material;
 use logic::sound::{
-    bonus_sfx_for_gather_event, choose_track, sfx_for_box_event, sfx_for_game_event, sfx_for_gather_event, sfx_for_item_event, sfx_for_math_result, sfx_for_mission_event, sfx_for_practice_event,
+    bonus_sfx_for_gather_event, choose_track, sfx_for_box_event, sfx_for_game_event, sfx_for_gather_event, sfx_for_item_event, sfx_for_math_result, sfx_for_mission_event, sfx_for_practice_event, sfx_for_weapon_event,
     sfx_for_shop_event, sfx_for_swing, sfx_for_tutorial_event, MiningSound, MusicChange, MusicPlan, MusicScene, MusicSituation, Sfx, SfxMixer, SoundSettings,
 };
 use view::assets::Assets;
@@ -670,6 +670,11 @@ async fn main() {
                             mixer.request_opt(sfx_for_item_event(&event));
                             effects.on_item_event(event);
                         }
+                        // 무기 강화 (US-130): +n 글자·별·반짝이·큰 알림 글·소리. 주운 문구보다 나중에 받아서 강화 글이 보인다
+                        for event in game.take_weapon_events() {
+                            mixer.request_opt(sfx_for_weapon_event(&event));
+                            effects.on_weapon_event(event);
+                        }
                         // 연습용 몬스터 (US-124): 나타남·맞음·쓰러짐·사라짐 효과. 소리는 소리 스토리(US-112~)가 오면 여기서 낸다
                         for event in game.take_practice_events() {
                             mixer.request_opt(sfx_for_practice_event(&event));
@@ -793,7 +798,7 @@ async fn main() {
                     draw_pause(&text, touch_mode, *pause_pick, (pause_buddy_texture(&assets, *pause_buddy), get_time() as f32), (sound.is_on(), sound.music_percent(), sound.effects_percent()));
                 } else if ended.is_none() && bag.open {
                     let show_recipe = game.world.workbench().is_some();
-                    draw_bag_window(&text, game, &assets.m6, bag, touch_mode, show_recipe);
+                    draw_bag_window(&text, game, &assets.m6, bag, &effects.upgrade, touch_mode, show_recipe);
                 } else if touch_mode && ended.is_none() && !qa.open && !help.is_open() {
                     let label = mine_button_label(game);
                     let buttons = play_buttons_with_mine(game.can_switch(), label.is_some());

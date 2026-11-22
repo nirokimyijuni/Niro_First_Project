@@ -320,6 +320,38 @@ pub const SWORD_RANGE: f32 = PLAYER_ATTACK_RANGE;
 pub const AXE_RANGE: f32 = PLAYER_ATTACK_RANGE;
 /// 임시-8 총이 닿는 거리 (픽셀)
 pub const GUN_RANGE: f32 = 300.0;
+/// US-127~129 (D115) 무기 강화: 이미 가진 칼·도끼·총을 또 주울 때마다 공격력이 이만큼 는다. 맨손은 강화가 없다.
+pub const WEAPON_ATTACK_PER_UPGRADE: u32 = 1;
+/// US-128 총을 또 주울 때마다 닿는 거리가 이만큼(픽셀) 는다.
+pub const GUN_RANGE_PER_UPGRADE: f32 = 36.0;
+/// US-129 총이 닿는 거리의 끝 (픽셀). 주인공 앞쪽 화면 끝이다. 300에서 5번 강화하면 닿는다. 공격력은 이 뒤로도 계속 는다.
+pub const GUN_RANGE_MAX: f32 = SCREEN_WIDTH / 2.0;
+/// US-129 빛줄기가 몸 앞 끝에서 가장 멀리 닿는 거리. `GUN_RANGE_MAX`는 몸 가운데에서 화면 끝까지라서 몸 폭의 절반을 뺀다.
+pub const GUN_REACH_MAX_FROM_FRONT: f32 = GUN_RANGE_MAX - PLAYER_WIDTH / 2.0;
+/// US-127 화면에 보이는 강화 숫자의 끝. 이보다 크면 "99+"처럼 보인다 (칼·도끼는 강화에 끝이 없다, 임시-142).
+pub const WEAPON_LEVEL_DISPLAY_CAP: u32 = 99;
+/// US-130 화면에 보이는 공격력 숫자의 끝 (칸 폭). 이보다 크면 "999+"처럼 보인다. 강화 횟수가 커져도 글자가 칸을 넘지 않게.
+pub const WEAPON_ATTACK_DISPLAY_CAP: u32 = 999;
+/// US-130 무기를 강화하면 보이는 큰 알림 글 (임시 문구, 아이가 나중에 정한다). 무섭지 않게.
+pub const SWORD_UPGRADED_TEXT: &str = "칼이 더 세졌어요!";
+pub const AXE_UPGRADED_TEXT: &str = "도끼가 더 세졌어요!";
+pub const GUN_UPGRADED_TEXT: &str = "총이 더 멀리 더 세게!";
+/// US-130 가방 무기 줄 오른쪽 안내와 총 범위 글 (총 범위 줄: "총 범위 408", 끝에 닿으면 "총 범위 480 (최대)")
+pub const WEAPON_NUMBERS_HELP_TEXT: &str = "Lv는 레벨, 숫자는 공격력";
+pub const GUN_RANGE_LABEL_TEXT: &str = "사거리";
+pub const GUN_RANGE_MAX_TEXT: &str = "최대";
+/// US-130 강화 효과 ("+n" 글자가 올라가며 사라지고 별이 퍼진다) 보이는 실제 초, 올라가는 높이(픽셀), 별 수
+pub const WEAPON_UPGRADE_SECONDS: f32 = 1.4;
+pub const WEAPON_UPGRADE_RISE: f32 = 64.0;
+pub const WEAPON_UPGRADE_STARS: usize = 6;
+/// US-130 한꺼번에 떠 있을 수 있는 "+n" 수 (빨리 여러 번 주울 때 쌓이지 않게)
+pub const WEAPON_UPGRADE_MAX_FLOATS: usize = 3;
+/// US-130 강화한 무기 칸(가방·손에 든 칸)이 반짝이는 실제 초 (가방 반짝이와 같다, 임시-77)
+pub const WEAPON_UPGRADE_FLASH_SECONDS: f32 = BAG_FLASH_SECONDS;
+/// US-130 "+n"과 별과 반짝이 색 (노랑, RGB 0~1). 아이가 "무지개"를 고르면 여기서 바꾼다
+pub const WEAPON_UPGRADE_COLOR: [f32; 3] = [1.0, 0.86, 0.22];
+/// D115 총을 이미 가졌을 때 미스에게서 또 총이 나올 확률 (강화 재료). 칼·도끼가 나머지를 반반 나눈다.
+pub const GUN_UPGRADE_DROP_CHANCE: f32 = 1.0 / 3.0;
 /// US-052 무기 줍는 문구
 pub const SWORD_PICKED_TEXT: &str = "칼을 주웠어요!";
 pub const AXE_PICKED_TEXT: &str = "도끼를 주웠어요!";
@@ -920,14 +952,14 @@ pub const TUTORIAL_FIND_MISS_SECONDS: f32 = 6.0;
 /// 순서: ① 이동 ② 공격 ③ 캐기 ④ 점프 ⑤ 미스 찾기. PC(키보드)와 폰(터치)은 따로 둔다 (D16).
 pub const TUTORIAL_TEXT_PC: [&str; 5] = [
     "왼쪽, 오른쪽 화살표로 걸어 봐요~",
-    "Q 키로 친구를 톡톡 쳐 봐요~",
+    "Q 키로 몬스터를 톡톡 쳐 봐요~",
     "나무나 돌 옆에서 E 키를 꾹 눌러 봐요~",
     "스페이스 키로 폴짝 뛰어 봐요~",
     "하얀 미스를 찾아 봐요~ 어디 있을까요?",
 ];
 pub const TUTORIAL_TEXT_TOUCH: [&str; 5] = [
     "왼쪽 동그라미를 밀어서 걸어 봐요~",
-    "공격 버튼을 눌러 친구를 쳐 봐요~",
+    "공격 버튼을 눌러 몬스터를 쳐 봐요~",
     "나무나 돌 옆에서 캐기 버튼을 꾹 눌러 봐요~",
     // 폰에는 점프 버튼이 없다: 왼쪽 동그라미를 위로 밀면 뛴다 (US-063)
     "왼쪽 동그라미를 위로 밀어서 폴짝 뛰어 봐요~",

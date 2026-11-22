@@ -20,7 +20,7 @@ use super::settings::Settings;
 use super::shop::{CantBuy, ShopEvent};
 use super::skeleton::ProjectileKind;
 use super::tutorial::TutorialEvent;
-use super::weapon::Weapon;
+use super::weapon::{Weapon, WeaponEvent};
 use crate::config::*;
 
 // ---------------------------------------------------------------- 소리 설정
@@ -380,6 +380,13 @@ pub fn sfx_for_item_event(event: &ItemEvent) -> Option<Sfx> {
         ItemEvent::SyringeGunFired { .. } => Some(Sfx::ToyGun),
         ItemEvent::Slammed { .. } => Some(Sfx::HeavyThud),
         ItemEvent::CarOff | ItemEvent::EnderFruitEaten { .. } | ItemEvent::EnderFruitAlreadyEaten => None,
+    }
+}
+
+/// 무기를 강화하면 레벨업처럼 짧고 밝은 소리 (새 파일 없이 `Sfx::LevelUp`을 다시 쓴다).
+pub fn sfx_for_weapon_event(event: &WeaponEvent) -> Option<Sfx> {
+    match event {
+        WeaponEvent::Upgraded { .. } => Some(Sfx::LevelUp),
     }
 }
 
