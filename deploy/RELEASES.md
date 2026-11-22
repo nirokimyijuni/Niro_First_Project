@@ -4,7 +4,7 @@
 
 ## 되돌리기 (문제가 생겼을 때)
 
-- **직전 좋은 버전 커밋: `316e290`** (다음 배포 때마다 이 번호를 새로 고쳐 쓴다)
+- **직전 좋은 버전 커밋: `316e290`** (2026-11-22 배포 9d99490 직전 버전. 9d99490이 성공해서 **다음 배포 때 이 번호를 `9d99490`으로 고쳐 쓴다**)
 - 순서:
   1. `git revert <나쁜 커밋>` (새 커밋이 하나 생긴다. 강제 push는 하지 않는다)
   2. `git push` (main에 올라가면 자동으로 다시 배포된다)
@@ -37,6 +37,7 @@
 | AWS에도 올렸어요 | 2026-11-21 | 게임이 이제 두 곳에 올라가요. 지금 주소는 그대로이고, AWS 주소에서도 같은 게임이 열려요. 게임 안은 바뀐 게 없어요. (AWS 주소 공유는 부모님이 정해요) | https://d28f2c2r7ho7iz.cloudfront.net/ (그리고 https://nirokimyijuni.github.io/Niro_First_Project/) |
 | 로고와 새 주소 | 2026-11-21 | 게임을 열면 니로 스튜디오 로고가 나와요! "눌러서 시작"을 누르면 로고가 뿅 하고 나온 뒤 타이틀이 열려요. 폰에서는 누르면 전체화면과 가로로 바뀌어요. 밤이 갈수록 몬스터가 조금씩 더 나와요(1일째는 그대로). 돌아다니는 시민이 상자에 끼지 않아요. 밤에 산 스케이트는 두 번째 아침까지 신고 있어요. 구글에서 찾을 수 있게 소개 글과 홈 화면 아이콘이 생겼어요. 새 주소는 findmis.niro-studio.com이에요. | https://findmis.niro-studio.com/ (그리고 https://nirokimyijuni.github.io/Niro_First_Project/ , https://d28f2c2r7ho7iz.cloudfront.net/) |
 | 소리가 나요 | 2026-11-21 | 게임에 소리가 생겼어요! 타이틀, 낮, 밤(동굴 오르골), 상점 음악 4곡과 효과음 39개가 나와요. M 키나 스피커 버튼으로 켜고 끌 수 있고, 멈춤 창에도 소리 칸이 있어요. 소리는 "눌러서 시작"을 누른 뒤 뒤에서 받아서 로딩이 길어지지 않아요. 아이폰 홈 화면 앱 아래 하늘색 띠도 고쳤어요(폰에서 확인 필요). | https://findmis.niro-studio.com/ (그리고 https://nirokimyijuni.github.io/Niro_First_Project/) |
+| 소리가 더 좋아졌어요 | 2026-11-22 | 퀴즈를 맞히면 새 소리가 나고, 레벨업 소리도 새로 바뀌었어요! 밤에 몬스터 소리가 많아도 나무 캐는 소리가 꼭 들려요. 게임을 못 불러오면 "불러오지 못했어요" 글과 다시 하기 버튼이 나와요. | https://nirokimyijuni.github.io/Niro_First_Project/ , https://findmis.niro-studio.com/ |
 
 ## 부모 결정 기록
 
@@ -93,6 +94,18 @@
 - 새 의존성 메모: Cargo.toml에 wasm 전용 `quad-snd`(macroquad 계열 소리 라이브러리)가 들어가고 Cargo.lock에 크레이트 11개가 늘었다. `game/build.rs`가 wasm 빌드에 링커 옵션 `--allow-undefined`를 붙인다(소리 함수를 자바스크립트가 채우는 방식). wasm 크기 991KB 안팎, 소리 파일 합계 약 3.67MB
 - 근거: qa/reviews/REVIEW-032-소리-시스템.md, qa/bugs/BUG-041, BUG-042 (둘 다 고침)
 
+## 배포 뒤 직접 확인 (2026-11-22 소리 세 가지와 로딩 실패 안내, 엘리가 못 본 것)
+
+> 부모 승인("엘리 끝나면 바로 배포해" 2026-11-22)으로 배포한다. 엘리는 "출시해도 좋아요"로 통과시켰고(qa/gates.md 2026-11-22-1), 아래는 사람 귀와 진짜 폰이 필요해서 못 봤다. 부모님이 직접 확인한다.
+
+- 귀로 듣기: 퀴즈 정답 새 소리(quiz_correct.wav), 레벨업 새 팡파르, 밤에 몬스터 소리가 몰려도 캐는 소리가 들리는지
+- 진짜 폰·절전 복귀: 폰에서 소리 풀기, 잠금 화면에서 돌아왔을 때 소리와 게임이 정상인지
+- 전투를 브라우저에서 직접 쳐 보기: 전투·시계 반복문 횟수 제한 고침은 cargo test(변이 시험 포함)로만 봄
+- 정확한 18:00·06:00 낮밤 전환을 초 단위로: cargo test로만 봄
+- 로딩 실패 안내는 엘리가 흉내(wasm 404·글꼴 없음)로만 봤고, 진짜 느린 폰 회선에서 30초 안내가 뜨는지는 못 봄
+- 폭죽 그림 9개는 art에 저장만 했고 게임에는 아직 넣지 않았다
+- 근거: qa/reviews/REVIEW-033-전체-다시-보기.md (꼭 고칠 것: 로딩 멈춤 → 고침)
+
 ## 배포 시도 기록
 
 > 2026-11-07부터 성공, 실패, 취소를 모두 적는다. 지난 릴리스는 소급하지 않는다.
@@ -127,3 +140,4 @@
 | 2026-11-21 | 튜토리얼 마무리: 창 처음 열 때 한 줄 안내 US-121, 물음표 도움말 US-122, BUG-040 고침, 소리 파일 준비 (d72687f) | 계획 | 성공 (run 44895270542: build, deploy, deploy-aws, record 모두 success. 라이브 GAME_VERSION d72687f-20261121103955가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음, miss-game.wasm 200 application/wasm 962,515바이트(두 곳 같음). 소리 파일도 올라감: assets/sounds/music/day_overworld.ogg 200 audio/ogg 837,583바이트, assets/sounds/sfx/correct.wav 200 audio/wav 43,872바이트(두 곳). deploy/build.sh가 game/assets를 통째로 복사해서 소리 약 3.66MB가 같이 올라갔고 dist 전체 8.2MB, wasm 크기 검사(5MB)는 소리와 상관없어 막히지 않음. 게임이 아직 소리를 부르지 않아 로딩에는 영향 없음) | **부모 승인 예외** (사전 승인 "엘리 끝나면 바로 배포해" 2026-11-21). 엘리는 "새 버그 0, 열린 S1·S2 0, 규칙·변이 시험 통과, 화면은 일부만 봄"이라고 했고 "출시해도 좋아요"까지는 주지 않음. 포함: US-121·122, BUG-040 고침(눈으로 못 봐 S4 열림 유지), 소리 파일(CC0). 큰 변경 아님이라 밥 리뷰 없이 엘리 시험만(간소화 규칙 2026-11-08). cargo test 통과, wasm 빌드 통과(로컬 wasm 960,185바이트). **예외: 못 본 것**은 위 "배포 뒤 직접 확인 (2026-11-21 튜토리얼 마무리)"에 적음 → 부모님 폰에서 확인. 케빈은 공개 주소에서 파일·버전·wasm·소리 파일까지만 확인 | 대기 | 엘리가 화면을 일부만 본 것 |
 | 2026-11-21 | 소리 시스템 US-112~117 (f880c4d) | 계획 | 성공 (run 44902928825: build, deploy, deploy-aws, record 모두 success. 새 의존성 quad-snd와 build.rs --allow-undefined가 들어간 첫 CI(ubuntu) wasm 빌드도 통과. 라이브 GAME_VERSION f880c4d-20261121121631가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음, miss-game.wasm 200 application/wasm 994,753바이트(두 곳 같음), index.html에 standaloneFillHeight·__soundContexts 들어 있음(두 곳). 소리 파일: day_overworld.ogg 200 audio/ogg 837,583바이트(두 곳), correct.wav 200 43,872바이트인데 Content-Type이 GitHub Pages는 audio/wav, AWS(findmis)는 audio/x-wav. deploy.yml S3 업로드 규칙이 wav 종류를 못 박지 않아 S3가 추측한 값이다. 소리 풀기는 확장자 아닌 내용으로 하는 방식이라 영향은 없을 것으로 보이나 진짜 폰에서 확인 필요) | **부모 승인** ("엘리 끝나면 3개 고치고 배포해" 2026-11-21). 밥 REVIEW-032 커밋해도 좋아요, 엘리 재확인 "출시해도 좋아요", 열린 S1·S2 0개, cargo test 통과, wasm 빌드 통과(992,825바이트, CI 994,753), 소리 파일 합계 약 3.67MB. 못 본 것은 위 "배포 뒤 직접 확인 (2026-11-21 소리 시스템)" 참고 | 대기 | — |
 | 2026-11-21 | 스피커 버튼 삭제, 타이틀 곡 Children's March, 코인 소리 새로 만들기 (316e290) | 계획 | 성공 (run 44906339919: build 2m12s, deploy 10s, deploy-aws 48s, record 4s 모두 success, 1차 실행, 총 3m27s. 라이브 GAME_VERSION 316e290-20261121125819가 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음(2026-11-22 케빈 점검), miss-game.wasm 200 application/wasm 993,994바이트(두 곳 같음, 전송은 gzip), title_children_march.ogg 200 audio/ogg 704,434바이트(두 곳), coin_pickup.wav 200 17,718바이트(두 곳, 새 코인 소리), 옛 title_classical_pop.ogg는 Pages 404·AWS 403(없음). wav Content-Type은 Pages audio/wav, AWS audio/x-wav(앞 소리 시스템 행의 메모와 같음)) | 승인 (부모 "엘리 끝나면 바로 배포해" 2026-11-21, qa/gates.md 2026-11-21-9). 큰 변경 아님이라 밥 리뷰 없이 엘리 시험만(간소화 규칙 2026-11-08). 열린 S1·S2 0개, cargo test 통과, wasm 빌드 통과(로컬 992KB). **예외: 귀로 듣기를 못 함**(타이틀 곡이 어울리는지, 코인이 마리오 느낌인지, 곡 이음새), 진짜 아이폰·안드로이드, PC 큰 화면 → 부모님이 직접 듣고 확인. 이 행은 세션이 멈춰 2026-11-22에 케빈이 run 결과와 공개 주소를 다시 확인해 채움 | 대기 | 귀로 듣기를 못 한 것 |
+| 2026-11-22 | 퀴즈 정답·레벨업 새 소리, 캐는 소리 우선, 로딩 실패 안내와 다시 하기, 전투·시계 반복문 횟수 제한, 폭죽 그림 저장 (9d99490) | 계획 | 성공 (run 44969835337: build 1m24s, deploy 12s, deploy-aws 41s(실행됨, 건너뛰지 않음, deploy.yml은 안 바꿨고 AWS 역할 값은 Variables로 동작), record 3s 모두 success, 1차 실행. 라이브 GAME_VERSION 9d99490-20261122010728이 GitHub Pages, https://findmis.niro-studio.com/ 모두 같음, miss-game.wasm 200 application/wasm 994,199바이트(두 곳 같음), index.html에 LOADING_SLOW_MS 들어 있음(두 곳), quiz_correct.wav 200 30,952바이트(두 곳), level_up_fanfare.wav 200 68,878바이트(두 곳, CloudFront 옛 49,410바이트는 안 나옴, 캐시 문제 없음)) | **부모 승인** ("엘리 끝나면 바로 배포해" 2026-11-22, qa/gates.md 2026-11-22-1). 엘리 "출시해도 좋아요", 밥 REVIEW-033 "커밋해도 좋아요". 열린 S1·S2 0개(열린 것은 S3·S4), cargo test 6018개 통과, wasm 빌드 통과(로컬 992,271바이트), 소리 합계 약 4.1MB(5MB 이하). 커밋 전 검사: 12자리 숫자·arn:aws·아이 실명 새로 들어감 없음. 못 본 것은 위 "배포 뒤 직접 확인 (2026-11-22 ...)" 참고. 이번 커밋에서 stories/는 니로(에이전트)가 쓰는 중이라 뺐다 | 대기 | 귀로 듣기, 진짜 폰·절전 복귀, 전투 직접, 전환 시각 초 단위 |
