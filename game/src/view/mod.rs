@@ -23,6 +23,7 @@ pub mod qa;
 pub mod screen;
 pub mod screens;
 pub mod shop;
+pub mod skates;
 pub mod sky;
 pub mod sprites;
 pub mod text;

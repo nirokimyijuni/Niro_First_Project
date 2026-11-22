@@ -199,7 +199,7 @@ pub fn draw_potion(potion: Potion, c: Vec2, size: f32) {
 
 /// 스케이트: 하늘색 신발 + 바퀴 두 개.
 pub fn draw_skates(c: Vec2, size: f32) {
-    let boot = Color::new(0.45, 0.75, 1.0, 1.0);
+    let boot = super::skates::skates_color();
     let line = Color::new(0.20, 0.25, 0.45, 1.0);
     draw_rectangle(c.x - size * 0.28, c.y - size * 0.4, size * 0.26, size * 0.5, boot);
     draw_rectangle(c.x - size * 0.28, c.y - size * 0.02, size * 0.62, size * 0.2, boot);

@@ -21,6 +21,7 @@ use super::touch;
 use super::tutorial;
 use super::items;
 use super::shop;
+use super::skates;
 use crate::config::{
     CITIZEN_HELP_TEXT, DEV_FAST_FORWARD_SCALE, PRACTICE_MARK_BOB, PRACTICE_MARK_ABOVE, PRACTICE_MARK_COLOR, PRACTICE_MARK_RADIUS, PRACTICE_MARK_TURN_SPEED, PRACTICE_MONSTER_HEIGHT,
     PRACTICE_MONSTER_STOP_DISTANCE, PRACTICE_TINT, ZOMBIE_HEIGHT,
@@ -571,6 +572,12 @@ pub fn draw_play(
         let motion = if ended.is_some() || bag.riding_car { Motion::Idle } else { player.motion };
         let pose = sprites::pose(motion, time(), player.vel.y < 0.0);
         draw_character(texture, body_feet, height, player.facing, pose, player_tint);
+        // 스케이트 (US-134): 신었을 때만 발에 스케이트 색. 밤 빛과 깜박임은 캐릭터를 따라간다
+        if skates::skates_shown(game.shop.has_skates(), ended.is_some()) {
+            let aspect = texture.width() / texture.height();
+            let shape = skates::skate_shape(player.kind, body_feet, height, aspect, player.facing, pose);
+            skates::draw_skate_shape(&shape, Color { a: player_tint.a, ..tint });
+        }
         if !effects.swinging_blade() {
             draw_held_weapon(assets, game.weapons.held(), body_feet, player.facing, player_tint);
         }

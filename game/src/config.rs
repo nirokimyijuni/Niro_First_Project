@@ -1284,3 +1284,21 @@ pub const RECENT_TABLE_RECT: (f32, f32, f32, f32) = (684.0, 352.0, 266.0, 188.0)
 pub const RECENT_TABLE_LINE_HEIGHT: f32 = 29.0;
 pub const RECENT_TABLE_FONT: f32 = 27.0;
 pub const RECENT_TABLE_PADDING: f32 = 10.0;
+
+// ---- US-134 스케이트를 신으면 발에 스케이트 색이 보인다 (임시-163: 색은 아이가 고른다) ----
+/// 스케이트 색 (빨강, 초록, 파랑, 투명도 0~1). 기본은 밝은 파랑 (상점 그림의 신발색과 같다). 아이가 고르면 이 한 줄만 바꾼다.
+pub const SKATES_COLOR: [f32; 4] = [0.45, 0.75, 1.0, 1.0];
+/// 바퀴 색, 테두리 색 (상점 그림과 같다)
+pub const SKATES_WHEEL_COLOR: [f32; 4] = [1.0, 0.85, 0.25, 1.0];
+pub const SKATES_OUTLINE_COLOR: [f32; 4] = [0.20, 0.25, 0.45, 1.0];
+/// 발 한 쌍의 자리와 크기, 캐릭터 순서는 Niro, Ellie, Logan (`CharacterKind::ALL`).
+/// (가운데가 그림 가운데에서 오른쪽을 볼 때 얼마나 옆인지, 날 길이, 땅에서 얼마나 위인지) 모두 그림 가로·세로에 대한 비율이다.
+/// 왼쪽을 볼 때는 그림처럼 좌우가 뒤집힌다.
+pub const SKATES_FEET: [(f32, f32, f32); 3] = [(-0.02, 0.70, 0.0), (0.04, 0.46, 0.0), (-0.13, 0.62, 0.0)];
+/// 날(신발) 두께와 바퀴 반지름 (가상 화면 픽셀). 폰 가로에서도 작아 안 보이지 않는 가장 작은 값이다.
+pub const SKATES_BLADE_THICKNESS: f32 = 7.0;
+pub const SKATES_WHEEL_RADIUS: f32 = 4.5;
+/// 날 길이의 가장 작은 값 (가상 화면 픽셀)
+pub const SKATES_MIN_LENGTH: f32 = 26.0;
+/// 테두리 두께 (가상 화면 픽셀)
+pub const SKATES_OUTLINE: f32 = 1.5;
